@@ -38,5 +38,15 @@ enum Command {
 
 fn main() {
     let args = Cli::from_args();
-    println!("args: {:?}", args);
+    match args.cmd {
+        Command::Ping { ref host, ref port } => {
+            println!("PING host: {:?}, port: {:?}", host, port);
+        }
+        Command::Validate { ref hash, ref slot, ref host, ref port } => {
+            println!("VALIDATE hash: {:?}, slot: {:?}, host: {:?}, port: {:?}", hash, slot, host, port);
+        }
+        Command::Sync { ref db, ref host, ref port } => {
+            println!("SYNC db: {:?}, host: {:?}, port: {:?}", db, host, port);
+        }
+    }
 }
