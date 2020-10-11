@@ -34,9 +34,12 @@ pub mod nodeclient {
     pub fn start(cmd: Command) {
         println!("Starting NodeClient...");
 
+
         match cmd {
             Command::Ping { ref host, ref port } => {
-                println!("PING host: {:?}, port: {:?}", host, port);
+                let connect_url = format!("{}:{}", host, port);
+                protocols::mux_protocol::ping(&connect_url);
+                println!("PING {} done.", connect_url);
             }
             Command::Validate { ref hash, ref slot, ref host, ref port } => {
                 println!("VALIDATE hash: {:?}, slot: {:?}, host: {:?}, port: {:?}", hash, slot, host, port);
