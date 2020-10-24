@@ -10,6 +10,8 @@ pub mod nodeclient {
             host: String,
             #[structopt(short, long, default_value = "3000", help = "cardano-node port")]
             port: u16,
+            #[structopt(long, default_value = "764824073", help = "network magic. defaults to mainnet.")]
+            network_magic: u32,
         },
         Validate {
             #[structopt(long, help = "block hash to validate")]
@@ -32,19 +34,15 @@ pub mod nodeclient {
     }
 
     pub fn start(cmd: Command) {
-        println!("Starting NodeClient...");
-
-
         match cmd {
-            Command::Ping { ref host, ref port } => {
-                let connect_url = format!("{}:{}", host, port);
-                protocols::mux_protocol::ping(&connect_url);
-                println!("PING {} done.", connect_url);
+            Command::Ping { ref host, ref port , ref network_magic} => {
+                protocols::mux_protocol::ping(host, *port, *network_magic);
             }
             Command::Validate { ref hash, ref slot, ref host, ref port } => {
                 println!("VALIDATE hash: {:?}, slot: {:?}, host: {:?}, port: {:?}", hash, slot, host, port);
             }
             Command::Sync { ref db, ref host, ref port } => {
+                println!("Starting NodeClient...");
                 println!("SYNC db: {:?}, host: {:?}, port: {:?}", db, host, port);
             }
         }
