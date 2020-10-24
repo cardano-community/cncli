@@ -1,5 +1,5 @@
-use std::net::{Shutdown, TcpStream};
-use std::time::Instant;
+use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
+use std::time::{Duration, Instant};
 
 use crate::nodeclient::protocols::handshake_protocol;
 
@@ -7,10 +7,11 @@ use crate::nodeclient::protocols::handshake_protocol;
 //
 // Ping connects to a remote cardano-node and runs the handshake protocol
 pub fn ping(host: &String, port: u16, network_magic: u32) {
-    let connect_url = format!("{}:{}", host, port);
+    // let connect_url = format!("{}:{}", host, port);
     // println!("mux_protocol, pinging: {}", connect_url);
     let start_time = Instant::now();
-    match TcpStream::connect(connect_url) {
+    let socket_addr: SocketAddr = (host.as_str(), port).to_socket_addrs().unwrap().nth(0).unwrap();
+    match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(1)) {
         Ok(stream) => {
             match handshake_protocol::ping(&stream, timestamp(&start_time), network_magic) {
                 Ok(_payload) => {
@@ -34,7 +35,12 @@ pub fn ping(host: &String, port: u16, network_magic: u32) {
             }
         }
         Err(e) => {
-            println!("Failed to connect: {}", e);
+            println!("{{\n\
+                      \x20\"status\": \"error\",\n\
+                      \x20\"host\": \"{}\",\n\
+                      \x20\"port\": {},\n\
+                      \x20\"errorMessage\": \"Failed to connect: {}\"\n\
+                    }}", host, port, e)
         }
     }
 }

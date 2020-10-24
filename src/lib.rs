@@ -8,9 +8,9 @@ pub mod nodeclient {
         Ping {
             #[structopt(short, long, help = "cardano-node hostname to connect to")]
             host: String,
-            #[structopt(short, long, default_value = "3000", help = "cardano-node port")]
+            #[structopt(short, long, default_value = "3001", help = "cardano-node port")]
             port: u16,
-            #[structopt(long, default_value = "764824073", help = "network magic. defaults to mainnet.")]
+            #[structopt(long, default_value = "764824073", help = "network magic.")]
             network_magic: u32,
         },
         Validate {
@@ -35,7 +35,7 @@ pub mod nodeclient {
 
     pub fn start(cmd: Command) {
         match cmd {
-            Command::Ping { ref host, ref port , ref network_magic} => {
+            Command::Ping { ref host, ref port, ref network_magic } => {
                 protocols::mux_protocol::ping(host, *port, *network_magic);
             }
             Command::Validate { ref hash, ref slot, ref host, ref port } => {

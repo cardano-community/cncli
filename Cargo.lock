@@ -53,9 +53,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "hex",
- "serde",
  "serde_cbor",
- "serde_derive",
  "structopt",
 ]
 
@@ -158,17 +156,6 @@ dependencies = [
  "byteorder",
  "half",
  "serde",
-]
-
-[[package]]
-name = "serde_derive"
-version = "1.0.117"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbd1ae72adb44aab48f325a02444a5fc079349a8d804c1fc922aed3f7454c74e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
 ]
 
 [[package]]
