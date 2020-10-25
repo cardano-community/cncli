@@ -24,12 +24,14 @@ pub mod nodeclient {
             port: u16,
         },
         Sync {
-            #[structopt(parse(from_os_str), short, long, help = "sqlite database file")]
+            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
             db: std::path::PathBuf,
             #[structopt(short, long, help = "cardano-node hostname to connect to")]
             host: String,
-            #[structopt(short, long, default_value = "3000", help = "cardano-node port")]
+            #[structopt(short, long, default_value = "3001", help = "cardano-node port")]
             port: u16,
+            #[structopt(long, default_value = "764824073", help = "network magic.")]
+            network_magic: u32,
         },
     }
 
@@ -41,9 +43,9 @@ pub mod nodeclient {
             Command::Validate { ref hash, ref slot, ref host, ref port } => {
                 println!("VALIDATE hash: {:?}, slot: {:?}, host: {:?}, port: {:?}", hash, slot, host, port);
             }
-            Command::Sync { ref db, ref host, ref port } => {
+            Command::Sync { ref db, ref host, ref port, ref network_magic } => {
                 println!("Starting NodeClient...");
-                println!("SYNC db: {:?}, host: {:?}, port: {:?}", db, host, port);
+                protocols::mux_protocol::sync(db, host, *port, *network_magic);
             }
         }
     }

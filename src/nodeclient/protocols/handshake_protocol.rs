@@ -5,6 +5,60 @@ use std::net::TcpStream;
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use serde_cbor::{de, ser, Value};
 
+use crate::nodeclient::protocols::Protocol;
+
+pub enum State {
+    Propose,
+    Confirm,
+    Done,
+}
+
+pub struct HandshakeProtocol {
+    pub(crate) state: State,
+    pub(crate) network_magic: u32,
+    pub(crate) result: Option<Result<String, String>>,
+}
+
+impl Protocol for HandshakeProtocol {
+    fn protocol_id(&self) -> u16 {
+        return 0x0000u16;
+    }
+
+    fn send_data(&mut self) -> Option<Vec<u8>> {
+        return match self.state {
+            State::Propose => {
+                let payload = msg_propose_versions(self.network_magic);
+                self.state = State::Confirm;
+                Some(payload)
+            }
+            State::Confirm => {
+                None
+            }
+            State::Done => {
+                None
+            }
+        };
+    }
+
+    fn receive_data(&mut self, data: Vec<u8>) {
+        if data.len() != 8 {
+            // some payload error
+            let cbor_value: Value = de::from_slice(&data[..]).unwrap();
+            match find_error_message(&cbor_value) {
+                Ok(error_message) => {
+                    self.result = Some(Err(error_message));
+                }
+                Err(_) => {
+                    self.result = Some(Err(format!("Unable to parse payload error! {}", hex::encode(data))));
+                }
+            }
+        } else {
+            self.result = Some(Ok(hex::encode(data)));
+        }
+        self.state = State::Done
+    }
+}
+
 pub fn ping(mut stream: &TcpStream, start_time: u32, network_magic: u32) -> Result<String, String> {
     let mut handshake: Vec<u8> = Vec::new();
     handshake.write_u32::<NetworkEndian>(start_time).unwrap(); // timestamp
@@ -33,7 +87,7 @@ pub fn ping(mut stream: &TcpStream, start_time: u32, network_magic: u32) -> Resu
                     if payload_length != 8 {
                         // some payload error
                         let cbor_value: Value = de::from_slice(&response[..]).unwrap();
-                        match get_ping_error_message(&cbor_value) {
+                        match find_error_message(&cbor_value) {
                             Ok(error_message) => {
                                 Err(error_message)
                             }
@@ -72,14 +126,15 @@ fn msg_propose_versions(network_magic: u32) -> Vec<u8> {
     ser::to_vec_packed(&msg_propose_versions).unwrap()
 }
 
-fn get_ping_error_message(cbor_value: &Value) -> Result<String, ()> {
+// Search through the cbor values until we find a Text value.
+fn find_error_message(cbor_value: &Value) -> Result<String, ()> {
     match cbor_value {
         Value::Text(cbor_text) => {
             return Ok(cbor_text.to_owned());
         }
         Value::Array(cbor_array) => {
             for value in cbor_array {
-                let result = get_ping_error_message(value);
+                let result = find_error_message(value);
                 if result.is_ok() {
                     return result;
                 }
