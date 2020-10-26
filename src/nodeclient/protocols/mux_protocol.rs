@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
-use crate::nodeclient::protocols::{handshake_protocol, MiniProtocol, Protocol, transaction_protocol};
+use crate::nodeclient::protocols::{Agency, handshake_protocol, MiniProtocol, Protocol, transaction_protocol};
 use crate::nodeclient::protocols::handshake_protocol::HandshakeProtocol;
 use crate::nodeclient::protocols::transaction_protocol::TxSubmissionProtocol;
 
@@ -54,34 +54,32 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                     }
                                 }
 
-                                // try receiving some data
-                                let mut message_header = [0u8; 8]; // read 8 bytes to start with
-                                match stream.peek(&mut message_header) {
-                                    Ok(peek_size) => {
-                                        println!("peek_size: {}", peek_size);
-                                        if peek_size == 8 {
-                                            match stream.read_exact(&mut message_header) {
+                                // only read from the server if no protocols have client agency and
+                                // at least one has Server agency
+                                let should_read_from_server =
+                                    !protocols.iter().any(|protocol| protocol.get_agency() == Agency::Client)
+                                        && protocols.iter().any(|protocol| protocol.get_agency() == Agency::Server);
+
+                                if should_read_from_server {
+                                    // try receiving some data
+                                    let mut message_header = [0u8; 8]; // read 8 bytes to start with
+                                    match stream.read_exact(&mut message_header) {
+                                        Ok(_) => {
+                                            let _server_timestamp = NetworkEndian::read_u32(&mut message_header[0..4]);
+                                            // println!("server_timestamp: {:x}", server_timestamp);
+                                            let protocol_id = NetworkEndian::read_u16(&mut message_header[4..6]);
+                                            // println!("protocol_id: {:x}", protocol_id);
+                                            let payload_length = NetworkEndian::read_u16(&mut message_header[6..]) as usize;
+                                            // println!("payload_length: {:x}", payload_length);
+                                            let mut payload = vec![0u8; payload_length];
+                                            match stream.read_exact(&mut payload) {
                                                 Ok(_) => {
-                                                    let _server_timestamp = NetworkEndian::read_u32(&mut message_header[0..4]);
-                                                    // println!("server_timestamp: {:x}", server_timestamp);
-                                                    let protocol_id = NetworkEndian::read_u16(&mut message_header[4..6]);
-                                                    // println!("protocol_id: {:x}", protocol_id);
-                                                    let payload_length = NetworkEndian::read_u16(&mut message_header[6..]) as usize;
-                                                    // println!("payload_length: {:x}", payload_length);
-                                                    let mut payload = vec![0u8; payload_length];
-                                                    match stream.read_exact(&mut payload) {
-                                                        Ok(_) => {
-                                                            // Find the protocol to handle the message
-                                                            for protocol in protocols.iter_mut() {
-                                                                if protocol_id == (protocol.protocol_id() | 0x8000u16) {
-                                                                    // println!("receive_data: {}", hex::encode(&payload));
-                                                                    protocol.receive_data(payload);
-                                                                    break;
-                                                                }
-                                                            }
-                                                        }
-                                                        Err(e) => {
-                                                            println!("Unable to read response payload! {}", e)
+                                                    // Find the protocol to handle the message
+                                                    for protocol in protocols.iter_mut() {
+                                                        if protocol_id == (protocol.protocol_id() | 0x8000u16) {
+                                                            // println!("receive_data: {}", hex::encode(&payload));
+                                                            protocol.receive_data(payload);
+                                                            break;
                                                         }
                                                     }
                                                 }
@@ -90,9 +88,9 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                                 }
                                             }
                                         }
-                                    }
-                                    Err(e) => {
-                                        println!("Unable to peek response payload! {}", e)
+                                        Err(e) => {
+                                            println!("Unable to read response header! {}", e)
+                                        }
                                     }
                                 }
 

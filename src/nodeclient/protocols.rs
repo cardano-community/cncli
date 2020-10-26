@@ -6,10 +6,24 @@ mod handshake_protocol;
 mod transaction_protocol;
 mod chainsync_protocol;
 
+// Who has the ball?
+//
+// Client agency, we have stuff to send
+// Server agency, wait for the server to send us something
+#[derive(PartialEq)]
+pub enum Agency {
+    Client,
+    Server,
+    None,
+}
+
 // Common interface for a protocol
 pub trait Protocol {
     // Each protocol has a unique hardcoded id
     fn protocol_id(&self) -> u16;
+
+    // Tells us what agency state the protocol is in
+    fn get_agency(&self) -> Agency;
 
     // Fetch the next piece of data this protocol wants to send, or None if the client doesn't
     // have agency.
@@ -30,6 +44,13 @@ impl Protocol for MiniProtocol {
         match self {
             MiniProtocol::Handshake(handshake_protocol) => { handshake_protocol.protocol_id() }
             MiniProtocol::TxSubmission(tx_submission_protocol) => { tx_submission_protocol.protocol_id() }
+        }
+    }
+
+    fn get_agency(&self) -> Agency {
+        match self {
+            MiniProtocol::Handshake(handshake_protocol) => { handshake_protocol.get_agency() }
+            MiniProtocol::TxSubmission(tx_submission_protocol) => { tx_submission_protocol.get_agency() }
         }
     }
 

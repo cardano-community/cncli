@@ -5,7 +5,7 @@ use std::net::TcpStream;
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use serde_cbor::{de, ser, Value};
 
-use crate::nodeclient::protocols::Protocol;
+use crate::nodeclient::protocols::{Agency, Protocol};
 
 pub enum State {
     Propose,
@@ -22,6 +22,14 @@ pub struct HandshakeProtocol {
 impl Protocol for HandshakeProtocol {
     fn protocol_id(&self) -> u16 {
         return 0x0000u16;
+    }
+
+    fn get_agency(&self) -> Agency {
+        return match self.state {
+            State::Propose => { Agency::Client }
+            State::Confirm => { Agency::Server }
+            State::Done => { Agency::None }
+        };
     }
 
     fn send_data(&mut self) -> Option<Vec<u8>> {

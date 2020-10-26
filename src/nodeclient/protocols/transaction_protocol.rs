@@ -1,7 +1,7 @@
 use byteorder::WriteBytesExt;
 use serde_cbor::{de, Value};
 
-use crate::nodeclient::protocols::Protocol;
+use crate::nodeclient::protocols::{Agency, Protocol};
 
 pub enum State {
     Idle,
@@ -32,6 +32,19 @@ impl TxSubmissionProtocol {
 impl Protocol for TxSubmissionProtocol {
     fn protocol_id(&self) -> u16 {
         return 0x0004u16;
+    }
+
+    fn get_agency(&self) -> Agency {
+        return match self.state {
+            State::Idle => { Agency::Server }
+            State::TxIdsBlocking => {
+                // Typically, this would be client agency, but we pretend it's none since
+                // we just hang on to Client agency and never send any transactions.
+                Agency::None
+            }
+            State::TxIdsNonBlocking => { Agency::Client }
+            State::Done => { Agency::None }
+        };
     }
 
     fn send_data(&mut self) -> Option<Vec<u8>> {
