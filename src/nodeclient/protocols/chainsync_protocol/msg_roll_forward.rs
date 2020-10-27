@@ -27,17 +27,23 @@ pub struct Tip {
 }
 
 trait UnwrapValue {
-    fn integer(self) -> i128;
-    fn bytes(self) -> Vec<u8>;
+    fn integer(&self) -> i128;
+    fn bytes(&self) -> Vec<u8>;
 }
 
 impl UnwrapValue for Value {
-    fn integer(self) -> i128 {
-        if let Value::Integer(integer_value) = self { integer_value } else { panic!("not an integer!") }
+    fn integer(&self) -> i128 {
+        match self {
+            Value::Integer(integer_value) => { *integer_value }
+            _ => { panic!("not an integer!") }
+        }
     }
 
-    fn bytes(self) -> Vec<u8> {
-        if let Value::Bytes(bytes_vec) = self { bytes_vec } else { panic!("not a byte array!") }
+    fn bytes(&self) -> Vec<u8> {
+        match self {
+            Value::Bytes(bytes_vec) => { bytes_vec.clone() }
+            _ => { panic!("not a byte array!") }
+        }
     }
 }
 
@@ -112,19 +118,20 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
                 }
                 _ => { println!("invalid cbor!") }
             }
-            match &header_array[2] {
-                Value::Array(tip_array) => {
-                    match &tip_array[0] {
-                        Value::Array(tip_info_array) => {
-                            tip.slot_number = tip_info_array[0].integer() as u64;
-                            tip.hash.append(&mut tip_info_array[1].bytes());
-                        }
-                        _ => { println!("invalid cbor!") }
-                    }
-                    tip.block_number = tip_array[1].integer() as u64;
+        }
+        _ => { println!("invalid cbor!") }
+    }
+
+    match &cbor_array[2] {
+        Value::Array(tip_array) => {
+            match &tip_array[0] {
+                Value::Array(tip_info_array) => {
+                    tip.slot_number = tip_info_array[0].integer() as u64;
+                    tip.hash.append(&mut tip_info_array[1].bytes());
                 }
                 _ => { println!("invalid cbor!") }
             }
+            tip.block_number = tip_array[1].integer() as u64;
         }
         _ => { println!("invalid cbor!") }
     }

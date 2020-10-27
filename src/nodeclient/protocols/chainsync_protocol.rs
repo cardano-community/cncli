@@ -21,10 +21,19 @@ pub struct ChainSyncProtocol {
 
 impl ChainSyncProtocol {
     fn msg_find_intersect(&self, chain_blocks: Vec<(u64, Vec<u8>)>) -> Vec<u8> {
+
+        // figure out how to fix this extra clone later
+        // let mut points:Vec<Value> = vec![];
+        // for (slot, hash) in chain_blocks.iter() {
+        //     let point = Value::Array(vec![Value::Integer(*slot as i128), Value::Bytes(hash.clone())]);
+        //     points.push(point);
+        // }
+
         let msg: Value = Value::Array(
             vec![
                 Value::Integer(4), // message_id
-                Value::Array(chain_blocks.iter().map(|(slot, &hash)| Value::Array(vec![Value::Integer(*slot as i128), Value::Bytes(hash)])).collect())
+                // Value::Array(points),
+                Value::Array(chain_blocks.iter().map(|(slot, hash)| Value::Array(vec![Value::Integer(*slot as i128), Value::Bytes(hash.clone())])).collect())
             ]
         );
 
@@ -114,6 +123,7 @@ impl Protocol for ChainSyncProtocol {
                             }
                             2 => {
                                 // MsgRollForward
+                                println!("MsgRollForward: {:?}", cbor_array);
                                 let (msg_roll_forward, tip) = parse_msg_roll_forward(cbor_array);
 
                                 if msg_roll_forward.slot_number % 1000 == 0 {
@@ -131,17 +141,17 @@ impl Protocol for ChainSyncProtocol {
                                 self.state = State::Idle;
                             }
                             5 => {
-                                println!("MsgIntersectFound: {:?}", cbor_value);
+                                println!("MsgIntersectFound: {:?}", cbor_array);
                                 self.is_intersect_found = true;
                                 self.state = State::Idle;
                             }
                             6 => {
-                                println!("MsgIntersectNotFound: {:?}", cbor_value);
+                                println!("MsgIntersectNotFound: {:?}", cbor_array);
                                 self.is_intersect_found = true; // should start syncing at first byron block. will probably crash later, but oh well.
                                 self.state = State::Idle;
                             }
                             7 => {
-                                println!("MsgDone: {:?}", cbor_value);
+                                println!("MsgDone: {:?}", cbor_array);
                                 self.state = State::Done;
                                 self.result = Some(Ok(String::from("Done")))
                             }
