@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 
-use crate::nodeclient::protocols::{Agency, handshake_protocol, MiniProtocol, Protocol, transaction_protocol};
+use crate::nodeclient::protocols::{Agency, chainsync_protocol, handshake_protocol, MiniProtocol, Protocol, transaction_protocol};
+use crate::nodeclient::protocols::chainsync_protocol::ChainSyncProtocol;
 use crate::nodeclient::protocols::handshake_protocol::HandshakeProtocol;
 use crate::nodeclient::protocols::transaction_protocol::TxSubmissionProtocol;
 
@@ -111,6 +112,11 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                                                     TxSubmissionProtocol { state: transaction_protocol::State::Idle, result: None }
                                                                 )
                                                             );
+                                                            protocols_to_add.push(
+                                                                MiniProtocol::ChainSync(
+                                                                    ChainSyncProtocol { state: chainsync_protocol::State::Idle, is_intersect_found: false, result: None }
+                                                                )
+                                                            );
                                                         }
                                                         Err(error) => {
                                                             println!("HandshakeProtocol Error: {}", error);
@@ -130,6 +136,22 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                                         }
                                                         Err(error) => {
                                                             println!("TxSubmissionProtocol Error: {}", error);
+                                                        }
+                                                    }
+                                                    false
+                                                }
+                                                None => { true }
+                                            }
+                                        }
+                                        MiniProtocol::ChainSync(chainsync_protocol) => {
+                                            match chainsync_protocol.result.as_ref() {
+                                                Some(protocol_result) => {
+                                                    match protocol_result {
+                                                        Ok(message) => {
+                                                            println!("ChainSyncProtocol Result: {}", message);
+                                                        }
+                                                        Err(error) => {
+                                                            println!("ChainSyncProtocol Error: {}", error);
                                                         }
                                                     }
                                                     false
@@ -194,7 +216,7 @@ pub fn ping(host: &String, port: u16, network_magic: u32) {
                     }
                 }
             } else {
-                print_json_error("No IP addresses found!".to_owned(), host, port);
+                print_json_error(String::from("No IP addresses found!"), host, port);
             }
         }
         Err(error) => {

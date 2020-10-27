@@ -69,7 +69,7 @@ impl Protocol for TxSubmissionProtocol {
             //State::Txs => { None }
             State::Done => {
                 println!("TxSubmissionProtocol::State::Done");
-                self.result = Option::Some(Ok("Done".to_owned()));
+                self.result = Option::Some(Ok(String::from("Done")));
                 return None;
             }
         };

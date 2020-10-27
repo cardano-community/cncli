@@ -1,3 +1,4 @@
+use crate::nodeclient::protocols::chainsync_protocol::ChainSyncProtocol;
 use crate::nodeclient::protocols::handshake_protocol::HandshakeProtocol;
 use crate::nodeclient::protocols::transaction_protocol::TxSubmissionProtocol;
 
@@ -36,7 +37,7 @@ pub trait Protocol {
 pub enum MiniProtocol {
     Handshake(HandshakeProtocol),
     TxSubmission(TxSubmissionProtocol),
-    // ...
+    ChainSync(ChainSyncProtocol),
 }
 
 impl Protocol for MiniProtocol {
@@ -44,6 +45,7 @@ impl Protocol for MiniProtocol {
         match self {
             MiniProtocol::Handshake(handshake_protocol) => { handshake_protocol.protocol_id() }
             MiniProtocol::TxSubmission(tx_submission_protocol) => { tx_submission_protocol.protocol_id() }
+            MiniProtocol::ChainSync(chainsync_protocol) => { chainsync_protocol.protocol_id() }
         }
     }
 
@@ -51,6 +53,7 @@ impl Protocol for MiniProtocol {
         match self {
             MiniProtocol::Handshake(handshake_protocol) => { handshake_protocol.get_agency() }
             MiniProtocol::TxSubmission(tx_submission_protocol) => { tx_submission_protocol.get_agency() }
+            MiniProtocol::ChainSync(chainsync_protocol) => { chainsync_protocol.get_agency() }
         }
     }
 
@@ -58,6 +61,7 @@ impl Protocol for MiniProtocol {
         match self {
             MiniProtocol::Handshake(handshake_protocol) => { handshake_protocol.send_data() }
             MiniProtocol::TxSubmission(tx_submission_protocol) => { tx_submission_protocol.send_data() }
+            MiniProtocol::ChainSync(chainsync_protocol) => { chainsync_protocol.send_data() }
         }
     }
 
@@ -65,6 +69,7 @@ impl Protocol for MiniProtocol {
         match self {
             MiniProtocol::Handshake(handshake_protocol) => { handshake_protocol.receive_data(data) }
             MiniProtocol::TxSubmission(tx_submission_protocol) => { tx_submission_protocol.receive_data(data) }
+            MiniProtocol::ChainSync(chainsync_protocol) => { chainsync_protocol.receive_data(data) }
         }
     }
 }
