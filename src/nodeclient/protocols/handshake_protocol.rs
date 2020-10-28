@@ -19,6 +19,43 @@ pub struct HandshakeProtocol {
     pub(crate) result: Option<Result<String, String>>,
 }
 
+impl HandshakeProtocol {
+    // Serialize cbor for MsgProposeVersions
+    //
+    // Create the byte representation of MsgProposeVersions for sending to the server
+    fn msg_propose_versions(&self, network_magic: u32) -> Vec<u8> {
+        let mut payload_map: BTreeMap<Value, Value> = BTreeMap::new();
+        // protocol version 3 mapped to the network_magic value
+        payload_map.insert(Value::Integer(0x03), Value::Integer(network_magic as i128));
+
+        let message = Value::Array(vec![
+            Value::Integer(0), // message_id
+            Value::Map(payload_map)
+        ]);
+
+        ser::to_vec_packed(&message).unwrap()
+    }
+
+    // Search through the cbor values until we find a Text value.
+    fn find_error_message(&self, cbor_value: &Value) -> Result<String, ()> {
+        match cbor_value {
+            Value::Text(cbor_text) => {
+                return Ok(cbor_text.to_owned());
+            }
+            Value::Array(cbor_array) => {
+                for value in cbor_array {
+                    let result = self.find_error_message(value);
+                    if result.is_ok() {
+                        return result;
+                    }
+                }
+            }
+            _ => {}
+        }
+        return Err(());
+    }
+}
+
 impl Protocol for HandshakeProtocol {
     fn protocol_id(&self) -> u16 {
         return 0x0000u16;
@@ -35,7 +72,7 @@ impl Protocol for HandshakeProtocol {
     fn send_data(&mut self) -> Option<Vec<u8>> {
         return match self.state {
             State::Propose => {
-                let payload = msg_propose_versions(self.network_magic);
+                let payload = self.msg_propose_versions(self.network_magic);
                 self.state = State::Confirm;
                 Some(payload)
             }
@@ -52,7 +89,7 @@ impl Protocol for HandshakeProtocol {
         if data.len() != 8 {
             // some payload error
             let cbor_value: Value = de::from_slice(&data[..]).unwrap();
-            match find_error_message(&cbor_value) {
+            match self.find_error_message(&cbor_value) {
                 Ok(error_message) => {
                     self.result = Some(Err(error_message));
                 }
@@ -72,7 +109,12 @@ pub fn ping(mut stream: &TcpStream, start_time: u32, network_magic: u32) -> Resu
     handshake.write_u32::<NetworkEndian>(start_time).unwrap(); // timestamp
     handshake.write_u16::<NetworkEndian>(0u16).unwrap(); // handshake protocol id
 
-    let payload = msg_propose_versions(network_magic);
+    let handshake_protocol = HandshakeProtocol {
+        state: State::Propose,
+        network_magic,
+        result: None,
+    };
+    let payload = handshake_protocol.msg_propose_versions(network_magic);
     handshake.write_u16::<NetworkEndian>(payload.len() as u16).unwrap(); // length of payload
     handshake.write(&payload[..]).unwrap(); // the payload
     // println!("sending: {:?}", hex::encode(&handshake));
@@ -95,7 +137,7 @@ pub fn ping(mut stream: &TcpStream, start_time: u32, network_magic: u32) -> Resu
                     if payload_length != 8 {
                         // some payload error
                         let cbor_value: Value = de::from_slice(&response[..]).unwrap();
-                        match find_error_message(&cbor_value) {
+                        match handshake_protocol.find_error_message(&cbor_value) {
                             Ok(error_message) => {
                                 Err(error_message)
                             }
@@ -116,39 +158,4 @@ pub fn ping(mut stream: &TcpStream, start_time: u32, network_magic: u32) -> Resu
             Err(format!("Unable to read response header! {}", e))
         }
     };
-}
-
-// Serialize cbor for MsgProposeVersions
-//
-// Create the byte representation of MsgProposeVersions for sending to the server
-fn msg_propose_versions(network_magic: u32) -> Vec<u8> {
-    let mut payload_map: BTreeMap<Value, Value> = BTreeMap::new();
-    // protocol version 3 mapped to the network_magic value
-    payload_map.insert(Value::Integer(0x03), Value::Integer(network_magic as i128));
-
-    let msg_propose_versions = Value::Array(vec![
-        Value::Integer(0), // message_id
-        Value::Map(payload_map)
-    ]);
-
-    ser::to_vec_packed(&msg_propose_versions).unwrap()
-}
-
-// Search through the cbor values until we find a Text value.
-fn find_error_message(cbor_value: &Value) -> Result<String, ()> {
-    match cbor_value {
-        Value::Text(cbor_text) => {
-            return Ok(cbor_text.to_owned());
-        }
-        Value::Array(cbor_array) => {
-            for value in cbor_array {
-                let result = find_error_message(value);
-                if result.is_ok() {
-                    return result;
-                }
-            }
-        }
-        _ => {}
-    }
-    return Err(());
 }

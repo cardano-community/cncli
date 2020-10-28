@@ -39,21 +39,7 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                         Ok(mut stream) => {
                             loop {
                                 // Try sending some data
-                                for protocol in protocols.iter_mut() {
-                                    match protocol.send_data() {
-                                        Some(send_payload) => {
-                                            let mut message: Vec<u8> = Vec::new();
-                                            message.write_u32::<NetworkEndian>(timestamp(&start_time)).unwrap();
-                                            message.write_u16::<NetworkEndian>(protocol.protocol_id()).unwrap();
-                                            message.write_u16::<NetworkEndian>(send_payload.len() as u16).unwrap();
-                                            message.write(&send_payload[..]).unwrap();
-                                            // println!("sending: {}", hex::encode(&message));
-                                            stream.write(&message).unwrap();
-                                            break;
-                                        }
-                                        None => {}
-                                    }
-                                }
+                                mux_send_data(&start_time, &mut protocols, &mut stream);
 
                                 // only read from the server if no protocols have client agency and
                                 // at least one has Server agency
@@ -63,106 +49,11 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
 
                                 if should_read_from_server {
                                     // try receiving some data
-                                    let mut message_header = [0u8; 8]; // read 8 bytes to start with
-                                    match stream.read_exact(&mut message_header) {
-                                        Ok(_) => {
-                                            let _server_timestamp = NetworkEndian::read_u32(&mut message_header[0..4]);
-                                            // println!("server_timestamp: {:x}", server_timestamp);
-                                            let protocol_id = NetworkEndian::read_u16(&mut message_header[4..6]);
-                                            // println!("protocol_id: {:x}", protocol_id);
-                                            let payload_length = NetworkEndian::read_u16(&mut message_header[6..]) as usize;
-                                            // println!("payload_length: {:x}", payload_length);
-                                            let mut payload = vec![0u8; payload_length];
-                                            match stream.read_exact(&mut payload) {
-                                                Ok(_) => {
-                                                    // Find the protocol to handle the message
-                                                    for protocol in protocols.iter_mut() {
-                                                        if protocol_id == (protocol.protocol_id() | 0x8000u16) {
-                                                            // println!("receive_data: {}", hex::encode(&payload));
-                                                            protocol.receive_data(payload);
-                                                            break;
-                                                        }
-                                                    }
-                                                }
-                                                Err(e) => {
-                                                    println!("Unable to read response payload! {}", e)
-                                                }
-                                            }
-                                        }
-                                        Err(e) => {
-                                            println!("Unable to read response header! {}", e)
-                                        }
-                                    }
+                                    mux_receive_data(&mut protocols, &mut stream)
                                 }
 
-                                let mut protocols_to_add: Vec<MiniProtocol> = Vec::new();
-                                // Remove any protocols that have a result (are done)
-                                protocols.retain(|protocol| {
-                                    match protocol {
-                                        MiniProtocol::Handshake(handshake_protocol) => {
-                                            match handshake_protocol.result.as_ref() {
-                                                Some(protocol_result) => {
-                                                    match protocol_result {
-                                                        Ok(message) => {
-                                                            println!("HandshakeProtocol Result: {}", message);
-
-                                                            // handshake succeeded. Add other protocols
-                                                            protocols_to_add.push(
-                                                                MiniProtocol::TxSubmission(
-                                                                    TxSubmissionProtocol { state: transaction_protocol::State::Idle, result: None }
-                                                                )
-                                                            );
-                                                            protocols_to_add.push(
-                                                                MiniProtocol::ChainSync(
-                                                                    ChainSyncProtocol { state: chainsync_protocol::State::Idle, is_intersect_found: false, result: None }
-                                                                )
-                                                            );
-                                                        }
-                                                        Err(error) => {
-                                                            println!("HandshakeProtocol Error: {}", error);
-                                                        }
-                                                    }
-                                                    false
-                                                }
-                                                None => { true }
-                                            }
-                                        }
-                                        MiniProtocol::TxSubmission(tx_submission_protocol) => {
-                                            match tx_submission_protocol.result.as_ref() {
-                                                Some(protocol_result) => {
-                                                    match protocol_result {
-                                                        Ok(message) => {
-                                                            println!("TxSubmissionProtocol Result: {}", message);
-                                                        }
-                                                        Err(error) => {
-                                                            println!("TxSubmissionProtocol Error: {}", error);
-                                                        }
-                                                    }
-                                                    false
-                                                }
-                                                None => { true }
-                                            }
-                                        }
-                                        MiniProtocol::ChainSync(chainsync_protocol) => {
-                                            match chainsync_protocol.result.as_ref() {
-                                                Some(protocol_result) => {
-                                                    match protocol_result {
-                                                        Ok(message) => {
-                                                            println!("ChainSyncProtocol Result: {}", message);
-                                                        }
-                                                        Err(error) => {
-                                                            println!("ChainSyncProtocol Error: {}", error);
-                                                        }
-                                                    }
-                                                    false
-                                                }
-                                                None => { true }
-                                            }
-                                        }
-                                    }
-                                });
-
-                                protocols.append(&mut protocols_to_add);
+                                // Add and Remove protocols depending on status
+                                mux_add_remove_protocols(&mut protocols);
 
                                 if protocols.is_empty() {
                                     println!("No more active protocols, exiting...");
@@ -186,6 +77,124 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
         // Wait a bit before trying again
         sleep(Duration::from_secs(5))
     }
+}
+
+fn mux_send_data(start_time: &Instant, protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) {
+    for protocol in protocols.iter_mut() {
+        match protocol.send_data() {
+            Some(send_payload) => {
+                let mut message: Vec<u8> = Vec::new();
+                message.write_u32::<NetworkEndian>(timestamp(&start_time)).unwrap();
+                message.write_u16::<NetworkEndian>(protocol.protocol_id()).unwrap();
+                message.write_u16::<NetworkEndian>(send_payload.len() as u16).unwrap();
+                message.write(&send_payload[..]).unwrap();
+                // println!("sending: {}", hex::encode(&message));
+                stream.write(&message).unwrap();
+                break;
+            }
+            None => {}
+        }
+    }
+}
+
+fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) {
+    let mut message_header = [0u8; 8]; // read 8 bytes to start with
+    match stream.read_exact(&mut message_header) {
+        Ok(_) => {
+            let _server_timestamp = NetworkEndian::read_u32(&mut message_header[0..4]);
+            // println!("server_timestamp: {:x}", server_timestamp);
+            let protocol_id = NetworkEndian::read_u16(&mut message_header[4..6]);
+            // println!("protocol_id: {:x}", protocol_id);
+            let payload_length = NetworkEndian::read_u16(&mut message_header[6..]) as usize;
+            // println!("payload_length: {:x}", payload_length);
+            let mut payload = vec![0u8; payload_length];
+            match stream.read_exact(&mut payload) {
+                Ok(_) => {
+                    // Find the protocol to handle the message
+                    for protocol in protocols.iter_mut() {
+                        if protocol_id == (protocol.protocol_id() | 0x8000u16) {
+                            // println!("receive_data: {}", hex::encode(&payload));
+                            protocol.receive_data(payload);
+                            break;
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("Unable to read response payload! {}", e)
+                }
+            }
+        }
+        Err(e) => {
+            println!("Unable to read response header! {}", e)
+        }
+    }
+}
+
+fn mux_add_remove_protocols(protocols: &mut Vec<MiniProtocol>) {
+    let mut protocols_to_add: Vec<MiniProtocol> = Vec::new();
+    // Remove any protocols that have a result (are done)
+    protocols.retain(|protocol| {
+        match protocol {
+            MiniProtocol::Handshake(handshake_protocol) => {
+                match handshake_protocol.result.as_ref() {
+                    Some(protocol_result) => {
+                        match protocol_result {
+                            Ok(message) => {
+                                println!("HandshakeProtocol Result: {}", message);
+
+                                // handshake succeeded. Add other protocols
+                                protocols_to_add.push(
+                                    MiniProtocol::TxSubmission(TxSubmissionProtocol::default())
+                                );
+                                protocols_to_add.push(
+                                    MiniProtocol::ChainSync(ChainSyncProtocol::default())
+                                );
+                            }
+                            Err(error) => {
+                                println!("HandshakeProtocol Error: {}", error);
+                            }
+                        }
+                        false
+                    }
+                    None => { true }
+                }
+            }
+            MiniProtocol::TxSubmission(tx_submission_protocol) => {
+                match tx_submission_protocol.result.as_ref() {
+                    Some(protocol_result) => {
+                        match protocol_result {
+                            Ok(message) => {
+                                println!("TxSubmissionProtocol Result: {}", message);
+                            }
+                            Err(error) => {
+                                println!("TxSubmissionProtocol Error: {}", error);
+                            }
+                        }
+                        false
+                    }
+                    None => { true }
+                }
+            }
+            MiniProtocol::ChainSync(chainsync_protocol) => {
+                match chainsync_protocol.result.as_ref() {
+                    Some(protocol_result) => {
+                        match protocol_result {
+                            Ok(message) => {
+                                println!("ChainSyncProtocol Result: {}", message);
+                            }
+                            Err(error) => {
+                                println!("ChainSyncProtocol Error: {}", error);
+                            }
+                        }
+                        false
+                    }
+                    None => { true }
+                }
+            }
+        }
+    });
+
+    protocols.append(&mut protocols_to_add);
 }
 
 // Ping a remote cardano-node

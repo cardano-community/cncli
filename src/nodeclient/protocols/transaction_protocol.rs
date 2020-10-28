@@ -12,8 +12,14 @@ pub enum State {
 }
 
 pub struct TxSubmissionProtocol {
-    pub(crate) state: State,
+    state: State,
     pub(crate) result: Option<Result<String, String>>,
+}
+
+impl Default for TxSubmissionProtocol {
+    fn default() -> Self {
+        TxSubmissionProtocol { state: State::Idle, result: None }
+    }
 }
 
 impl TxSubmissionProtocol {

@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use serde_cbor::{de, ser, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
@@ -14,9 +16,21 @@ pub enum State {
 }
 
 pub struct ChainSyncProtocol {
+    last_log_time: Instant,
     pub(crate) state: State,
     pub(crate) result: Option<Result<String, String>>,
     pub(crate) is_intersect_found: bool,
+}
+
+impl Default for ChainSyncProtocol {
+    fn default() -> Self {
+        ChainSyncProtocol {
+            last_log_time: Instant::now(),
+            state: State::Idle,
+            result: None,
+            is_intersect_found: false,
+        }
+    }
 }
 
 impl ChainSyncProtocol {
@@ -123,17 +137,18 @@ impl Protocol for ChainSyncProtocol {
                             }
                             2 => {
                                 // MsgRollForward
-                                println!("MsgRollForward: {:?}", cbor_array);
+                                // println!("MsgRollForward: {:?}", cbor_array);
                                 let (msg_roll_forward, tip) = parse_msg_roll_forward(cbor_array);
 
-                                if msg_roll_forward.slot_number % 1000 == 0 {
+                                if self.last_log_time.elapsed().as_millis() > 5_000 {
                                     println!("ChainSync: slot {} of {}.", msg_roll_forward.slot_number, tip.slot_number);
+                                    self.last_log_time = Instant::now()
                                 }
-                                // self.state = State::Idle;
+                                self.state = State::Idle;
 
-                                // testing only
-                                self.state = State::Done;
-                                self.result = Some(Ok(String::from("Done")))
+                                // testing only so we sync only a single block
+                                // self.state = State::Done;
+                                // self.result = Some(Ok(String::from("Done")))
                             }
                             3 => {
                                 // MsgRollBackward
