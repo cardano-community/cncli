@@ -41,6 +41,7 @@ impl UnwrapValue for Value {
 
     fn bytes(&self) -> Vec<u8> {
         match self {
+            // figure out how to fix this extra clone later
             Value::Bytes(bytes_vec) => { bytes_vec.clone() }
             _ => { panic!("not a byte array!") }
         }

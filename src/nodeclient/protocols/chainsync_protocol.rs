@@ -37,12 +37,6 @@ impl ChainSyncProtocol {
     fn msg_find_intersect(&self, chain_blocks: Vec<(u64, Vec<u8>)>) -> Vec<u8> {
 
         // figure out how to fix this extra clone later
-        // let mut points:Vec<Value> = vec![];
-        // for (slot, hash) in chain_blocks.iter() {
-        //     let point = Value::Array(vec![Value::Integer(*slot as i128), Value::Bytes(hash.clone())]);
-        //     points.push(point);
-        // }
-
         let msg: Value = Value::Array(
             vec![
                 Value::Integer(4), // message_id
@@ -97,19 +91,19 @@ impl Protocol for ChainSyncProtocol {
                 }
             }
             State::Intersect => {
-                println!("ChainSyncProtocol::State::Intersect");
+                // println!("ChainSyncProtocol::State::Intersect");
                 None
             }
             State::CanAwait => {
-                println!("ChainSyncProtocol::State::CanAwait");
+                // println!("ChainSyncProtocol::State::CanAwait");
                 None
             }
             State::MustReply => {
-                println!("ChainSyncProtocol::State::MustReply");
+                // println!("ChainSyncProtocol::State::MustReply");
                 None
             }
             State::Done => {
-                println!("ChainSyncProtocol::State::Done");
+                // println!("ChainSyncProtocol::State::Done");
                 None
             }
         };
