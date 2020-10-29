@@ -1,5 +1,6 @@
 use std::io::{Error, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
+use std::path::PathBuf;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -66,7 +67,7 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                 }
 
                                 // Add and Remove protocols depending on status
-                                mux_add_remove_protocols(&mut protocols);
+                                mux_add_remove_protocols(db, &mut protocols);
 
                                 if protocols.is_empty() {
                                     warn!("No more active protocols, exiting...");
@@ -147,7 +148,7 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
     Ok(())
 }
 
-fn mux_add_remove_protocols(protocols: &mut Vec<MiniProtocol>) {
+fn mux_add_remove_protocols(db: &PathBuf, protocols: &mut Vec<MiniProtocol>) {
     let mut protocols_to_add: Vec<MiniProtocol> = Vec::new();
     // Remove any protocols that have a result (are done)
     protocols.retain(|protocol| {
@@ -163,8 +164,11 @@ fn mux_add_remove_protocols(protocols: &mut Vec<MiniProtocol>) {
                                 protocols_to_add.push(
                                     MiniProtocol::TxSubmission(TxSubmissionProtocol::default())
                                 );
+                                let mut chain_sync_protocol = ChainSyncProtocol::default();
+                                chain_sync_protocol.init_database(db).expect("Error opening database!");
+
                                 protocols_to_add.push(
-                                    MiniProtocol::ChainSync(ChainSyncProtocol::default())
+                                    MiniProtocol::ChainSync(chain_sync_protocol)
                                 );
                             }
                             Err(error) => {

@@ -1,7 +1,9 @@
 use std::ops::Sub;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use log::{debug, error, info, trace, warn};
+use rusqlite::{Connection, Error, NO_PARAMS};
 use serde_cbor::{de, ser, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
@@ -21,6 +23,7 @@ pub enum State {
 
 pub struct ChainSyncProtocol {
     last_log_time: Instant,
+    db: Option<Connection>,
     pub(crate) state: State,
     pub(crate) result: Option<Result<String, String>>,
     pub(crate) is_intersect_found: bool,
@@ -30,6 +33,7 @@ impl Default for ChainSyncProtocol {
     fn default() -> Self {
         ChainSyncProtocol {
             last_log_time: Instant::now().sub(Duration::from_secs(6)),
+            db: None,
             state: State::Idle,
             result: None,
             is_intersect_found: false,
@@ -38,6 +42,61 @@ impl Default for ChainSyncProtocol {
 }
 
 impl ChainSyncProtocol {
+    const DB_VERSION: i64 = 1;
+
+    pub(crate) fn init_database(&mut self, db_path: &PathBuf) -> Result<(), Error> {
+        let db = Connection::open(db_path)?;
+        {
+            db.execute("CREATE TABLE IF NOT EXISTS db_version (version INTEGER PRIMARY KEY)", NO_PARAMS)?;
+            let mut stmt = db.prepare("SELECT version FROM db_version")?;
+            let mut rows = stmt.query(NO_PARAMS)?;
+            let version: i64 = match rows.next()? {
+                None => { -1 }
+                Some(row) => {
+                    row.get(0)?
+                }
+            };
+
+            // Upgrade their database to version 1
+            if version < 1 {
+                db.execute("CREATE TABLE IF NOT EXISTS chain (\
+            id INTEGER PRIMARY KEY AUTOINCREMENT, \
+            block_number INTEGER NOT NULL, \
+            slot_number INTEGER NOT NULL, \
+            hash TEXT NOT NULL, \
+            prev_hash TEXT NOT NULL, \
+            node_vkey TEXT NOT NULL, \
+            node_vrf_vkey TEXT NOT NULL, \
+            eta_vrf_0 TEXT NOT NULL, \
+            eta_vrf_1 TEXT NOT NULL, \
+            leader_vrf_0 TEXT NOT NULL, \
+            leader_vrf_1 TEXT NOT NULL, \
+            block_size INTEGER NOT NULL, \
+            block_body_hash TEXT NOT NULL, \
+            pool_opcert TEXT NOT NULL, \
+            unknown_0 INTEGER NOT NULL, \
+            unknown_1 INTEGER NOT NULL, \
+            unknown_2 TEXT NOT NULL, \
+            protocol_major_version INTEGER NOT NULL, \
+            protocol_minor_version INTEGER NOT NULL \
+            )", NO_PARAMS)?;
+            }
+
+            // Upgrade their database to version ...
+            // if version < ... {}
+
+            // Update the db version now that we've upgraded the user's database fully
+            if version < 0 {
+                db.execute("INSERT INTO db_version (version) VALUES (?1)", &[&ChainSyncProtocol::DB_VERSION])?;
+            } else {
+                db.execute("UPDATE db_version SET version=?1", &[&ChainSyncProtocol::DB_VERSION])?;
+            }
+        }
+        self.db = Some(db);
+
+        Ok(())
+    }
+
     fn msg_find_intersect(&self, chain_blocks: Vec<(u64, Vec<u8>)>) -> Vec<u8> {
 
         // figure out how to fix this extra clone later
