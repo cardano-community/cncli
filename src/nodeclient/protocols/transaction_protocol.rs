@@ -1,4 +1,5 @@
 use byteorder::WriteBytesExt;
+use log::{debug, error, warn};
 use serde_cbor::{de, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
@@ -56,17 +57,17 @@ impl Protocol for TxSubmissionProtocol {
     fn send_data(&mut self) -> Option<Vec<u8>> {
         return match self.state {
             State::Idle => {
-                println!("TxSubmissionProtocol::State::Idle");
+                debug!("TxSubmissionProtocol::State::Idle");
                 None
             }
             State::TxIdsBlocking => {
-                println!("TxSubmissionProtocol::State::TxIdsBlocking");
+                debug!("TxSubmissionProtocol::State::TxIdsBlocking");
                 // Server will wait on us forever. Just move to Done state.
                 self.state = State::Done;
                 None
             }
             State::TxIdsNonBlocking => {
-                println!("TxSubmissionProtocol::State::TxIdsNonBlocking");
+                debug!("TxSubmissionProtocol::State::TxIdsNonBlocking");
                 // Tell the server that we have no transactions to send them
                 let payload = self.msg_reply_tx_ids();
                 self.state = State::Idle;
@@ -74,7 +75,7 @@ impl Protocol for TxSubmissionProtocol {
             }
             //State::Txs => { None }
             State::Done => {
-                println!("TxSubmissionProtocol::State::Done");
+                warn!("TxSubmissionProtocol::State::Done");
                 self.result = Option::Some(Ok(String::from("Done")));
                 return None;
             }
@@ -95,7 +96,7 @@ impl Protocol for TxSubmissionProtocol {
                             //tsMsgDone       = [4]
                             //msgReplyKTnxBye = [5]
                             0 => {
-                                println!("TxSubmissionProtocol received MsgRequestTxIds");
+                                debug!("TxSubmissionProtocol received MsgRequestTxIds");
                                 let is_blocking = cbor_array[1] == Value::Bool(true);
                                 self.state = if is_blocking {
                                     State::TxIdsBlocking
@@ -104,17 +105,17 @@ impl Protocol for TxSubmissionProtocol {
                                 }
                             }
                             _ => {
-                                println!("unexpected message_id: {}", message_id);
+                                error!("unexpected message_id: {}", message_id);
                             }
                         }
                     }
                     _ => {
-                        println!("Unexpected cbor!")
+                        error!("Unexpected cbor!")
                     }
                 }
             }
             _ => {
-                println!("Unexpected cbor!")
+                error!("Unexpected cbor!")
             }
         }
     }

@@ -1,3 +1,4 @@
+use log::error;
 use serde_cbor::{de, Value};
 
 pub struct MsgRollForward {
@@ -93,14 +94,14 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
                                             msg_roll_forward.eta_vrf_0.append(&mut nonce_array[0].bytes());
                                             msg_roll_forward.eta_vrf_1.append(&mut nonce_array[1].bytes());
                                         }
-                                        _ => { println!("invalid cbor!") }
+                                        _ => { error!("invalid cbor!") }
                                     }
                                     match &block_header_array_inner[6] {
                                         Value::Array(leader_array) => {
                                             msg_roll_forward.leader_vrf_0.append(&mut leader_array[0].bytes());
                                             msg_roll_forward.leader_vrf_1.append(&mut leader_array[1].bytes());
                                         }
-                                        _ => { println!("invalid cbor!") }
+                                        _ => { error!("invalid cbor!") }
                                     }
                                     msg_roll_forward.block_size = block_header_array_inner[7].integer() as u64;
                                     msg_roll_forward.block_body_hash.append(&mut block_header_array_inner[8].bytes());
@@ -111,16 +112,16 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
                                     msg_roll_forward.protocol_major_version = block_header_array_inner[13].integer() as u64;
                                     msg_roll_forward.protocol_minor_version = block_header_array_inner[14].integer() as u64;
                                 }
-                                _ => { println!("invalid cbor!") }
+                                _ => { error!("invalid cbor!") }
                             }
                         }
-                        _ => { println!("invalid cbor!") }
+                        _ => { error!("invalid cbor!") }
                     }
                 }
-                _ => { println!("invalid cbor!") }
+                _ => { error!("invalid cbor!") }
             }
         }
-        _ => { println!("invalid cbor!") }
+        _ => { error!("invalid cbor!") }
     }
 
     match &cbor_array[2] {
@@ -130,11 +131,11 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
                     tip.slot_number = tip_info_array[0].integer() as u64;
                     tip.hash.append(&mut tip_info_array[1].bytes());
                 }
-                _ => { println!("invalid cbor!") }
+                _ => { error!("invalid cbor!") }
             }
             tip.block_number = tip_array[1].integer() as u64;
         }
-        _ => { println!("invalid cbor!") }
+        _ => { error!("invalid cbor!") }
     }
 
     (msg_roll_forward, tip)

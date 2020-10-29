@@ -4,6 +4,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
+use log::{debug, error, info, warn};
 
 use crate::nodeclient::protocols::{Agency, handshake_protocol, MiniProtocol, Protocol};
 use crate::nodeclient::protocols::chainsync_protocol::ChainSyncProtocol;
@@ -19,7 +20,7 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
 
     // continually retry connection
     loop {
-        println!("Connecting to {}:{} ...", host, port);
+        info!("Connecting to {}:{} ...", host, port);
 
         let mut protocols: Vec<MiniProtocol> = vec![
             MiniProtocol::Handshake(
@@ -42,7 +43,7 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                 match mux_send_data(&start_time, &mut protocols, &mut stream) {
                                     Ok(_) => {}
                                     Err(e) => {
-                                        println!("mux_send_data error: {}", e);
+                                        error!("mux_send_data error: {}", e);
                                         break;
                                     }
                                 }
@@ -58,7 +59,7 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                     match mux_receive_data(&mut protocols, &mut stream) {
                                         Ok(_) => {}
                                         Err(e) => {
-                                            println!("mux_receive_data error: {}", e);
+                                            error!("mux_receive_data error: {}", e);
                                             break;
                                         }
                                     }
@@ -68,21 +69,21 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                 mux_add_remove_protocols(&mut protocols);
 
                                 if protocols.is_empty() {
-                                    println!("No more active protocols, exiting...");
+                                    warn!("No more active protocols, exiting...");
                                     return;
                                 }
                             }
                         }
                         Err(e) => {
-                            println!("Failed to connect: {}", e);
+                            error!("Failed to connect: {}", e);
                         }
                     }
                 } else {
-                    println!("No IP addresses found!");
+                    error!("No IP addresses found!");
                 }
             }
             Err(error) => {
-                println!("{}", error);
+                error!("{}", error);
             }
         }
 
@@ -100,7 +101,7 @@ fn mux_send_data(start_time: &Instant, protocols: &mut Vec<MiniProtocol>, stream
                 message.write_u16::<NetworkEndian>(protocol.protocol_id()).unwrap();
                 message.write_u16::<NetworkEndian>(send_payload.len() as u16).unwrap();
                 message.write(&send_payload[..]).unwrap();
-                // println!("sending: {}", hex::encode(&message));
+                // debug!("sending: {}", hex::encode(&message));
                 stream.write(&message)?;
                 break;
             }
@@ -127,7 +128,6 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
         loop {
             let size = stream.peek(&mut payload)?;
             if size != payload_length {
-                println!("size: {}, payload_length: {}", size, payload_length);
                 continue;
             }
             stream.read_exact(&mut payload)?;
@@ -149,7 +149,7 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
 
 fn mux_add_remove_protocols(protocols: &mut Vec<MiniProtocol>) {
     let mut protocols_to_add: Vec<MiniProtocol> = Vec::new();
-// Remove any protocols that have a result (are done)
+    // Remove any protocols that have a result (are done)
     protocols.retain(|protocol| {
         match protocol {
             MiniProtocol::Handshake(handshake_protocol) => {
@@ -157,9 +157,9 @@ fn mux_add_remove_protocols(protocols: &mut Vec<MiniProtocol>) {
                     Some(protocol_result) => {
                         match protocol_result {
                             Ok(message) => {
-                                println!("HandshakeProtocol Result: {}", message);
+                                debug!("HandshakeProtocol Result: {}", message);
 
-// handshake succeeded. Add other protocols
+                                // handshake succeeded. Add other protocols
                                 protocols_to_add.push(
                                     MiniProtocol::TxSubmission(TxSubmissionProtocol::default())
                                 );
@@ -168,7 +168,7 @@ fn mux_add_remove_protocols(protocols: &mut Vec<MiniProtocol>) {
                                 );
                             }
                             Err(error) => {
-                                println!("HandshakeProtocol Error: {}", error);
+                                error!("HandshakeProtocol Error: {}", error);
                             }
                         }
                         false
@@ -181,10 +181,10 @@ fn mux_add_remove_protocols(protocols: &mut Vec<MiniProtocol>) {
                     Some(protocol_result) => {
                         match protocol_result {
                             Ok(message) => {
-                                println!("TxSubmissionProtocol Result: {}", message);
+                                debug!("TxSubmissionProtocol Result: {}", message);
                             }
                             Err(error) => {
-                                println!("TxSubmissionProtocol Error: {}", error);
+                                error!("TxSubmissionProtocol Error: {}", error);
                             }
                         }
                         false
@@ -197,10 +197,10 @@ fn mux_add_remove_protocols(protocols: &mut Vec<MiniProtocol>) {
                     Some(protocol_result) => {
                         match protocol_result {
                             Ok(message) => {
-                                println!("ChainSyncProtocol Result: {}", message);
+                                debug!("ChainSyncProtocol Result: {}", message);
                             }
                             Err(error) => {
-                                println!("ChainSyncProtocol Error: {}", error);
+                                error!("ChainSyncProtocol Error: {}", error);
                             }
                         }
                         false

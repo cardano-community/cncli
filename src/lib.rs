@@ -1,4 +1,5 @@
 pub mod nodeclient {
+    use log::info;
     use structopt::StructOpt;
 
     mod protocols;
@@ -44,7 +45,7 @@ pub mod nodeclient {
                 println!("VALIDATE hash: {:?}, slot: {:?}, host: {:?}, port: {:?}", hash, slot, host, port);
             }
             Command::Sync { ref db, ref host, ref port, ref network_magic } => {
-                println!("Starting NodeClient...");
+                info!("Starting NodeClient...");
                 protocols::mux_protocol::sync(db, host, *port, *network_magic);
             }
         }

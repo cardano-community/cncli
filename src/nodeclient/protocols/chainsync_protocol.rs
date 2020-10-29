@@ -1,11 +1,15 @@
-use std::time::Instant;
+use std::ops::Sub;
+use std::time::{Duration, Instant};
 
+use log::{debug, error, info, trace, warn};
 use serde_cbor::{de, ser, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
+use crate::nodeclient::protocols::chainsync_protocol::msg_roll_backward::parse_msg_roll_backward;
 use crate::nodeclient::protocols::chainsync_protocol::msg_roll_forward::parse_msg_roll_forward;
 
 mod msg_roll_forward;
+mod msg_roll_backward;
 
 pub enum State {
     Idle,
@@ -25,7 +29,7 @@ pub struct ChainSyncProtocol {
 impl Default for ChainSyncProtocol {
     fn default() -> Self {
         ChainSyncProtocol {
-            last_log_time: Instant::now(),
+            last_log_time: Instant::now().sub(Duration::from_secs(6)),
             state: State::Idle,
             result: None,
             is_intersect_found: false,
@@ -72,6 +76,7 @@ impl Protocol for ChainSyncProtocol {
     fn send_data(&mut self) -> Option<Vec<u8>> {
         return match self.state {
             State::Idle => {
+                trace!("ChainSyncProtocol::State::Idle");
                 if !self.is_intersect_found {
                     // request an intersect with the server so we know where to start syncing blocks
                     let chain_blocks = vec![
@@ -91,19 +96,19 @@ impl Protocol for ChainSyncProtocol {
                 }
             }
             State::Intersect => {
-                // println!("ChainSyncProtocol::State::Intersect");
+                debug!("ChainSyncProtocol::State::Intersect");
                 None
             }
             State::CanAwait => {
-                // println!("ChainSyncProtocol::State::CanAwait");
+                debug!("ChainSyncProtocol::State::CanAwait");
                 None
             }
             State::MustReply => {
-                // println!("ChainSyncProtocol::State::MustReply");
+                debug!("ChainSyncProtocol::State::MustReply");
                 None
             }
             State::Done => {
-                // println!("ChainSyncProtocol::State::Done");
+                debug!("ChainSyncProtocol::State::Done");
                 None
             }
         };
@@ -135,7 +140,7 @@ impl Protocol for ChainSyncProtocol {
                                 let (msg_roll_forward, tip) = parse_msg_roll_forward(cbor_array);
 
                                 if self.last_log_time.elapsed().as_millis() > 5_000 {
-                                    println!("ChainSync: slot {} of {}.", msg_roll_forward.slot_number, tip.slot_number);
+                                    info!("slot {} of {}.", msg_roll_forward.slot_number, tip.slot_number);
                                     self.last_log_time = Instant::now()
                                 }
                                 self.state = State::Idle;
@@ -146,36 +151,37 @@ impl Protocol for ChainSyncProtocol {
                             }
                             3 => {
                                 // MsgRollBackward
-                                println!("ChainSync: rollback to point: {:?}, tip: {:?}", cbor_array[1], cbor_array[2]);
+                                let slot = parse_msg_roll_backward(cbor_array);
+                                warn!("rollback to slot: {}", slot);
                                 self.state = State::Idle;
                             }
                             5 => {
-                                println!("MsgIntersectFound: {:?}", cbor_array);
+                                debug!("MsgIntersectFound: {:?}", cbor_array);
                                 self.is_intersect_found = true;
                                 self.state = State::Idle;
                             }
                             6 => {
-                                println!("MsgIntersectNotFound: {:?}", cbor_array);
+                                error!("MsgIntersectNotFound: {:?}", cbor_array);
                                 self.is_intersect_found = true; // should start syncing at first byron block. will probably crash later, but oh well.
                                 self.state = State::Idle;
                             }
                             7 => {
-                                println!("MsgDone: {:?}", cbor_array);
+                                warn!("MsgDone: {:?}", cbor_array);
                                 self.state = State::Done;
                                 self.result = Some(Ok(String::from("Done")))
                             }
                             _ => {
-                                println!("Got unexpected message_id: {}", message_id);
+                                error!("Got unexpected message_id: {}", message_id);
                             }
                         }
                     }
                     _ => {
-                        println!("Unexpected cbor!")
+                        error!("Unexpected cbor!")
                     }
                 }
             }
             _ => {
-                println!("Unexpected cbor!")
+                error!("Unexpected cbor!")
             }
         }
     }

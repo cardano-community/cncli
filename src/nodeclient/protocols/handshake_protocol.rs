@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
+use log::{debug, warn};
 use serde_cbor::{de, ser, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
@@ -72,14 +73,17 @@ impl Protocol for HandshakeProtocol {
     fn send_data(&mut self) -> Option<Vec<u8>> {
         return match self.state {
             State::Propose => {
+                debug!("HandshakeProtocol::State::Propose");
                 let payload = self.msg_propose_versions(self.network_magic);
                 self.state = State::Confirm;
                 Some(payload)
             }
             State::Confirm => {
+                debug!("HandshakeProtocol::State::Confirm");
                 None
             }
             State::Done => {
+                warn!("HandshakeProtocol::State::Done");
                 None
             }
         };
@@ -100,6 +104,7 @@ impl Protocol for HandshakeProtocol {
         } else {
             self.result = Some(Ok(hex::encode(data)));
         }
+        warn!("HandshakeProtocol::State::Done");
         self.state = State::Done
     }
 }
