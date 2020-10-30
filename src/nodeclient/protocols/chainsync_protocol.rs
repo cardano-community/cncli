@@ -185,7 +185,7 @@ impl ChainSyncProtocol {
         Ok(())
     }
 
-    fn msg_find_intersect(&self, chain_blocks: Vec<(u64, Vec<u8>)>) -> Vec<u8> {
+    fn msg_find_intersect(&self, chain_blocks: Vec<(i64, Vec<u8>)>) -> Vec<u8> {
 
         // figure out how to fix this extra clone later
         let msg: Value = Value::Array(
@@ -225,13 +225,29 @@ impl Protocol for ChainSyncProtocol {
             State::Idle => {
                 trace!("ChainSyncProtocol::State::Idle");
                 if !self.is_intersect_found {
-                    // request an intersect with the server so we know where to start syncing blocks
-                    let chain_blocks = vec![
-                        // Last byron block of mainnet
-                        (4492799, hex::decode("f8084c61b6a238acec985b59310b6ecec49c0ab8352249afd7268da5cff2a457").unwrap()),
-                        // Last byron block of testnet
-                        (1598399, hex::decode("7e16781b40ebf8b6da18f7b5e8ade855d6738095ef2f1c58c77e88b6e45997a4").unwrap()),
-                    ];
+                    let mut chain_blocks: Vec<(i64, Vec<u8>)> = vec![];
+                    { //scope for db operations
+                        let db = self.db.as_mut().unwrap();
+                        let mut stmt = db.prepare("SELECT slot_number, hash FROM chain ORDER BY slot_number DESC LIMIT 33").unwrap();
+                        let blocks = stmt.query_map(NO_PARAMS, |row| {
+                            let slot_result: Result<i64, Error> = row.get(0);
+                            let hash_result: Result<String, Error> = row.get(1);
+                            let slot = slot_result?;
+                            let hash = hash_result?;
+                            Ok((slot, hex::decode(hash).unwrap()))
+                        }).ok()?;
+                        for (i, block) in blocks.enumerate() {
+                            // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
+                            if (i != 1) && (i & (i - 1) == 0) {
+                                chain_blocks.push(block.unwrap());
+                            }
+                        }
+                    }
+                    // Last byron block of mainnet
+                    chain_blocks.push((4492799, hex::decode("f8084c61b6a238acec985b59310b6ecec49c0ab8352249afd7268da5cff2a457").unwrap()));
+                    // Last byron block of testnet
+                    chain_blocks.push((1598399, hex::decode("7e16781b40ebf8b6da18f7b5e8ade855d6738095ef2f1c58c77e88b6e45997a4").unwrap()));
+
                     let payload = self.msg_find_intersect(chain_blocks);
                     self.state = State::Intersect;
                     Some(payload)
@@ -286,7 +302,7 @@ impl Protocol for ChainSyncProtocol {
                                 let (msg_roll_forward, tip) = parse_msg_roll_forward(cbor_array);
 
                                 if self.last_log_time.elapsed().as_millis() > 5_000 {
-                                    info!("slot {} of {}, hash: {}", msg_roll_forward.slot_number, tip.slot_number, hex::encode(&msg_roll_forward.hash));
+                                    info!("slot {} of {}", msg_roll_forward.slot_number, tip.slot_number);
                                     self.last_log_time = Instant::now()
                                 }
 
