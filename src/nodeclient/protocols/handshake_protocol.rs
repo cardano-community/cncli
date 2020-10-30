@@ -20,6 +20,16 @@ pub struct HandshakeProtocol {
     pub(crate) result: Option<Result<String, String>>,
 }
 
+impl Default for HandshakeProtocol {
+    fn default() -> Self {
+        HandshakeProtocol {
+            state: State::Propose,
+            network_magic: 764824073,
+            result: None,
+        }
+    }
+}
+
 impl HandshakeProtocol {
     // Serialize cbor for MsgProposeVersions
     //

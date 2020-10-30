@@ -2,6 +2,8 @@ use std::ops::Sub;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use blake2::digest::{Update, VariableOutput};
+use blake2::VarBlake2b;
 use log::{debug, error, info, trace, warn};
 use rusqlite::{Connection, Error, named_params, NO_PARAMS};
 use serde_cbor::{de, ser, Value};
@@ -22,10 +24,11 @@ pub enum State {
 }
 
 pub struct ChainSyncProtocol {
-    last_log_time: Instant,
-    last_insert_time: Instant,
-    db: Option<Connection>,
-    pending_blocks: Vec<MsgRollForward>,
+    pub(crate) last_log_time: Instant,
+    pub(crate) last_insert_time: Instant,
+    pub(crate) db: Option<Connection>,
+    pub(crate) network_magic: u32,
+    pub(crate) pending_blocks: Vec<MsgRollForward>,
     pub(crate) state: State,
     pub(crate) result: Option<Result<String, String>>,
     pub(crate) is_intersect_found: bool,
@@ -37,6 +40,7 @@ impl Default for ChainSyncProtocol {
             last_log_time: Instant::now().sub(Duration::from_secs(6)),
             last_insert_time: Instant::now(),
             db: None,
+            network_magic: 764824073,
             pending_blocks: Vec::new(),
             state: State::Idle,
             result: None,
@@ -72,6 +76,7 @@ impl ChainSyncProtocol {
                     slot_number INTEGER NOT NULL, \
                     hash TEXT NOT NULL, \
                     prev_hash TEXT NOT NULL, \
+                    eta_v TEXT NOT NULL, \
                     node_vkey TEXT NOT NULL, \
                     node_vrf_vkey TEXT NOT NULL, \
                     eta_vrf_0 TEXT NOT NULL, \
@@ -110,6 +115,25 @@ impl ChainSyncProtocol {
 
         if self.pending_blocks.len() >= ChainSyncProtocol::BLOCK_BATCH_SIZE || self.last_insert_time.elapsed() > ChainSyncProtocol::FIVE_SECS {
             let db = self.db.as_mut().unwrap();
+            // get the last block eta_v (nonce) in the db
+            let mut prev_eta_v =
+                {
+                    hex::decode(
+                        match db.query_row("SELECT eta_v FROM chain ORDER BY slot_number ASC LIMIT 1", NO_PARAMS, |row| row.get(0)) {
+                            Ok(eta_v) => { eta_v }
+                            Err(_) => {
+                                if self.network_magic == 764824073 {
+                                    // mainnet genesis hash
+                                    String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
+                                } else {
+                                    // assume testnet genesis hash
+                                    String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                                }
+                            }
+                        }
+                    ).unwrap()
+                };
+
             let tx = db.transaction()?;
             { // scope for db transaction
                 let mut orphan_stmt = tx.prepare("UPDATE chain SET orphaned = 1 WHERE slot_number >= ?1")?;
@@ -118,6 +142,7 @@ impl ChainSyncProtocol {
                 slot_number, \
                 hash, \
                 prev_hash, \
+                eta_v, \
                 node_vkey, \
                 node_vrf_vkey, \
                 eta_vrf_0, \
@@ -137,6 +162,7 @@ impl ChainSyncProtocol {
                 :slot_number, \
                 :hash, \
                 :prev_hash, \
+                :eta_v, \
                 :node_vkey, \
                 :node_vrf_vkey, \
                 :eta_vrf_0, \
@@ -151,7 +177,16 @@ impl ChainSyncProtocol {
                 :unknown_2, \
                 :protocol_major_version, \
                 :protocol_minor_version)")?;
+
+                let mut hasher = VarBlake2b::new(32).unwrap();
+
                 for block in self.pending_blocks.drain(..) {
+                    hasher.update(&block.eta_vrf_0[..]);
+                    let mut block_eta_v = hasher.finalize_boxed_reset().to_vec();
+                    prev_eta_v.append(&mut block_eta_v);
+                    hasher.update(&prev_eta_v[..]);
+                    prev_eta_v = hasher.finalize_boxed_reset().to_vec();
+
                     orphan_stmt.execute(&[&block.slot_number])?;
                     insert_stmt.execute_named(
                         named_params! {
@@ -159,6 +194,7 @@ impl ChainSyncProtocol {
                         ":slot_number": block.slot_number,
                         ":hash" : hex::encode(block.hash),
                         ":prev_hash" : hex::encode(block.prev_hash),
+                        ":eta_v" : hex::encode(&prev_eta_v),
                         ":node_vkey" : hex::encode(block.node_vkey),
                         ":node_vrf_vkey" : hex::encode(block.node_vrf_vkey),
                         ":eta_vrf_0" : hex::encode(block.eta_vrf_0),
