@@ -1,9 +1,12 @@
+use blake2::digest::{Update, VariableOutput};
+use blake2::VarBlake2b;
 use log::error;
 use serde_cbor::{de, Value};
 
 pub struct MsgRollForward {
-    pub block_number: u64,
-    pub slot_number: u64,
+    pub block_number: i64,
+    pub slot_number: i64,
+    pub hash: Vec<u8>,
     pub prev_hash: Vec<u8>,
     pub node_vkey: Vec<u8>,
     pub node_vrf_vkey: Vec<u8>,
@@ -11,19 +14,19 @@ pub struct MsgRollForward {
     pub eta_vrf_1: Vec<u8>,
     pub leader_vrf_0: Vec<u8>,
     pub leader_vrf_1: Vec<u8>,
-    pub block_size: u64,
+    pub block_size: i64,
     pub block_body_hash: Vec<u8>,
     pub pool_opcert: Vec<u8>,
-    pub unknown_0: u64,
-    pub unknown_1: u64,
+    pub unknown_0: i64,
+    pub unknown_1: i64,
     pub unknown_2: Vec<u8>,
-    pub protocol_major_version: u64,
-    pub protocol_minor_version: u64,
+    pub protocol_major_version: i64,
+    pub protocol_minor_version: i64,
 }
 
 pub struct Tip {
-    pub block_number: u64,
-    pub slot_number: u64,
+    pub block_number: i64,
+    pub slot_number: i64,
     pub hash: Vec<u8>,
 }
 
@@ -53,6 +56,7 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
     let mut msg_roll_forward = MsgRollForward {
         block_number: 0,
         slot_number: 0,
+        hash: vec![],
         prev_hash: vec![],
         node_vkey: vec![],
         node_vrf_vkey: vec![],
@@ -79,13 +83,19 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
         Value::Array(header_array) => {
             match &header_array[1] {
                 Value::Bytes(wrapped_block_header_bytes) => {
+                    // optimize this hashing later
+                    let mut hasher = VarBlake2b::new(32).unwrap();
+                    hasher.update(wrapped_block_header_bytes);
+                    let mut hash = hasher.finalize_boxed().to_vec();
+                    msg_roll_forward.hash.append(&mut hash);
+
                     let block_header: Value = de::from_slice(&wrapped_block_header_bytes[..]).unwrap();
                     match block_header {
                         Value::Array(block_header_array) => {
                             match &block_header_array[0] {
                                 Value::Array(block_header_array_inner) => {
-                                    msg_roll_forward.block_number = block_header_array_inner[0].integer() as u64;
-                                    msg_roll_forward.slot_number = block_header_array_inner[1].integer() as u64;
+                                    msg_roll_forward.block_number = block_header_array_inner[0].integer() as i64;
+                                    msg_roll_forward.slot_number = block_header_array_inner[1].integer() as i64;
                                     msg_roll_forward.prev_hash.append(&mut block_header_array_inner[2].bytes());
                                     msg_roll_forward.node_vkey.append(&mut block_header_array_inner[3].bytes());
                                     msg_roll_forward.node_vrf_vkey.append(&mut block_header_array_inner[4].bytes());
@@ -103,14 +113,14 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
                                         }
                                         _ => { error!("invalid cbor!") }
                                     }
-                                    msg_roll_forward.block_size = block_header_array_inner[7].integer() as u64;
+                                    msg_roll_forward.block_size = block_header_array_inner[7].integer() as i64;
                                     msg_roll_forward.block_body_hash.append(&mut block_header_array_inner[8].bytes());
                                     msg_roll_forward.pool_opcert.append(&mut block_header_array_inner[9].bytes());
-                                    msg_roll_forward.unknown_0 = block_header_array_inner[10].integer() as u64;
-                                    msg_roll_forward.unknown_1 = block_header_array_inner[11].integer() as u64;
+                                    msg_roll_forward.unknown_0 = block_header_array_inner[10].integer() as i64;
+                                    msg_roll_forward.unknown_1 = block_header_array_inner[11].integer() as i64;
                                     msg_roll_forward.unknown_2.append(&mut block_header_array_inner[12].bytes());
-                                    msg_roll_forward.protocol_major_version = block_header_array_inner[13].integer() as u64;
-                                    msg_roll_forward.protocol_minor_version = block_header_array_inner[14].integer() as u64;
+                                    msg_roll_forward.protocol_major_version = block_header_array_inner[13].integer() as i64;
+                                    msg_roll_forward.protocol_minor_version = block_header_array_inner[14].integer() as i64;
                                 }
                                 _ => { error!("invalid cbor!") }
                             }
@@ -128,12 +138,12 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
         Value::Array(tip_array) => {
             match &tip_array[0] {
                 Value::Array(tip_info_array) => {
-                    tip.slot_number = tip_info_array[0].integer() as u64;
+                    tip.slot_number = tip_info_array[0].integer() as i64;
                     tip.hash.append(&mut tip_info_array[1].bytes());
                 }
                 _ => { error!("invalid cbor!") }
             }
-            tip.block_number = tip_array[1].integer() as u64;
+            tip.block_number = tip_array[1].integer() as i64;
         }
         _ => { error!("invalid cbor!") }
     }

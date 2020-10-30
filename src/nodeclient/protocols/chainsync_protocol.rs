@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use log::{debug, error, info, trace, warn};
-use rusqlite::{Connection, Error, NO_PARAMS};
+use rusqlite::{Connection, Error, named_params, NO_PARAMS};
 use serde_cbor::{de, ser, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
 use crate::nodeclient::protocols::chainsync_protocol::msg_roll_backward::parse_msg_roll_backward;
-use crate::nodeclient::protocols::chainsync_protocol::msg_roll_forward::parse_msg_roll_forward;
+use crate::nodeclient::protocols::chainsync_protocol::msg_roll_forward::{MsgRollForward, parse_msg_roll_forward};
 
 mod msg_roll_forward;
 mod msg_roll_backward;
@@ -23,7 +23,9 @@ pub enum State {
 
 pub struct ChainSyncProtocol {
     last_log_time: Instant,
+    last_insert_time: Instant,
     db: Option<Connection>,
+    pending_blocks: Vec<MsgRollForward>,
     pub(crate) state: State,
     pub(crate) result: Option<Result<String, String>>,
     pub(crate) is_intersect_found: bool,
@@ -33,7 +35,9 @@ impl Default for ChainSyncProtocol {
     fn default() -> Self {
         ChainSyncProtocol {
             last_log_time: Instant::now().sub(Duration::from_secs(6)),
+            last_insert_time: Instant::now(),
             db: None,
+            pending_blocks: Vec::new(),
             state: State::Idle,
             result: None,
             is_intersect_found: false,
@@ -43,10 +47,13 @@ impl Default for ChainSyncProtocol {
 
 impl ChainSyncProtocol {
     const DB_VERSION: i64 = 1;
+    const BLOCK_BATCH_SIZE: usize = 100;
+    const FIVE_SECS: Duration = Duration::from_secs(5);
 
     pub(crate) fn init_database(&mut self, db_path: &PathBuf) -> Result<(), Error> {
         let db = Connection::open(db_path)?;
         {
+            db.execute_batch("PRAGMA journal_mode=WAL")?;
             db.execute("CREATE TABLE IF NOT EXISTS db_version (version INTEGER PRIMARY KEY)", NO_PARAMS)?;
             let mut stmt = db.prepare("SELECT version FROM db_version")?;
             let mut rows = stmt.query(NO_PARAMS)?;
@@ -60,26 +67,27 @@ impl ChainSyncProtocol {
             // Upgrade their database to version 1
             if version < 1 {
                 db.execute("CREATE TABLE IF NOT EXISTS chain (\
-            id INTEGER PRIMARY KEY AUTOINCREMENT, \
-            block_number INTEGER NOT NULL, \
-            slot_number INTEGER NOT NULL, \
-            hash TEXT NOT NULL, \
-            prev_hash TEXT NOT NULL, \
-            node_vkey TEXT NOT NULL, \
-            node_vrf_vkey TEXT NOT NULL, \
-            eta_vrf_0 TEXT NOT NULL, \
-            eta_vrf_1 TEXT NOT NULL, \
-            leader_vrf_0 TEXT NOT NULL, \
-            leader_vrf_1 TEXT NOT NULL, \
-            block_size INTEGER NOT NULL, \
-            block_body_hash TEXT NOT NULL, \
-            pool_opcert TEXT NOT NULL, \
-            unknown_0 INTEGER NOT NULL, \
-            unknown_1 INTEGER NOT NULL, \
-            unknown_2 TEXT NOT NULL, \
-            protocol_major_version INTEGER NOT NULL, \
-            protocol_minor_version INTEGER NOT NULL \
-            )", NO_PARAMS)?;
+                    id INTEGER PRIMARY KEY AUTOINCREMENT, \
+                    block_number INTEGER NOT NULL, \
+                    slot_number INTEGER NOT NULL, \
+                    hash TEXT NOT NULL, \
+                    prev_hash TEXT NOT NULL, \
+                    node_vkey TEXT NOT NULL, \
+                    node_vrf_vkey TEXT NOT NULL, \
+                    eta_vrf_0 TEXT NOT NULL, \
+                    eta_vrf_1 TEXT NOT NULL, \
+                    leader_vrf_0 TEXT NOT NULL, \
+                    leader_vrf_1 TEXT NOT NULL, \
+                    block_size INTEGER NOT NULL, \
+                    block_body_hash TEXT NOT NULL, \
+                    pool_opcert TEXT NOT NULL, \
+                    unknown_0 INTEGER NOT NULL, \
+                    unknown_1 INTEGER NOT NULL, \
+                    unknown_2 TEXT NOT NULL, \
+                    protocol_major_version INTEGER NOT NULL, \
+                    protocol_minor_version INTEGER NOT NULL, \
+                    orphaned INTEGER NOT NULL DEFAULT 0 \
+                    )", NO_PARAMS)?;
             }
 
             // Upgrade their database to version ...
@@ -93,6 +101,86 @@ impl ChainSyncProtocol {
             }
         }
         self.db = Some(db);
+
+        Ok(())
+    }
+
+    fn save_block(&mut self, msg_roll_forward: MsgRollForward) -> Result<(), Error> {
+        self.pending_blocks.push(msg_roll_forward);
+
+        if self.pending_blocks.len() >= ChainSyncProtocol::BLOCK_BATCH_SIZE || self.last_insert_time.elapsed() > ChainSyncProtocol::FIVE_SECS {
+            let db = self.db.as_mut().unwrap();
+            let tx = db.transaction()?;
+            { // scope for db transaction
+                let mut orphan_stmt = tx.prepare("UPDATE chain SET orphaned = 1 WHERE slot_number >= ?1")?;
+                let mut insert_stmt = tx.prepare("INSERT INTO chain (\
+                block_number, \
+                slot_number, \
+                hash, \
+                prev_hash, \
+                node_vkey, \
+                node_vrf_vkey, \
+                eta_vrf_0, \
+                eta_vrf_1, \
+                leader_vrf_0, \
+                leader_vrf_1, \
+                block_size, \
+                block_body_hash, \
+                pool_opcert, \
+                unknown_0, \
+                unknown_1, \
+                unknown_2, \
+                protocol_major_version, \
+                protocol_minor_version) \
+                VALUES (\
+                :block_number, \
+                :slot_number, \
+                :hash, \
+                :prev_hash, \
+                :node_vkey, \
+                :node_vrf_vkey, \
+                :eta_vrf_0, \
+                :eta_vrf_1, \
+                :leader_vrf_0, \
+                :leader_vrf_1, \
+                :block_size, \
+                :block_body_hash, \
+                :pool_opcert, \
+                :unknown_0, \
+                :unknown_1, \
+                :unknown_2, \
+                :protocol_major_version, \
+                :protocol_minor_version)")?;
+                for block in self.pending_blocks.drain(..) {
+                    orphan_stmt.execute(&[&block.slot_number])?;
+                    insert_stmt.execute_named(
+                        named_params! {
+                        ":block_number" : block.block_number,
+                        ":slot_number": block.slot_number,
+                        ":hash" : hex::encode(block.hash),
+                        ":prev_hash" : hex::encode(block.prev_hash),
+                        ":node_vkey" : hex::encode(block.node_vkey),
+                        ":node_vrf_vkey" : hex::encode(block.node_vrf_vkey),
+                        ":eta_vrf_0" : hex::encode(block.eta_vrf_0),
+                        ":eta_vrf_1" : hex::encode(block.eta_vrf_1),
+                        ":leader_vrf_0" : hex::encode(block.leader_vrf_0),
+                        ":leader_vrf_1" : hex::encode(block.leader_vrf_1),
+                        ":block_size" : block.block_size,
+                        ":block_body_hash" : hex::encode(block.block_body_hash),
+                        ":pool_opcert" : hex::encode(block.pool_opcert),
+                        ":unknown_0" : block.unknown_0,
+                        ":unknown_1" : block.unknown_1,
+                        ":unknown_2" : hex::encode(block.unknown_2),
+                        ":protocol_major_version" : block.protocol_major_version,
+                        ":protocol_minor_version" : block.protocol_minor_version,
+                    }
+                    )?;
+                }
+            }
+
+            tx.commit()?;
+            self.last_insert_time = Instant::now();
+        }
 
         Ok(())
     }
@@ -195,13 +283,16 @@ impl Protocol for ChainSyncProtocol {
                             }
                             2 => {
                                 // MsgRollForward
-                                // println!("MsgRollForward: {:?}", cbor_array);
                                 let (msg_roll_forward, tip) = parse_msg_roll_forward(cbor_array);
 
                                 if self.last_log_time.elapsed().as_millis() > 5_000 {
-                                    info!("slot {} of {}.", msg_roll_forward.slot_number, tip.slot_number);
+                                    info!("slot {} of {}, hash: {}", msg_roll_forward.slot_number, tip.slot_number, hex::encode(&msg_roll_forward.hash));
                                     self.last_log_time = Instant::now()
                                 }
+
+                                // FIXME: return any error upward in case we fill the disk or something
+                                self.save_block(msg_roll_forward).unwrap();
+
                                 self.state = State::Idle;
 
                                 // testing only so we sync only a single block
