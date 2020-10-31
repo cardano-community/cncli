@@ -3,7 +3,7 @@ A community-based cardano-node CLI tool
 
 ## Building
 ```shell script
-$ sudo apt-get install sqlite3-dev
+$ sudo apt-get install libsqlite3-dev
 $ cargo install --path . --force
 ```
 

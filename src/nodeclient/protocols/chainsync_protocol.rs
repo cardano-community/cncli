@@ -338,7 +338,7 @@ impl Protocol for ChainSyncProtocol {
                                 let (msg_roll_forward, tip) = parse_msg_roll_forward(cbor_array);
 
                                 if self.last_log_time.elapsed().as_millis() > 5_000 {
-                                    info!("slot {} of {}", msg_roll_forward.slot_number, tip.slot_number);
+                                    info!("slot {} of {}, {:.2}% synced", msg_roll_forward.slot_number, tip.slot_number, (msg_roll_forward.slot_number as f64 / tip.slot_number as f64) * 100.0);
                                     self.last_log_time = Instant::now()
                                 }
 
