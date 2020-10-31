@@ -1,5 +1,4 @@
-use blake2::digest::{Update, VariableOutput};
-use blake2::VarBlake2b;
+use blake2b_simd::{Params};
 use log::error;
 use serde_cbor::{de, Value};
 
@@ -45,7 +44,6 @@ impl UnwrapValue for Value {
 
     fn bytes(&self) -> Vec<u8> {
         match self {
-            // figure out how to fix this extra clone later
             Value::Bytes(bytes_vec) => { bytes_vec.clone() }
             _ => { panic!("not a byte array!") }
         }
@@ -83,11 +81,9 @@ pub fn parse_msg_roll_forward(cbor_array: Vec<Value>) -> (MsgRollForward, Tip) {
         Value::Array(header_array) => {
             match &header_array[1] {
                 Value::Bytes(wrapped_block_header_bytes) => {
-                    // optimize this hashing later
-                    let mut hasher = VarBlake2b::new(32).unwrap();
-                    hasher.update(wrapped_block_header_bytes);
-                    let mut hash = hasher.finalize_boxed().to_vec();
-                    msg_roll_forward.hash.append(&mut hash);
+                    // calculate the block hash
+                    let hash = Params::new().hash_length(32).to_state().update(&*wrapped_block_header_bytes).finalize();
+                    msg_roll_forward.hash = hash.as_bytes().to_owned();
 
                     let block_header: Value = de::from_slice(&wrapped_block_header_bytes[..]).unwrap();
                     match block_header {

@@ -2,8 +2,7 @@ use std::ops::Sub;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use blake2::digest::{Update, VariableOutput};
-use blake2::VarBlake2b;
+use blake2b_simd::Params;
 use log::{debug, error, info, trace, warn};
 use rusqlite::{Connection, Error, named_params, NO_PARAMS};
 use serde_cbor::{de, ser, Value};
@@ -51,7 +50,7 @@ impl Default for ChainSyncProtocol {
 
 impl ChainSyncProtocol {
     const DB_VERSION: i64 = 1;
-    const BLOCK_BATCH_SIZE: usize = 100;
+    const BLOCK_BATCH_SIZE: usize = 100000;
     const FIVE_SECS: Duration = Duration::from_secs(5);
 
     pub(crate) fn init_database(&mut self, db_path: &PathBuf) -> Result<(), Error> {
@@ -93,6 +92,9 @@ impl ChainSyncProtocol {
                     protocol_minor_version INTEGER NOT NULL, \
                     orphaned INTEGER NOT NULL DEFAULT 0 \
                     )", NO_PARAMS)?;
+                db.execute("CREATE INDEX IF NOT EXISTS idx_chain_slot_number ON chain(slot_number)", NO_PARAMS)?;
+                db.execute("CREATE INDEX IF NOT EXISTS idx_chain_orphaned ON chain(orphaned)", NO_PARAMS)?;
+                db.execute("CREATE INDEX IF NOT EXISTS idx_chain_hash ON chain(hash)", NO_PARAMS)?;
             }
 
             // Upgrade their database to version ...
@@ -119,7 +121,7 @@ impl ChainSyncProtocol {
             let mut prev_eta_v =
                 {
                     hex::decode(
-                        match db.query_row("SELECT eta_v FROM chain ORDER BY slot_number ASC LIMIT 1", NO_PARAMS, |row| row.get(0)) {
+                        match db.query_row("SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0", NO_PARAMS, |row| row.get(0)) {
                             Ok(eta_v) => { eta_v }
                             Err(_) => {
                                 if self.network_magic == 764824073 {
@@ -178,14 +180,12 @@ impl ChainSyncProtocol {
                 :protocol_major_version, \
                 :protocol_minor_version)")?;
 
-                let mut hasher = VarBlake2b::new(32).unwrap();
-
                 for block in self.pending_blocks.drain(..) {
-                    hasher.update(&block.eta_vrf_0[..]);
-                    let mut block_eta_v = hasher.finalize_boxed_reset().to_vec();
+                    // blake2b hash of eta_vrf_0
+                    let mut block_eta_v = Params::new().hash_length(32).to_state().update(&*block.eta_vrf_0).finalize().as_bytes().to_vec();
                     prev_eta_v.append(&mut block_eta_v);
-                    hasher.update(&prev_eta_v[..]);
-                    prev_eta_v = hasher.finalize_boxed_reset().to_vec();
+                    // blake2b hash of prev_eta_v + block_eta_v
+                    prev_eta_v = Params::new().hash_length(32).to_state().update(&*prev_eta_v).finalize().as_bytes().to_vec();
 
                     orphan_stmt.execute(&[&block.slot_number])?;
                     insert_stmt.execute_named(
@@ -338,7 +338,7 @@ impl Protocol for ChainSyncProtocol {
                                 let (msg_roll_forward, tip) = parse_msg_roll_forward(cbor_array);
 
                                 if self.last_log_time.elapsed().as_millis() > 5_000 {
-                                    info!("slot {} of {}, {:.2}% synced", msg_roll_forward.slot_number, tip.slot_number, (msg_roll_forward.slot_number as f64 / tip.slot_number as f64) * 100.0);
+                                    info!("block {} of {}, {:.2}% synced", msg_roll_forward.block_number, tip.block_number, (msg_roll_forward.block_number as f64 / tip.block_number as f64) * 100.0);
                                     self.last_log_time = Instant::now()
                                 }
 
