@@ -50,7 +50,6 @@ impl Default for ChainSyncProtocol {
 
 impl ChainSyncProtocol {
     const DB_VERSION: i64 = 1;
-    const BLOCK_BATCH_SIZE: usize = 100000;
     const FIVE_SECS: Duration = Duration::from_secs(5);
 
     pub(crate) fn init_database(&mut self, db_path: &PathBuf) -> Result<(), Error> {
@@ -115,7 +114,7 @@ impl ChainSyncProtocol {
     fn save_block(&mut self, msg_roll_forward: MsgRollForward) -> Result<(), Error> {
         self.pending_blocks.push(msg_roll_forward);
 
-        if self.pending_blocks.len() >= ChainSyncProtocol::BLOCK_BATCH_SIZE || self.last_insert_time.elapsed() > ChainSyncProtocol::FIVE_SECS {
+        if self.last_insert_time.elapsed() > ChainSyncProtocol::FIVE_SECS {
             let db = self.db.as_mut().unwrap();
             // get the last block eta_v (nonce) in the db
             let mut prev_eta_v =
