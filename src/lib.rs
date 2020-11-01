@@ -1,9 +1,32 @@
 pub mod nodeclient {
+    use std::str::FromStr;
+    use std::string::ParseError;
+
     use log::info;
     use structopt::StructOpt;
 
     mod protocols;
     mod validate;
+    mod leaderlog;
+
+    #[derive(Debug)]
+    pub enum LedgerSet {
+        Mark,
+        Set,
+        Go,
+    }
+
+    impl FromStr for LedgerSet {
+        type Err = ParseError;
+        fn from_str(ledger_set: &str) -> Result<Self, Self::Err> {
+            match ledger_set {
+                "mark" => Ok(LedgerSet::Mark),
+                "set" => Ok(LedgerSet::Set),
+                "go" => Ok(LedgerSet::Go),
+                _ => Ok(LedgerSet::Set)
+            }
+        }
+    }
 
     #[derive(Debug, StructOpt)]
     pub enum Command {
@@ -31,6 +54,22 @@ pub mod nodeclient {
             #[structopt(long, default_value = "764824073", help = "network magic.")]
             network_magic: u32,
         },
+        Leaderlog {
+            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            db: std::path::PathBuf,
+            #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
+            byron_genesis: std::path::PathBuf,
+            #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
+            shelley_genesis: std::path::PathBuf,
+            #[structopt(parse(from_os_str), long, help = "ledger state json file")]
+            ledger_state: std::path::PathBuf,
+            #[structopt(long, default_value = "set", help = "Which ledger data to use. mark - future epoch, set - current epoch, go - past epoch")]
+            ledger_set: LedgerSet,
+            #[structopt(long, help = "lower-case hex pool id")]
+            pool_id: String,
+            #[structopt(long, help = "epoch to calculate")]
+            epoch: u64,
+        },
     }
 
     pub fn start(cmd: Command) {
@@ -44,6 +83,9 @@ pub mod nodeclient {
             Command::Sync { ref db, ref host, ref port, ref network_magic } => {
                 info!("Starting NodeClient...");
                 protocols::mux_protocol::sync(db, host, *port, *network_magic);
+            }
+            Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref epoch } => {
+                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, epoch);
             }
         }
     }
