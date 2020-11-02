@@ -2,6 +2,8 @@ use std::fs::File;
 use std::io::{BufReader, Error};
 use std::path::PathBuf;
 
+use blake2b_simd::Params;
+use log::debug;
 use rusqlite::{Connection, NO_PARAMS};
 use serde::Deserialize;
 use serde::export::fmt::Display;
@@ -66,6 +68,15 @@ fn get_eta_v_before_slot(db: &Connection, slot_number: i64) -> Result<String, ru
     )
 }
 
+fn get_prev_hash_before_slot(db: &Connection, slot_number: i64) -> Result<String, rusqlite::Error> {
+    Ok(
+        db.query_row("SELECT prev_hash FROM chain WHERE slot_number < ?1 AND ?1 - slot_number < 120 ORDER BY slot_number DESC LIMIT 1", &[&slot_number], |row| {
+            Ok(row.get(0)?)
+        })?
+    )
+}
+
+
 fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, current_slot: i64) -> i64 {
     let shelley_transition_epoch: i64 = if shelley.network_magic == 764824073 {
         // mainnet
@@ -86,16 +97,16 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
 
     match read_byron_genesis(byron_genesis) {
         Ok(byron) => {
-            println!("{:?}", byron);
+            debug!("{:?}", byron);
             match read_shelley_genesis(shelley_genesis) {
                 Ok(shelley) => {
-                    println!("{:?}", shelley);
+                    debug!("{:?}", shelley);
                     match calculate_ledger_state_sigma_and_d(ledger_state, ledger_set, pool_id) {
                         Ok((sigma, decentralization_param)) => {
-                            println!("sigma: {:?}", sigma);
-                            println!("decentralization_param: {:?}", decentralization_param);
+                            debug!("sigma: {:?}", sigma);
+                            debug!("decentralization_param: {:?}", decentralization_param);
                             let tip_slot_number = get_tip_slot_number(&db).unwrap();
-                            println!("tip_slot_number: {}", tip_slot_number);
+                            debug!("tip_slot_number: {}", tip_slot_number);
                             // pretend we're on a different slot number if we want to calculate past or future epochs.
                             let additional_slots: i64 = match ledger_set {
                                 LedgerSet::Mark => { shelley.epoch_length }
@@ -104,14 +115,29 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                             };
                             let first_slot_of_epoch = get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots);
                             let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
-                            println!("first_slot_of_epoch: {}", first_slot_of_epoch);
-                            println!("first_slot_of_prev_epoch: {}", first_slot_of_prev_epoch);
+                            debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
+                            debug!("first_slot_of_prev_epoch: {}", first_slot_of_prev_epoch);
                             let stability_window = ((3 * byron.protocol_consts.k) as f64 / shelley.active_slots_coeff).ceil() as i64;
                             let stability_window_start = first_slot_of_epoch - stability_window;
-                            println!("stability_window: {}", stability_window);
-                            println!("stability_window_start: {}", stability_window_start);
-                            let eta_v = get_eta_v_before_slot(&db, stability_window_start).unwrap();
-                            println!("eta_v: {}", eta_v);
+                            debug!("stability_window: {}", stability_window);
+                            debug!("stability_window_start: {}", stability_window_start);
+                            match get_eta_v_before_slot(&db, stability_window_start) {
+                                Ok(nc) => {
+                                    debug!("nc: {}", nc);
+                                    match get_prev_hash_before_slot(&db, first_slot_of_prev_epoch) {
+                                        Ok(nh) => {
+                                            debug!("nh: {}", nh);
+                                            let mut nc_nh = String::new();
+                                            nc_nh.push_str(&*nc);
+                                            nc_nh.push_str(&*nh);
+                                            let epoch_nonce = Params::new().hash_length(32).to_state().update(&*hex::decode(nc_nh).unwrap()).finalize().as_bytes().to_owned();
+                                            debug!("epoch_nonce: {}", hex::encode(&epoch_nonce))
+                                        }
+                                        Err(error) => { handle_error(error) }
+                                    }
+                                }
+                                Err(error) => { handle_error(error) }
+                            };
                         }
                         Err(error) => { handle_error(error) }
                     }
@@ -124,7 +150,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
 
     match db.close() {
         Err(error) => {
-            println!("db close error: {}", error.1);
+            handle_error(format!("db close error: {}", error.1));
         }
         _ => {}
     }

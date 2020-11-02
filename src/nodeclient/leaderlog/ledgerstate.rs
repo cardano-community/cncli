@@ -3,6 +3,7 @@ use std::fs::File;
 use std::io::{BufReader, Error};
 use std::path::PathBuf;
 
+use log::debug;
 use rug::Rational;
 use serde::Deserialize;
 
@@ -145,15 +146,15 @@ pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_
     Ok((
         match ledger_set {
             LedgerSet::Mark => {
-                println!("Mark");
+                debug!("Mark");
                 calculate_sigma(ledger.es_snapshots.stake_mark, pool_id)
             }
             LedgerSet::Set => {
-                println!("Set");
+                debug!("Set");
                 calculate_sigma(ledger.es_snapshots.stake_set, pool_id)
             }
             LedgerSet::Go => {
-                println!("Go");
+                debug!("Go");
                 calculate_sigma(ledger.es_snapshots.stake_go, pool_id)
             }
         },
