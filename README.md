@@ -2,8 +2,40 @@
 A community-based cardano-node CLI tool
 
 ## Building
+#### Prepare RUST environment
+```shell script
+$ mkdir $HOME/.cargo && mkdir $HOME/.cargo/bin
+$ chown -R $USER $HOME/.cargo
+$ touch $HOME/.profile
+$ chown $USER $HOME/.profile
+```
+#### Install rustup - proceed with default install (option 1)
+```shell script
+$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+
+# To configure your current shell run:
+$ source $HOME/.cargo/env
+
+$ rustup install stable
+$ rustup default stable
+$ rustup update  
+```
+#### Install dependencies and build cncli
 ```shell script
 $ sudo apt-get install libsqlite3-dev
+$ git clone https://github.com/AndrewWestberg/cncli
+$ cd cncli
+$ git checkout <latest_tag_name>
+$ cargo install --path . --force      
+$ cncli -V
+```
+
+## Updating cncli from earlier versions
+```shell script
+$ rustup update
+$ cd cncli
+$ git fetch --all --prune
+$ git checkout <latest_tag_name>
 $ cargo install --path . --force
 ```
 

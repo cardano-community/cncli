@@ -20,9 +20,9 @@ pub mod nodeclient {
         type Err = ParseError;
         fn from_str(ledger_set: &str) -> Result<Self, Self::Err> {
             match ledger_set {
-                "mark" => Ok(LedgerSet::Mark),
-                "set" => Ok(LedgerSet::Set),
-                "go" => Ok(LedgerSet::Go),
+                "next" => Ok(LedgerSet::Mark),
+                "current" => Ok(LedgerSet::Set),
+                "prev" => Ok(LedgerSet::Go),
                 _ => Ok(LedgerSet::Set)
             }
         }
@@ -63,12 +63,10 @@ pub mod nodeclient {
             shelley_genesis: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "ledger state json file")]
             ledger_state: std::path::PathBuf,
-            #[structopt(long, default_value = "set", help = "Which ledger data to use. mark - future epoch, set - current epoch, go - past epoch")]
+            #[structopt(long, default_value = "current", help = "Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch")]
             ledger_set: LedgerSet,
             #[structopt(long, help = "lower-case hex pool id")]
             pool_id: String,
-            #[structopt(long, help = "epoch to calculate")]
-            epoch: u64,
         },
     }
 
@@ -84,8 +82,8 @@ pub mod nodeclient {
                 info!("Starting NodeClient...");
                 protocols::mux_protocol::sync(db, host, *port, *network_magic);
             }
-            Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref epoch } => {
-                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, epoch);
+            Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id } => {
+                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id);
             }
         }
     }
