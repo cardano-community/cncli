@@ -14,6 +14,7 @@ use crate::nodeclient::protocols::chainsync_protocol::msg_roll_forward::{MsgRoll
 mod msg_roll_forward;
 mod msg_roll_backward;
 
+#[derive(Debug)]
 pub enum State {
     Idle,
     Intersect,
@@ -253,6 +254,10 @@ impl Protocol for ChainSyncProtocol {
             State::MustReply => { Agency::Server }
             State::Done => { Agency::None }
         };
+    }
+
+    fn get_state(&self) -> String {
+        format!("{:?}", self.state)
     }
 
     fn send_data(&mut self) -> Option<Vec<u8>> {

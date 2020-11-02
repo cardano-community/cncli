@@ -4,6 +4,7 @@ use serde_cbor::{de, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
 
+#[derive(Debug)]
 pub enum State {
     Idle,
     TxIdsBlocking,
@@ -13,7 +14,7 @@ pub enum State {
 }
 
 pub struct TxSubmissionProtocol {
-    state: State,
+    pub(crate) state: State,
     pub(crate) result: Option<Result<String, String>>,
 }
 
@@ -52,6 +53,10 @@ impl Protocol for TxSubmissionProtocol {
             State::TxIdsNonBlocking => { Agency::Client }
             State::Done => { Agency::None }
         };
+    }
+
+    fn get_state(&self) -> String {
+        format!("{:?}", self.state)
     }
 
     fn send_data(&mut self) -> Option<Vec<u8>> {

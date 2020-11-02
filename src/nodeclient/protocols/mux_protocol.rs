@@ -38,10 +38,15 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                     let socket_addr: SocketAddr = into_iter.nth(0).unwrap();
                     match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(1)) {
                         Ok(mut stream) => {
+                            let mut last_data_timestamp = Instant::now();
                             loop {
                                 // Try sending some data
                                 match mux_send_data(&start_time, &mut protocols, &mut stream) {
-                                    Ok(_) => {}
+                                    Ok(did_send_data) => {
+                                        if did_send_data {
+                                            last_data_timestamp = Instant::now();
+                                        }
+                                    }
                                     Err(e) => {
                                         error!("mux_send_data error: {}", e);
                                         break;
@@ -57,7 +62,11 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                 if should_read_from_server {
                                     // try receiving some data
                                     match mux_receive_data(&mut protocols, &mut stream) {
-                                        Ok(_) => {}
+                                        Ok(did_receive_data) => {
+                                            if did_receive_data {
+                                                last_data_timestamp = Instant::now();
+                                            }
+                                        }
                                         Err(e) => {
                                             error!("mux_receive_data error: {}", e);
                                             break;
@@ -71,6 +80,13 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                 if protocols.is_empty() {
                                     warn!("No more active protocols, exiting...");
                                     return;
+                                }
+
+                                if last_data_timestamp.elapsed() > Duration::from_secs(60) {
+                                    for protocol in protocols.iter() {
+                                        error!("state: {}", protocol.get_state());
+                                    }
+                                    panic!("No communication for over 1 minute from server!");
                                 }
                             }
                         }
@@ -92,7 +108,8 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
     }
 }
 
-fn mux_send_data(start_time: &Instant, protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -> Result<(), Error> {
+fn mux_send_data(start_time: &Instant, protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -> Result<bool, Error> {
+    let mut did_send_data = false;
     for protocol in protocols.iter_mut() {
         match protocol.send_data() {
             Some(send_payload) => {
@@ -103,16 +120,18 @@ fn mux_send_data(start_time: &Instant, protocols: &mut Vec<MiniProtocol>, stream
                 message.write(&send_payload[..]).unwrap();
                 // debug!("sending: {}", hex::encode(&message));
                 stream.write(&message)?;
+                did_send_data = true;
                 break;
             }
             None => {}
         }
     }
 
-    Ok(())
+    Ok(did_send_data)
 }
 
-fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -> Result<(), Error> {
+fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -> Result<bool, Error> {
+    let mut did_receive_data = false;
     let mut message_header = [0u8; 8]; // read 8 bytes to start with
     let size = stream.peek(&mut message_header)?;
     if size == 8 {
@@ -125,9 +144,13 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
         // println!("payload_length: {:x}", payload_length);
         let mut payload = vec![0u8; payload_length];
 
+        let timeout_check = Instant::now();
         loop {
             let size = stream.peek(&mut payload)?;
             if size != payload_length {
+                if timeout_check.elapsed() > Duration::from_secs(60) {
+                    panic!("Waiting for payload_length: {}, but available is: {}", payload_length, size);
+                }
                 continue;
             }
             stream.read_exact(&mut payload)?;
@@ -136,6 +159,7 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
                 if protocol_id == (protocol.protocol_id() | 0x8000u16) {
                     // println!("receive_data: {}", hex::encode(&payload));
                     protocol.receive_data(payload);
+                    did_receive_data = true;
                     break;
                 }
             }
@@ -144,7 +168,7 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
         }
     }
 
-    Ok(())
+    Ok(did_receive_data)
 }
 
 fn mux_add_remove_protocols(db: &PathBuf, network_magic: u32, protocols: &mut Vec<MiniProtocol>) {
@@ -163,7 +187,7 @@ fn mux_add_remove_protocols(db: &PathBuf, network_magic: u32, protocols: &mut Ve
                                 protocols_to_add.push(
                                     MiniProtocol::TxSubmission(TxSubmissionProtocol::default())
                                 );
-                                let mut chain_sync_protocol = ChainSyncProtocol{
+                                let mut chain_sync_protocol = ChainSyncProtocol {
                                     network_magic,
                                     ..Default::default()
                                 };

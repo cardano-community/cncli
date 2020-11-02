@@ -8,6 +8,7 @@ use serde_cbor::{de, ser, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
 
+#[derive(Debug)]
 pub enum State {
     Propose,
     Confirm,
@@ -78,6 +79,10 @@ impl Protocol for HandshakeProtocol {
             State::Confirm => { Agency::Server }
             State::Done => { Agency::None }
         };
+    }
+
+    fn get_state(&self) -> String {
+        format!("{:?}", self.state)
     }
 
     fn send_data(&mut self) -> Option<Vec<u8>> {

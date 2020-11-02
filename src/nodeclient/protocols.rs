@@ -26,6 +26,9 @@ pub trait Protocol {
     // Tells us what agency state the protocol is in
     fn get_agency(&self) -> Agency;
 
+    // Printable version of the state for the Protocol
+    fn get_state(&self) -> String;
+
     // Fetch the next piece of data this protocol wants to send, or None if the client doesn't
     // have agency.
     fn send_data(&mut self) -> Option<Vec<u8>>;
@@ -54,6 +57,14 @@ impl Protocol for MiniProtocol {
             MiniProtocol::Handshake(handshake_protocol) => { handshake_protocol.get_agency() }
             MiniProtocol::TxSubmission(tx_submission_protocol) => { tx_submission_protocol.get_agency() }
             MiniProtocol::ChainSync(chainsync_protocol) => { chainsync_protocol.get_agency() }
+        }
+    }
+
+    fn get_state(&self) -> String {
+        match self {
+            MiniProtocol::Handshake(handshake_protocol) => { handshake_protocol.get_state() }
+            MiniProtocol::TxSubmission(tx_submission_protocol) => { tx_submission_protocol.get_state() }
+            MiniProtocol::ChainSync(chainsync_protocol) => { chainsync_protocol.get_state() }
         }
     }
 
