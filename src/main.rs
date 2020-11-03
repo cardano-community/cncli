@@ -1,8 +1,10 @@
+extern crate libc;
 use std::env::{set_var, var};
 
 use structopt::StructOpt;
 
 use cncli::nodeclient::{self, Command};
+
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "cncli", about = "A community-built cardano-node CLI")]

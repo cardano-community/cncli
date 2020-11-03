@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use log::{debug, error, info, warn};
+use net2::TcpStreamExt;
 
 use crate::nodeclient::protocols::{Agency, handshake_protocol, MiniProtocol, Protocol};
 use crate::nodeclient::protocols::chainsync_protocol::ChainSyncProtocol;
@@ -38,6 +39,8 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                     let socket_addr: SocketAddr = into_iter.nth(0).unwrap();
                     match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(1)) {
                         Ok(mut stream) => {
+                            stream.set_nodelay(true).unwrap();
+                            stream.set_keepalive_ms(Some(10_000u32)).unwrap();
                             let mut last_data_timestamp = Instant::now();
                             loop {
                                 // Try sending some data

@@ -67,6 +67,8 @@ pub mod nodeclient {
             ledger_set: LedgerSet,
             #[structopt(long, help = "lower-case hex pool id")]
             pool_id: String,
+            #[structopt(parse(from_os_str), long, help = "pool's vrf.skey file")]
+            pool_vrf_skey: std::path::PathBuf,
         },
     }
 
@@ -82,8 +84,8 @@ pub mod nodeclient {
                 info!("Starting NodeClient...");
                 protocols::mux_protocol::sync(db, host, *port, *network_magic);
             }
-            Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id } => {
-                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id);
+            Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey } => {
+                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey);
             }
         }
     }
