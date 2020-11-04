@@ -11,7 +11,7 @@ use rug::{Integer, Rational};
 use rug::integer::Order;
 use rug::ops::Pow;
 use rusqlite::{Connection, NO_PARAMS};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde::export::fmt::Display;
 use serde_aux::prelude::deserialize_number_from_string;
 
@@ -61,6 +61,26 @@ struct VrfSkey {
     key: Vec<u8>
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LeaderLog {
+    status: String,
+    epoch: i64,
+    epoch_nonce: String,
+    pool_id: String,
+    sigma: f64,
+    d: f64,
+    assigned_slots: Vec<Slot>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Slot {
+    slot: u64,
+    slot_in_epoch: u64,
+    at: String,
+}
+
 fn read_byron_genesis(byron_genesis: &PathBuf) -> Result<ByronGenesis, Error> {
     let buf = BufReader::new(File::open(byron_genesis)?);
     Ok(serde_json::from_reader(buf)?)
@@ -99,7 +119,7 @@ fn get_prev_hash_before_slot(db: &Connection, slot_number: i64) -> Result<String
 }
 
 
-fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, current_slot: i64) -> i64 {
+fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, current_slot: i64) -> (i64, i64) {
     let shelley_transition_epoch: i64 = if shelley.network_magic == 764824073 {
         // mainnet
         208
@@ -111,7 +131,10 @@ fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, curre
     let byron_slots = byron_epoch_length * shelley_transition_epoch;
     let shelley_slots = current_slot - byron_slots;
     let shelley_slot_in_epoch = shelley_slots % shelley.epoch_length;
-    current_slot - shelley_slot_in_epoch
+    let first_slot_of_epoch = current_slot - shelley_slot_in_epoch;
+    let epoch = (shelley_slots / shelley.epoch_length) + shelley_transition_epoch;
+
+    (epoch, first_slot_of_epoch)
 }
 
 fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &I30F34) -> bool {
@@ -224,7 +247,8 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                         LedgerSet::Set => { 0 }
                                         LedgerSet::Go => { -shelley.epoch_length }
                                     };
-                                    let first_slot_of_epoch = get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots);
+                                    let (epoch, first_slot_of_epoch) = get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots);
+                                    debug!("epoch: {}", epoch);
                                     let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
                                     debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
                                     debug!("first_slot_of_prev_epoch: {}", first_slot_of_prev_epoch);
@@ -244,6 +268,16 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                     let epoch_nonce = Params::new().hash_length(32).to_state().update(&*hex::decode(nc_nh).unwrap()).finalize().as_bytes().to_owned();
                                                     debug!("epoch_nonce: {}", hex::encode(&epoch_nonce));
 
+                                                    let leader_log = LeaderLog {
+                                                        status: "ok".to_string(),
+                                                        epoch,
+                                                        epoch_nonce: hex::encode(&epoch_nonce),
+                                                        pool_id: pool_id.clone(),
+                                                        sigma: sigma.to_f64(),
+                                                        d: decentralization_param.to_num(),
+                                                        assigned_slots: vec![],
+                                                    };
+
                                                     for slot_in_epoch in 0..shelley.epoch_length {
                                                         let slot = first_slot_of_epoch + slot_in_epoch;
                                                         if is_overlay_slot(&first_slot_of_epoch, &slot, &decentralization_param) {
@@ -259,6 +293,12 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                             }
                                                             Err(error) => { handle_error(error) }
                                                         }
+                                                    }
+                                                    match serde_json::to_string_pretty(&leader_log) {
+                                                        Ok(leader_log_json) => {
+                                                            println!("{}", leader_log_json);
+                                                        }
+                                                        Err(error) => { handle_error(error) }
                                                     }
                                                 }
                                                 Err(error) => { handle_error(error) }
