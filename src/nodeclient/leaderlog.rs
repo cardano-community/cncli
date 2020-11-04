@@ -5,8 +5,9 @@ use std::path::PathBuf;
 
 use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
+use chrono::{Duration, Local, NaiveDateTime, TimeZone};
 use fixed::types::I30F34;
-use log::{debug, info};
+use log::debug;
 use rug::{Integer, Rational};
 use rug::integer::Order;
 use rug::ops::Pow;
@@ -27,7 +28,7 @@ mod deserialize;
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ByronGenesis {
-    start_time: u64,
+    start_time: i64,
     protocol_consts: ProtocolConsts,
     block_version_data: BlockVersionData,
 }
@@ -42,7 +43,7 @@ struct ProtocolConsts {
 #[serde(rename_all = "camelCase")]
 struct BlockVersionData {
     #[serde(deserialize_with = "deserialize_number_from_string")]
-    slot_duration: u64
+    slot_duration: i64
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,8 +77,8 @@ struct LeaderLog {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Slot {
-    slot: u64,
-    slot_in_epoch: u64,
+    slot: i64,
+    slot_in_epoch: i64,
     at: String,
 }
 
@@ -135,6 +136,27 @@ fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, curre
     let epoch = (shelley_slots / shelley.epoch_length) + shelley_transition_epoch;
 
     (epoch, first_slot_of_epoch)
+}
+
+fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64) -> String {
+    let shelley_transition_epoch: i64 = if shelley.network_magic == 764824073 {
+        // mainnet
+        208
+    } else {
+        // testnet
+        74
+    };
+
+    let network_start_time = NaiveDateTime::from_timestamp(byron.start_time, 0);
+    let byron_epoch_length = 10 * byron.protocol_consts.k;
+    let byron_slots = byron_epoch_length * shelley_transition_epoch;
+    let shelley_slots = slot - byron_slots;
+
+    let byron_secs = (byron.block_version_data.slot_duration * byron_slots) / 1000;
+    let shelley_secs = shelley_slots * shelley.slot_length;
+
+    let slot_time = network_start_time + Duration::seconds(byron_secs) + Duration::seconds(shelley_secs);
+    Local.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
 fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &I30F34) -> bool {
@@ -268,7 +290,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                     let epoch_nonce = Params::new().hash_length(32).to_state().update(&*hex::decode(nc_nh).unwrap()).finalize().as_bytes().to_owned();
                                                     debug!("epoch_nonce: {}", hex::encode(&epoch_nonce));
 
-                                                    let leader_log = LeaderLog {
+                                                    let mut leader_log = LeaderLog {
                                                         status: "ok".to_string(),
                                                         epoch,
                                                         epoch_nonce: hex::encode(&epoch_nonce),
@@ -288,7 +310,13 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                         match is_slot_leader(slot, &shelley.active_slots_coeff, &sigma, &epoch_nonce, &pool_vrf_skey.key) {
                                                             Ok(is_leader) => {
                                                                 if is_leader {
-                                                                    info!("slotleader: {}", slot);
+                                                                    leader_log.assigned_slots.push(
+                                                                        Slot {
+                                                                            slot,
+                                                                            slot_in_epoch: slot - first_slot_of_epoch,
+                                                                            at: slot_to_timestamp(&byron, &shelley, slot),
+                                                                        }
+                                                                    );
                                                                 }
                                                             }
                                                             Err(error) => { handle_error(error) }

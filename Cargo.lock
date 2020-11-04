@@ -122,6 +122,7 @@ version = "0.1.0"
 dependencies = [
  "blake2b_simd",
  "byteorder",
+ "chrono",
  "env_logger 0.8.1",
  "fixed",
  "hex",

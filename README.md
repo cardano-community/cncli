@@ -203,3 +203,64 @@ $ cncli validate --hash ffffff
  "errorMessage": "Query returned no rows"
 }
 ```
+
+### Leaderlog Command
+This command calculates a stakepool's expected slot list. "prev" and "current" logs are available as long as you have a sync'd database. "next" logs are only available 1.5 days before the end of the epoch.
+#### Show Help
+```shell script
+$ cncli leaderlog --help
+cncli-leaderlog 0.1.0
+
+USAGE:
+    cncli leaderlog [OPTIONS] --byron-genesis <byron-genesis> --ledger-state <ledger-state> --pool-id <pool-id> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+        --byron-genesis <byron-genesis>        byron genesis json file
+    -d, --db <db>                              sqlite database file [default: ./cncli.db]
+        --ledger-set <ledger-set>              Which ledger data to use. prev - previous epoch, current - current epoch,
+                                               next - future epoch [default: current]
+        --ledger-state <ledger-state>          ledger state json file
+        --pool-id <pool-id>                    lower-case hex pool id
+        --pool-vrf-skey <pool-vrf-skey>        pool's vrf.skey file
+        --shelley-genesis <shelley-genesis>    shelley genesis json file
+```
+
+#### Calculate leaderlog
+```shell script
+$ cncli leaderlog --pool-id 00beef284975ef87856c1343f6bf50172253177fdebc756524d43fc1 --pool-vrf-skey ./bcsh2.vrf.skey --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json --ledger-state /tmp/ledger-state-227.json --ledger-set current
+{
+  "status": "ok",
+  "epoch": 227,
+  "epochNonce": "0e534dd41bb80bfff4a16d038eb52280e9beac7545cc32c9bfc253a6d92010d1",
+  "poolId": "00beef284975ef87856c1343f6bf50172253177fdebc756524d43fc1",
+  "sigma": 0.0028306163817569175,
+  "d": 0.5,
+  "assignedSlots": [
+    ...
+    {
+      "slot": 13083245,
+      "slotInEpoch": 382445,
+      "at": "2020-11-05T23:58:56-08:00"
+    },
+    {
+      "slot": 13106185,
+      "slotInEpoch": 405385,
+      "at": "2020-11-06T06:21:16-08:00"
+    }
+    ...
+  ]
+}
+```
+
+#### Calculate leaderlog failure (too soon for "next" logs, or un-sync'd database)
+```shell script
+$ cncli leaderlog --pool-id 00beef284975ef87856c1343f6bf50172253177fdebc756524d43fc1 --pool-vrf-skey ./bcsh2.vrf.skey --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json --ledger-state /tmp/ledger-state-227.json --ledger-set next
+{
+ "status": "error",
+ "errorMessage": "Query returned no rows"
+}
+```
