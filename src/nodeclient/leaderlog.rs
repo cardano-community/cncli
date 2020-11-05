@@ -7,7 +7,7 @@ use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
 use chrono::{Duration, Local, NaiveDateTime, TimeZone};
 use fixed::types::I30F34;
-use log::debug;
+use log::{debug,trace};
 use rug::{Integer, Rational};
 use rug::integer::Order;
 use rug::ops::Pow;
@@ -105,7 +105,7 @@ fn get_tip_slot_number(db: &Connection) -> Result<i64, rusqlite::Error> {
 
 fn get_eta_v_before_slot(db: &Connection, slot_number: i64) -> Result<String, rusqlite::Error> {
     Ok(
-        db.query_row("SELECT eta_v FROM chain WHERE slot_number < ?1 AND ?1 - slot_number < 120 ORDER BY slot_number DESC LIMIT 1", &[&slot_number], |row| {
+        db.query_row("SELECT eta_v FROM chain WHERE orphaned = 0 AND slot_number < ?1 AND ?1 - slot_number < 120 ORDER BY slot_number DESC LIMIT 1", &[&slot_number], |row| {
             Ok(row.get(0)?)
         })?
     )
@@ -113,7 +113,7 @@ fn get_eta_v_before_slot(db: &Connection, slot_number: i64) -> Result<String, ru
 
 fn get_prev_hash_before_slot(db: &Connection, slot_number: i64) -> Result<String, rusqlite::Error> {
     Ok(
-        db.query_row("SELECT prev_hash FROM chain WHERE slot_number < ?1 AND ?1 - slot_number < 120 ORDER BY slot_number DESC LIMIT 1", &[&slot_number], |row| {
+        db.query_row("SELECT prev_hash FROM chain WHERE orphaned = 0 AND slot_number < ?1 AND ?1 - slot_number < 120 ORDER BY slot_number DESC LIMIT 1", &[&slot_number], |row| {
             Ok(row.get(0)?)
         })?
     )
@@ -172,11 +172,11 @@ fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &I30F34) ->
 const UC_NONCE: [u8; 32] = [0x12, 0xdd, 0x0a, 0x6a, 0x7d, 0x0e, 0x22, 0x2a, 0x97, 0x92, 0x6d, 0xa0, 0x3a, 0xdb, 0x5a, 0x77, 0x68, 0xd3, 0x1c, 0xc7, 0xc5, 0xc2, 0xbd, 0x68, 0x28, 0xe1, 0x4a, 0x7d, 0x25, 0xfa, 0x3a, 0x60];
 
 fn mk_seed(slot: i64, eta0: &Vec<u8>) -> Vec<u8> {
-    debug!("mk_seed() start slot {}", slot);
+    trace!("mk_seed() start slot {}", slot);
     let mut concat = [0u8; 8 + 32];
     NetworkEndian::write_i64(&mut concat, slot);
     concat[8..].copy_from_slice(eta0);
-    debug!("concat: {}", hex::encode(&concat));
+    trace!("concat: {}", hex::encode(&concat));
 
     let slot_to_seed = Params::new().hash_length(32).to_state().update(&concat).finalize().as_bytes().to_owned();
 
@@ -227,17 +227,17 @@ fn taylor_exp_cmp(bound_x: i32, cmp: I30F34, x: I30F34) -> TaylorCmp {
 // @param pool_vrf_skey The vrf signing key for the pool
 fn is_slot_leader(slot: i64, f: &f64, sigma: &Rational, eta0: &Vec<u8>, pool_vrf_skey: &Vec<u8>) -> Result<bool, String> {
     let seed = mk_seed(slot, eta0);
-    debug!("seed: {}", hex::encode(&seed));
+    trace!("seed: {}", hex::encode(&seed));
     let cert_nat = vrf_eval_certified(seed, pool_vrf_skey)?;
-    debug!("cert_nat: {}", &cert_nat);
+    trace!("cert_nat: {}", &cert_nat);
     let cert_nat_max = Integer::from(2).pow(512);
     let denominator = &cert_nat_max - cert_nat;
     let recip_q: I30F34 = I30F34::from_num(Rational::from((cert_nat_max, denominator)).to_f64());
-    debug!("recip_q: {}", &recip_q);
+    trace!("recip_q: {}", &recip_q);
     let c = (1f64 - f).ln();
-    debug!("c: {}", &c);
+    trace!("c: {}", &c);
     let x: I30F34 = I30F34::from_num(-sigma.to_f64() * c);
-    debug!("x: {}", &x);
+    trace!("x: {}", &x);
 
     match taylor_exp_cmp(3, recip_q, x) {
         TaylorCmp::Above => { Ok(false) }
