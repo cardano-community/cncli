@@ -77,6 +77,7 @@ struct LeaderLog {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Slot {
+    no: i64,
     slot: i64,
     slot_in_epoch: i64,
     at: String,
@@ -247,6 +248,10 @@ fn is_slot_leader(slot: i64, f: &f64, sigma: &Rational, eta0: &Vec<u8>, pool_vrf
 }
 
 pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, shelley_genesis: &PathBuf, ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String, pool_vrf_skey_path: &PathBuf) {
+    if !db_path.exists() {
+        handle_error("database not found!");
+        return;
+    }
     let db = Connection::open(db_path).unwrap();
 
     match read_byron_genesis(byron_genesis) {
@@ -300,6 +305,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                         assigned_slots: vec![],
                                                     };
 
+                                                    let mut no = 0i64;
                                                     for slot_in_epoch in 0..shelley.epoch_length {
                                                         let slot = first_slot_of_epoch + slot_in_epoch;
                                                         if is_overlay_slot(&first_slot_of_epoch, &slot, &decentralization_param) {
@@ -310,8 +316,10 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                         match is_slot_leader(slot, &shelley.active_slots_coeff, &sigma, &epoch_nonce, &pool_vrf_skey.key) {
                                                             Ok(is_leader) => {
                                                                 if is_leader {
+                                                                    no += 1;
                                                                     leader_log.assigned_slots.push(
                                                                         Slot {
+                                                                            no,
                                                                             slot,
                                                                             slot_in_epoch: slot - first_slot_of_epoch,
                                                                             at: slot_to_timestamp(&byron, &shelley, slot),
