@@ -151,7 +151,7 @@ $ cncli sync --host 127.0.0.1 --port 6000
 ```
 
 ### Validate Command
-This command validates that a block hash or partial block hash is on-chain.
+This command validates that a block hash or partial block hash is on-chain. You must run `sync` command separately to build up the database and have it sync to 100%.
 #### Show Help
 ```shell script
 $ cncli validate --help
@@ -206,6 +206,15 @@ $ cncli validate --hash ffffff
 
 ### Leaderlog Command
 This command calculates a stakepool's expected slot list. "prev" and "current" logs are available as long as you have a sync'd database. "next" logs are only available 1.5 days before the end of the epoch.
+
+This command requires that you:
+
+1.) use cardano-cli to dump a fresh ledger-state.json file 
+```shell script
+$ cardano-cli shelley query ledger-state --cardano-mode --mainnet > /tmp/ledger-state-227.json
+```
+2.) Use the `sync` command above to build a 100% sync'd cncli.db database file.
+
 #### Show Help
 ```shell script
 $ cncli leaderlog --help

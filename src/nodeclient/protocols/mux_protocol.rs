@@ -89,7 +89,8 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                     for protocol in protocols.iter() {
                                         error!("state: {}", protocol.get_state());
                                     }
-                                    panic!("No communication for over 1 minute from server!");
+                                    error!("No communication for over 1 minute from server! restarting connection...");
+                                    break;
                                 }
                             }
                         }
