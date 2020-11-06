@@ -7,7 +7,7 @@ use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
 use chrono::{Duration, Local, NaiveDateTime, TimeZone};
 use fixed::types::I30F34;
-use log::{debug,trace};
+use log::{debug, trace};
 use rug::{Integer, Rational};
 use rug::integer::Order;
 use rug::ops::Pow;
@@ -296,7 +296,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                         epoch_nonce: hex::encode(&epoch_nonce),
                                                         pool_id: pool_id.clone(),
                                                         sigma: sigma.to_f64(),
-                                                        d: decentralization_param.to_num(),
+                                                        d: decentralization_param.to_string().parse().unwrap(),
                                                         assigned_slots: vec![],
                                                     };
 
