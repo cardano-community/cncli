@@ -118,6 +118,25 @@ impl ChainSyncProtocol {
         if self.last_insert_time.elapsed() > ChainSyncProtocol::FIVE_SECS {
             let db = self.db.as_mut().unwrap();
 
+            // get the last block eta_v (nonce) in the db
+            let mut prev_eta_v =
+                {
+                    hex::decode(
+                        match db.query_row("SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0", NO_PARAMS, |row| row.get(0)) {
+                            Ok(eta_v) => { eta_v }
+                            Err(_) => {
+                                if self.network_magic == 764824073 {
+                                    // mainnet genesis hash
+                                    String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
+                                } else {
+                                    // assume testnet genesis hash
+                                    String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                                }
+                            }
+                        }
+                    ).unwrap()
+                };
+
             let tx = db.transaction()?;
             { // scope for db transaction
                 let mut orphan_stmt = tx.prepare("UPDATE chain SET orphaned = 1 WHERE slot_number >= ?1")?;
@@ -164,25 +183,27 @@ impl ChainSyncProtocol {
 
                 for block in self.pending_blocks.drain(..) {
                     // Set any necessary blocks as orphans
-                    orphan_stmt.execute(&[&block.slot_number])?;
+                    let orphan_num = orphan_stmt.execute(&[&block.slot_number])?;
 
-                    // get the last block eta_v (nonce) in the db
-                    let mut prev_eta_v = {
-                        hex::decode(
-                            match tx.query_row("SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0", NO_PARAMS, |row| row.get(0)) {
-                                Ok(eta_v) => { eta_v }
-                                Err(_) => {
-                                    if self.network_magic == 764824073 {
-                                        // mainnet genesis hash
-                                        String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
-                                    } else {
-                                        // assume testnet genesis hash
-                                        String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                    if orphan_num > 0 {
+                        // get the last block eta_v (nonce) in the db
+                        prev_eta_v = {
+                            hex::decode(
+                                match tx.query_row("SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0", NO_PARAMS, |row| row.get(0)) {
+                                    Ok(eta_v) => { eta_v }
+                                    Err(_) => {
+                                        if self.network_magic == 764824073 {
+                                            // mainnet genesis hash
+                                            String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
+                                        } else {
+                                            // assume testnet genesis hash
+                                            String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                                        }
                                     }
                                 }
-                            }
-                        ).unwrap()
-                    };
+                            ).unwrap()
+                        };
+                    }
                     // blake2b hash of eta_vrf_0
                     let mut block_eta_v = Params::new().hash_length(32).to_state().update(&*block.eta_vrf_0).finalize().as_bytes().to_vec();
                     prev_eta_v.append(&mut block_eta_v);
