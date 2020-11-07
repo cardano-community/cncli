@@ -14,15 +14,22 @@ use crate::nodeclient::protocols::chainsync_protocol::ChainSyncProtocol;
 use crate::nodeclient::protocols::handshake_protocol::HandshakeProtocol;
 use crate::nodeclient::protocols::transaction_protocol::TxSubmissionProtocol;
 
+#[derive(PartialEq)]
+pub enum Cmd {
+    Ping,
+    Sync,
+    SendTip,
+}
+
 // Sync a cardano-node database
 //
 // Connect to cardano-node and run protocols depending on command type
-pub fn start(is_sync: bool, db: &std::path::PathBuf, host: &String, port: u16, network_magic: u32) {
+pub fn start(cmd: Cmd, db: &std::path::PathBuf, host: &String, port: u16, network_magic: u32) {
     let start_time = Instant::now();
 
     // continually retry connection
     loop {
-        if is_sync {
+        if cmd != Cmd::Ping {
             info!("Connecting to {}:{} ...", host, port);
         }
 
@@ -53,7 +60,7 @@ pub fn start(is_sync: bool, db: &std::path::PathBuf, host: &String, port: u16, n
                                         }
                                     }
                                     Err(e) => {
-                                        handle_error(is_sync, format!("mux_send_data error: {}", e), host, port);
+                                        handle_error(&cmd, format!("mux_send_data error: {}", e), host, port);
                                         break;
                                     }
                                 }
@@ -73,21 +80,22 @@ pub fn start(is_sync: bool, db: &std::path::PathBuf, host: &String, port: u16, n
                                             }
                                         }
                                         Err(e) => {
-                                            handle_error(is_sync, format!("mux_receive_data error: {}", e), host, port);
+                                            handle_error(&cmd, format!("mux_receive_data error: {}", e), host, port);
                                             break;
                                         }
                                     }
                                 }
 
                                 // Add and Remove protocols depending on status
-                                mux_add_remove_protocols(is_sync, db, network_magic, &mut protocols, host, port);
+                                mux_add_remove_protocols(&cmd, db, network_magic, &mut protocols, host, port);
 
                                 if protocols.is_empty() {
-                                    if is_sync {
-                                        warn!("No more active protocols, exiting...");
-                                    } else {
-                                        // for ping, we need to print the final times
-                                        ping_json_success(start_time.elapsed(), host, port);
+                                    match cmd {
+                                        Cmd::Ping => {
+                                            // for ping, we need to print the final output
+                                            ping_json_success(start_time.elapsed(), host, port);
+                                        }
+                                        _ => { warn!("No more active protocols, exiting..."); }
                                     }
                                     return;
                                 }
@@ -105,20 +113,20 @@ pub fn start(is_sync: bool, db: &std::path::PathBuf, host: &String, port: u16, n
                             match stream.shutdown(Shutdown::Both) {
                                 Ok(_) => {}
                                 Err(error) => {
-                                    handle_error(is_sync, format!("{}", error), host, port);
+                                    handle_error(&cmd, format!("{}", error), host, port);
                                 }
                             }
                         }
                         Err(e) => {
-                            handle_error(is_sync, format!("Failed to connect: {}", e), host, port);
+                            handle_error(&cmd, format!("Failed to connect: {}", e), host, port);
                         }
                     }
                 } else {
-                    handle_error(is_sync, format!("No IP addresses found!"), host, port);
+                    handle_error(&cmd, format!("No IP addresses found!"), host, port);
                 }
             }
             Err(error) => {
-                handle_error(is_sync, format!("{}", error), host, port);
+                handle_error(&cmd, format!("{}", error), host, port);
             }
         }
 
@@ -190,7 +198,7 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
     Ok(did_receive_data)
 }
 
-fn mux_add_remove_protocols(is_sync: bool, db: &PathBuf, network_magic: u32, protocols: &mut Vec<MiniProtocol>, host: &String, port: u16) {
+fn mux_add_remove_protocols(cmd: &Cmd, db: &PathBuf, network_magic: u32, protocols: &mut Vec<MiniProtocol>, host: &String, port: u16) {
     let mut protocols_to_add: Vec<MiniProtocol> = Vec::new();
     // Remove any protocols that have a result (are done)
     protocols.retain(|protocol| {
@@ -202,24 +210,28 @@ fn mux_add_remove_protocols(is_sync: bool, db: &PathBuf, network_magic: u32, pro
                             Ok(message) => {
                                 debug!("HandshakeProtocol Result: {}", message);
 
-                                if is_sync {
-                                    // handshake succeeded. Add other protocols to continue sync
-                                    protocols_to_add.push(
-                                        MiniProtocol::TxSubmission(TxSubmissionProtocol::default())
-                                    );
-                                    let mut chain_sync_protocol = ChainSyncProtocol {
-                                        network_magic,
-                                        ..Default::default()
-                                    };
-                                    chain_sync_protocol.init_database(db).expect("Error opening database!");
+                                match cmd {
+                                    Cmd::Ping => {}
+                                    Cmd::Sync => {
+                                        // handshake succeeded. Add other protocols to continue sync
+                                        protocols_to_add.push(
+                                            MiniProtocol::TxSubmission(TxSubmissionProtocol::default())
+                                        );
+                                        let mut chain_sync_protocol = ChainSyncProtocol {
+                                            network_magic,
+                                            ..Default::default()
+                                        };
+                                        chain_sync_protocol.init_database(db).expect("Error opening database!");
 
-                                    protocols_to_add.push(
-                                        MiniProtocol::ChainSync(chain_sync_protocol)
-                                    );
+                                        protocols_to_add.push(
+                                            MiniProtocol::ChainSync(chain_sync_protocol)
+                                        );
+                                    }
+                                    Cmd::SendTip => {}
                                 }
                             }
                             Err(error) => {
-                                handle_error(is_sync, format!("HandshakeProtocol Error: {}", error), host, port);
+                                handle_error(cmd, format!("HandshakeProtocol Error: {}", error), host, port);
                             }
                         }
                         false
@@ -274,11 +286,10 @@ fn ping_json_success(duration: Duration, host: &String, port: u16) {
     }}", host, port, duration.as_millis())
 }
 
-fn handle_error(is_sync: bool, message: String, host: &String, port: u16) {
-    if is_sync {
-        error!("{}", message);
-    } else {
-        ping_json_error(message, host, port);
+fn handle_error(cmd: &Cmd, message: String, host: &String, port: u16) {
+    match cmd {
+        Cmd::Ping => { ping_json_error(message, host, port); }
+        _ => { error!("{}", message); }
     }
 }
 

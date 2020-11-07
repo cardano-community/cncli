@@ -13,6 +13,12 @@ use crate::nodeclient::LedgerSet;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct Ledger2 {
+    nes_es: Ledger,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Ledger {
     es_prev_pp: ProtocolParams,
     es_pp: ProtocolParams,
@@ -144,8 +150,10 @@ fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> Rational {
 }
 
 pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<(Rational, I30F34), Error> {
-    let buf = BufReader::new(File::open(ledger_state)?);
-    let ledger: Ledger = serde_json::from_reader(buf)?;
+    let ledger: Ledger = match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(File::open(ledger_state)?)) {
+        Ok(ledger2) => { ledger2.nes_es }
+        Err(_) => { serde_json::from_reader(BufReader::new(File::open(ledger_state)?))? }
+    };
 
     Ok((
         match ledger_set {

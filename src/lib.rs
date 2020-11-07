@@ -6,6 +6,8 @@ pub mod nodeclient {
     use log::info;
     use structopt::StructOpt;
 
+    use crate::nodeclient::protocols::mux_protocol::Cmd;
+
     mod protocols;
     mod validate;
     mod leaderlog;
@@ -71,22 +73,29 @@ pub mod nodeclient {
             #[structopt(parse(from_os_str), long, help = "pool's vrf.skey file")]
             pool_vrf_skey: std::path::PathBuf,
         },
+        Sendtip {
+            #[structopt(parse(from_os_str), short, long, default_value = "./pooltool.json", help = "pooltool config file for sending tips")]
+            config: std::path::PathBuf,
+        },
     }
 
     pub fn start(cmd: Command) {
         match cmd {
             Command::Ping { ref host, ref port, ref network_magic } => {
-                protocols::mux_protocol::start(false, &PathBuf::from_str("/dev/null").unwrap(), host, *port, *network_magic);
+                protocols::mux_protocol::start(Cmd::Ping, &PathBuf::new(), host, *port, *network_magic);
             }
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash);
             }
             Command::Sync { ref db, ref host, ref port, ref network_magic } => {
                 info!("Starting NodeClient...");
-                protocols::mux_protocol::start(true, db, host, *port, *network_magic);
+                protocols::mux_protocol::start(Cmd::Sync, db, host, *port, *network_magic);
             }
             Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey } => {
                 leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey);
+            }
+            Command::Sendtip { ref config } => {
+                protocols::mux_protocol::start(Cmd::SendTip, config, &String::new(), 0, 0);
             }
         }
     }
