@@ -1,6 +1,7 @@
 use std::io::{Error, Read, Write};
 use std::net::{Shutdown, SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
+use std::process::exit;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 
@@ -8,21 +9,22 @@ use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
 use log::{debug, error, info, warn};
 use net2::TcpStreamExt;
 
-use crate::nodeclient::protocols::{Agency, handshake_protocol, MiniProtocol, Protocol};
+use crate::nodeclient::protocols::{Agency, MiniProtocol, Protocol};
 use crate::nodeclient::protocols::chainsync_protocol::ChainSyncProtocol;
 use crate::nodeclient::protocols::handshake_protocol::HandshakeProtocol;
 use crate::nodeclient::protocols::transaction_protocol::TxSubmissionProtocol;
 
 // Sync a cardano-node database
 //
-// Connect to cardano-node and run chain-sync protocol to sync block headers
-pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u32) {
-    //println!("SYNC db: {:?}, host: {:?}, port: {:?}, network_magic: {:?}", db, host, port, network_magic);
+// Connect to cardano-node and run protocols depending on command type
+pub fn start(is_sync: bool, db: &std::path::PathBuf, host: &String, port: u16, network_magic: u32) {
     let start_time = Instant::now();
 
     // continually retry connection
     loop {
-        info!("Connecting to {}:{} ...", host, port);
+        if is_sync {
+            info!("Connecting to {}:{} ...", host, port);
+        }
 
         let mut protocols: Vec<MiniProtocol> = vec![
             MiniProtocol::Handshake(
@@ -51,7 +53,7 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                         }
                                     }
                                     Err(e) => {
-                                        error!("mux_send_data error: {}", e);
+                                        handle_error(is_sync, format!("mux_send_data error: {}", e), host, port);
                                         break;
                                     }
                                 }
@@ -71,17 +73,22 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                             }
                                         }
                                         Err(e) => {
-                                            error!("mux_receive_data error: {}", e);
+                                            handle_error(is_sync, format!("mux_receive_data error: {}", e), host, port);
                                             break;
                                         }
                                     }
                                 }
 
                                 // Add and Remove protocols depending on status
-                                mux_add_remove_protocols(db, network_magic, &mut protocols);
+                                mux_add_remove_protocols(is_sync, db, network_magic, &mut protocols, host, port);
 
                                 if protocols.is_empty() {
-                                    warn!("No more active protocols, exiting...");
+                                    if is_sync {
+                                        warn!("No more active protocols, exiting...");
+                                    } else {
+                                        // for ping, we need to print the final times
+                                        ping_json_success(start_time.elapsed(), host, port);
+                                    }
                                     return;
                                 }
 
@@ -93,17 +100,25 @@ pub fn sync(db: &std::path::PathBuf, host: &String, port: u16, network_magic: u3
                                     break;
                                 }
                             }
+
+                            // shutdown stream and ignore errors
+                            match stream.shutdown(Shutdown::Both) {
+                                Ok(_) => {}
+                                Err(error) => {
+                                    handle_error(is_sync, format!("{}", error), host, port);
+                                }
+                            }
                         }
                         Err(e) => {
-                            error!("Failed to connect: {}", e);
+                            handle_error(is_sync, format!("Failed to connect: {}", e), host, port);
                         }
                     }
                 } else {
-                    error!("No IP addresses found!");
+                    handle_error(is_sync, format!("No IP addresses found!"), host, port);
                 }
             }
             Err(error) => {
-                error!("{}", error);
+                handle_error(is_sync, format!("{}", error), host, port);
             }
         }
 
@@ -175,7 +190,7 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
     Ok(did_receive_data)
 }
 
-fn mux_add_remove_protocols(db: &PathBuf, network_magic: u32, protocols: &mut Vec<MiniProtocol>) {
+fn mux_add_remove_protocols(is_sync: bool, db: &PathBuf, network_magic: u32, protocols: &mut Vec<MiniProtocol>, host: &String, port: u16) {
     let mut protocols_to_add: Vec<MiniProtocol> = Vec::new();
     // Remove any protocols that have a result (are done)
     protocols.retain(|protocol| {
@@ -187,22 +202,24 @@ fn mux_add_remove_protocols(db: &PathBuf, network_magic: u32, protocols: &mut Ve
                             Ok(message) => {
                                 debug!("HandshakeProtocol Result: {}", message);
 
-                                // handshake succeeded. Add other protocols
-                                protocols_to_add.push(
-                                    MiniProtocol::TxSubmission(TxSubmissionProtocol::default())
-                                );
-                                let mut chain_sync_protocol = ChainSyncProtocol {
-                                    network_magic,
-                                    ..Default::default()
-                                };
-                                chain_sync_protocol.init_database(db).expect("Error opening database!");
+                                if is_sync {
+                                    // handshake succeeded. Add other protocols to continue sync
+                                    protocols_to_add.push(
+                                        MiniProtocol::TxSubmission(TxSubmissionProtocol::default())
+                                    );
+                                    let mut chain_sync_protocol = ChainSyncProtocol {
+                                        network_magic,
+                                        ..Default::default()
+                                    };
+                                    chain_sync_protocol.init_database(db).expect("Error opening database!");
 
-                                protocols_to_add.push(
-                                    MiniProtocol::ChainSync(chain_sync_protocol)
-                                );
+                                    protocols_to_add.push(
+                                        MiniProtocol::ChainSync(chain_sync_protocol)
+                                    );
+                                }
                             }
                             Err(error) => {
-                                error!("HandshakeProtocol Error: {}", error);
+                                handle_error(is_sync, format!("HandshakeProtocol Error: {}", error), host, port);
                             }
                         }
                         false
@@ -248,44 +265,7 @@ fn mux_add_remove_protocols(db: &PathBuf, network_magic: u32, protocols: &mut Ve
     protocols.append(&mut protocols_to_add);
 }
 
-// Ping a remote cardano-node
-//
-// Ping connects to a remote cardano-node and runs the handshake protocol
-pub fn ping(host: &String, port: u16, network_magic: u32) {
-    let start_time = Instant::now();
-
-    match (host.as_str(), port).to_socket_addrs() {
-        Ok(mut into_iter) => {
-            if into_iter.len() > 0 {
-                let socket_addr: SocketAddr = into_iter.nth(0).unwrap();
-                match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(1)) {
-                    Ok(stream) => {
-                        match handshake_protocol::ping(&stream, timestamp(&start_time), network_magic) {
-                            Ok(_payload) => {
-                                stream.shutdown(Shutdown::Both).expect("shutdown call failed");
-                                print_json_success(start_time.elapsed(), host, port);
-                            }
-                            Err(message) => {
-                                stream.shutdown(Shutdown::Both).expect("shutdown call failed");
-                                print_json_error(message, host, port);
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        print_json_error(format!("Failed to connect: {}", e), host, port);
-                    }
-                }
-            } else {
-                print_json_error(String::from("No IP addresses found!"), host, port);
-            }
-        }
-        Err(error) => {
-            print_json_error(error.to_string(), host, port);
-        }
-    }
-}
-
-fn print_json_success(duration: Duration, host: &String, port: u16) {
+fn ping_json_success(duration: Duration, host: &String, port: u16) {
     println!("{{\n\
         \x20\"status\": \"ok\",\n\
         \x20\"host\": \"{}\",\n\
@@ -294,13 +274,23 @@ fn print_json_success(duration: Duration, host: &String, port: u16) {
     }}", host, port, duration.as_millis())
 }
 
-fn print_json_error(message: String, host: &String, port: u16) {
+fn handle_error(is_sync: bool, message: String, host: &String, port: u16) {
+    if is_sync {
+        error!("{}", message);
+    } else {
+        ping_json_error(message, host, port);
+    }
+}
+
+fn ping_json_error(message: String, host: &String, port: u16) {
     println!("{{\n\
         \x20\"status\": \"error\",\n\
         \x20\"host\": \"{}\",\n\
         \x20\"port\": {},\n\
         \x20\"errorMessage\": \"{}\"\n\
     }}", host, port, message);
+    // blow out of the process
+    exit(0);
 }
 
 // return microseconds from the monotonic clock dropping all bits above 32.

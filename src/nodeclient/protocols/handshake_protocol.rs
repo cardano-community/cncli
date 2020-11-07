@@ -1,9 +1,6 @@
 use std::collections::BTreeMap;
-use std::io::{Read, Write};
-use std::net::TcpStream;
 
-use byteorder::{ByteOrder, NetworkEndian, WriteBytesExt};
-use log::{debug, warn};
+use log::debug;
 use serde_cbor::{de, ser, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
@@ -98,7 +95,7 @@ impl Protocol for HandshakeProtocol {
                 None
             }
             State::Done => {
-                warn!("HandshakeProtocol::State::Done");
+                debug!("HandshakeProtocol::State::Done");
                 None
             }
         };
@@ -119,63 +116,7 @@ impl Protocol for HandshakeProtocol {
         } else {
             self.result = Some(Ok(hex::encode(data)));
         }
-        warn!("HandshakeProtocol::State::Done");
+        debug!("HandshakeProtocol::State::Done");
         self.state = State::Done
     }
-}
-
-pub fn ping(mut stream: &TcpStream, start_time: u32, network_magic: u32) -> Result<String, String> {
-    let mut handshake: Vec<u8> = Vec::new();
-    handshake.write_u32::<NetworkEndian>(start_time).unwrap(); // timestamp
-    handshake.write_u16::<NetworkEndian>(0u16).unwrap(); // handshake protocol id
-
-    let handshake_protocol = HandshakeProtocol {
-        state: State::Propose,
-        network_magic,
-        result: None,
-    };
-    let payload = handshake_protocol.msg_propose_versions(network_magic);
-    handshake.write_u16::<NetworkEndian>(payload.len() as u16).unwrap(); // length of payload
-    handshake.write(&payload[..]).unwrap(); // the payload
-    // println!("sending: {:?}", hex::encode(&handshake));
-
-    // send the message. Expect it to succeed.
-    stream.write(&handshake).unwrap();
-
-    let mut response = [0u8; 8]; // read 8 bytes to start with
-    return match stream.read_exact(&mut response) {
-        Ok(_) => {
-            let _server_timestamp = NetworkEndian::read_u32(&mut response[0..4]);
-            // println!("server_timestamp: {:x}", server_timestamp);
-            let _protocol_id = NetworkEndian::read_u16(&mut response[4..6]);
-            // println!("protocol_id: {:x}", protocol_id);
-            let payload_length = NetworkEndian::read_u16(&mut response[6..]) as usize;
-            // println!("payload_length: {:x}", payload_length);
-            let mut response = vec![0u8; payload_length];
-            match stream.read_exact(&mut response) {
-                Ok(_) => {
-                    if payload_length != 8 {
-                        // some payload error
-                        let cbor_value: Value = de::from_slice(&response[..]).unwrap();
-                        match handshake_protocol.find_error_message(&cbor_value) {
-                            Ok(error_message) => {
-                                Err(error_message)
-                            }
-                            Err(_) => {
-                                Err(format!("Unable to parse payload error! {}", hex::encode(response)))
-                            }
-                        }
-                    } else {
-                        Ok(hex::encode(response))
-                    }
-                }
-                Err(e) => {
-                    Err(format!("Unable to read response payload! {}", e))
-                }
-            }
-        }
-        Err(e) => {
-            Err(format!("Unable to read response header! {}", e))
-        }
-    };
 }

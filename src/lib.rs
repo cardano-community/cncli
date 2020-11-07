@@ -1,4 +1,5 @@
 pub mod nodeclient {
+    use std::path::PathBuf;
     use std::str::FromStr;
     use std::string::ParseError;
 
@@ -75,14 +76,14 @@ pub mod nodeclient {
     pub fn start(cmd: Command) {
         match cmd {
             Command::Ping { ref host, ref port, ref network_magic } => {
-                protocols::mux_protocol::ping(host, *port, *network_magic);
+                protocols::mux_protocol::start(false, &PathBuf::from_str("/dev/null").unwrap(), host, *port, *network_magic);
             }
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash);
             }
             Command::Sync { ref db, ref host, ref port, ref network_magic } => {
                 info!("Starting NodeClient...");
-                protocols::mux_protocol::sync(db, host, *port, *network_magic);
+                protocols::mux_protocol::start(true, db, host, *port, *network_magic);
             }
             Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey } => {
                 leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey);
