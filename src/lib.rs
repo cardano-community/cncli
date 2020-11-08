@@ -1,9 +1,14 @@
 pub mod nodeclient {
+    use std::fs::File;
+    use std::io::BufReader;
     use std::path::PathBuf;
     use std::str::FromStr;
     use std::string::ParseError;
+    use std::thread;
+    use std::thread::JoinHandle;
 
     use log::info;
+    use serde::Deserialize;
     use structopt::StructOpt;
 
     use crate::nodeclient::protocols::mux_protocol::Cmd;
@@ -82,21 +87,52 @@ pub mod nodeclient {
     pub fn start(cmd: Command) {
         match cmd {
             Command::Ping { ref host, ref port, ref network_magic } => {
-                protocols::mux_protocol::start(Cmd::Ping, &PathBuf::new(), host, *port, *network_magic);
+                protocols::mux_protocol::start(Cmd::Ping, &PathBuf::new(), host, *port, *network_magic, &String::new(), &String::new(), &String::new(), &String::new());
             }
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash);
             }
             Command::Sync { ref db, ref host, ref port, ref network_magic } => {
                 info!("Starting NodeClient...");
-                protocols::mux_protocol::start(Cmd::Sync, db, host, *port, *network_magic);
+                protocols::mux_protocol::start(Cmd::Sync, db, host, *port, *network_magic, &String::new(), &String::new(), &String::new(), &String::new());
             }
             Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey } => {
                 leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey);
             }
             Command::Sendtip { ref config } => {
-                protocols::mux_protocol::start(Cmd::SendTip, config, &String::new(), 0, 0);
+                let buf = BufReader::new(File::open(config).unwrap());
+                let pooltool_config: PooltoolConfig = serde_json::from_reader(buf).unwrap();
+                let mut handles: Vec<JoinHandle<_>> = vec![];
+                for pool in pooltool_config.pools.into_iter() {
+                    let api_key = pooltool_config.api_key.clone();
+                    let node_version = pooltool_config.node_version.clone();
+                    handles.push(
+                        thread::spawn(move || {
+                            // PoolTool is hard-coded to mainnet network magic
+                            protocols::mux_protocol::start(Cmd::SendTip, &PathBuf::new(), &pool.host, pool.port, 764824073, &api_key, &node_version, &pool.name, &pool.pool_id);
+                        })
+                    );
+                }
+
+                for handle in handles {
+                    handle.join().unwrap()
+                }
             }
         }
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct PooltoolConfig {
+        api_key: String,
+        node_version: String,
+        pools: Vec<Pool>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct Pool {
+        name: String,
+        pool_id: String,
+        host: String,
+        port: u16,
     }
 }

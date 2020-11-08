@@ -1,4 +1,4 @@
-use blake2b_simd::{Params};
+use blake2b_simd::Params;
 use log::error;
 use serde_cbor::{de, Value};
 
@@ -23,6 +23,7 @@ pub struct MsgRollForward {
     pub protocol_minor_version: i64,
 }
 
+#[derive(Debug)]
 pub struct Tip {
     pub block_number: i64,
     pub slot_number: i64,

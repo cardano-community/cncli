@@ -3,13 +3,15 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use blake2b_simd::Params;
+use chrono::{SecondsFormat, Utc};
 use log::{debug, error, info, trace, warn};
 use rusqlite::{Connection, Error, named_params, NO_PARAMS};
+use serde::Serialize;
 use serde_cbor::{de, ser, Value};
 
 use crate::nodeclient::protocols::{Agency, Protocol};
 use crate::nodeclient::protocols::chainsync_protocol::msg_roll_backward::parse_msg_roll_backward;
-use crate::nodeclient::protocols::chainsync_protocol::msg_roll_forward::{MsgRollForward, parse_msg_roll_forward};
+use crate::nodeclient::protocols::chainsync_protocol::msg_roll_forward::{MsgRollForward, parse_msg_roll_forward, Tip};
 
 mod msg_roll_forward;
 mod msg_roll_backward;
@@ -23,7 +25,36 @@ pub enum State {
     Done,
 }
 
+#[derive(PartialEq)]
+pub enum Mode {
+    Sync,
+    SendTip,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PooltoolStats {
+    api_key: String,
+    pool_id: String,
+    data: PooltoolData,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PooltoolData {
+    node_id: String,
+    version: String,
+    at: String,
+    block_no: i64,
+    slot_no: i64,
+    block_hash: String,
+    parent_hash: String,
+    leader_vrf: String,
+    platform: String,
+}
+
 pub struct ChainSyncProtocol {
+    pub(crate) mode: Mode,
     pub(crate) last_log_time: Instant,
     pub(crate) last_insert_time: Instant,
     pub(crate) db: Option<Connection>,
@@ -32,11 +63,17 @@ pub struct ChainSyncProtocol {
     pub(crate) state: State,
     pub(crate) result: Option<Result<String, String>>,
     pub(crate) is_intersect_found: bool,
+    pub(crate) pooltool_api_key: String,
+    pub(crate) node_version: String,
+    pub(crate) pool_name: String,
+    pub(crate) pool_id: String,
+    pub(crate) tip_to_intersect: Option<Tip>,
 }
 
 impl Default for ChainSyncProtocol {
     fn default() -> Self {
         ChainSyncProtocol {
+            mode: Mode::Sync,
             last_log_time: Instant::now().sub(Duration::from_secs(6)),
             last_insert_time: Instant::now(),
             db: None,
@@ -45,6 +82,11 @@ impl Default for ChainSyncProtocol {
             state: State::Idle,
             result: None,
             is_intersect_found: false,
+            pooltool_api_key: String::new(),
+            node_version: String::new(),
+            pool_name: String::new(),
+            pool_id: String::new(),
+            tip_to_intersect: None,
         }
     }
 }
@@ -288,20 +330,28 @@ impl Protocol for ChainSyncProtocol {
                 trace!("ChainSyncProtocol::State::Idle");
                 if !self.is_intersect_found {
                     let mut chain_blocks: Vec<(i64, Vec<u8>)> = vec![];
-                    { //scope for db operations
-                        let db = self.db.as_mut().unwrap();
-                        let mut stmt = db.prepare("SELECT slot_number, hash FROM chain ORDER BY slot_number DESC LIMIT 33").unwrap();
-                        let blocks = stmt.query_map(NO_PARAMS, |row| {
-                            let slot_result: Result<i64, Error> = row.get(0);
-                            let hash_result: Result<String, Error> = row.get(1);
-                            let slot = slot_result?;
-                            let hash = hash_result?;
-                            Ok((slot, hex::decode(hash).unwrap()))
-                        }).ok()?;
-                        for (i, block) in blocks.enumerate() {
-                            // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
-                            if (i != 1) && (i & (i - 1) == 0) {
-                                chain_blocks.push(block.unwrap());
+                    match self.mode {
+                        Mode::Sync => {
+                            let db = self.db.as_mut().unwrap();
+                            let mut stmt = db.prepare("SELECT slot_number, hash FROM chain ORDER BY slot_number DESC LIMIT 33").unwrap();
+                            let blocks = stmt.query_map(NO_PARAMS, |row| {
+                                let slot_result: Result<i64, Error> = row.get(0);
+                                let hash_result: Result<String, Error> = row.get(1);
+                                let slot = slot_result?;
+                                let hash = hash_result?;
+                                Ok((slot, hex::decode(hash).unwrap()))
+                            }).ok()?;
+                            for (i, block) in blocks.enumerate() {
+                                // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
+                                if (i != 1) && (i & (i - 1) == 0) {
+                                    chain_blocks.push(block.unwrap());
+                                }
+                            }
+                        }
+                        Mode::SendTip => {
+                            if self.tip_to_intersect.is_some() {
+                                let tip = self.tip_to_intersect.as_ref().unwrap();
+                                chain_blocks.push((tip.slot_number, tip.hash.clone()));
                             }
                         }
                     }
@@ -364,12 +414,54 @@ impl Protocol for ChainSyncProtocol {
                                 let (msg_roll_forward, tip) = parse_msg_roll_forward(cbor_array);
 
                                 if self.last_log_time.elapsed().as_millis() > 5_000 {
-                                    info!("block {} of {}, {:.2}% synced", msg_roll_forward.block_number, tip.block_number, (msg_roll_forward.block_number as f64 / tip.block_number as f64) * 100.0);
+                                    if self.mode == Mode::Sync {
+                                        info!("block {} of {}, {:.2}% synced", msg_roll_forward.block_number, tip.block_number, (msg_roll_forward.block_number as f64 / tip.block_number as f64) * 100.0);
+                                    }
                                     self.last_log_time = Instant::now()
                                 }
 
-                                // FIXME: return any error upward in case we fill the disk or something
-                                self.save_block(msg_roll_forward).unwrap();
+                                match self.mode {
+                                    Mode::Sync => { self.save_block(msg_roll_forward).unwrap(); }
+                                    Mode::SendTip => {
+                                        if msg_roll_forward.slot_number == tip.slot_number && msg_roll_forward.hash == tip.hash {
+                                            let client = reqwest::blocking::Client::new();
+                                            let pooltool_result = client.post("https://api.pooltool.io/v0/sendstats").body(
+                                                serde_json::ser::to_string(
+                                                    &PooltoolStats {
+                                                        api_key: self.pooltool_api_key.clone(),
+                                                        pool_id: self.pool_id.clone(),
+                                                        data: PooltoolData {
+                                                            node_id: "".to_string(),
+                                                            version: self.node_version.clone(),
+                                                            at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+                                                            block_no: tip.block_number,
+                                                            slot_no: tip.slot_number,
+                                                            block_hash: hex::encode(&tip.hash),
+                                                            parent_hash: hex::encode(&msg_roll_forward.prev_hash),
+                                                            leader_vrf: hex::encode(&msg_roll_forward.leader_vrf_0),
+                                                            platform: "cncli".to_string(),
+                                                        },
+                                                    }
+                                                ).unwrap()
+                                            ).send();
+
+                                            match pooltool_result {
+                                                Ok(response) => {
+                                                    match response.text() {
+                                                        Ok(text) => {
+                                                            info!("Pooltool ({}, {}): ({}, {}), json: {}", &self.pool_name, &self.pool_id[..8], &tip.block_number, hex::encode(&tip.hash[..8]), text);
+                                                        }
+                                                        Err(error) => { error!("PoolTool error: {}", error); }
+                                                    }
+                                                }
+                                                Err(error) => { error!("PoolTool error: {}", error); }
+                                            }
+                                        } else {
+                                            self.tip_to_intersect = Some(tip);
+                                            self.is_intersect_found = false;
+                                        }
+                                    }
+                                }
 
                                 self.state = State::Idle;
 
