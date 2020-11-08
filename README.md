@@ -335,3 +335,54 @@ $ cncli sendtip --config pooltool.json
  ...
  ...
 ```
+
+### systemd scripts
+`sync` and `sendtip` can be easily enabled as systemd services. Here are some example configurations.
+
+```shell script
+$ cat /etc/systemd/system/cncli-sync.service 
+[Unit]
+Description=cncli sync
+After=syslog.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=westbam
+LimitNOFILE=131072
+WorkingDirectory=/home/westbam/Development/cncli
+ExecStart=/home/westbam/.cargo/bin/cncli sync --host 127.0.0.1 --port 6000 --db /home/westbam/Development/cncli/cncli.db
+SuccessExitStatus=143
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cncli-sync
+                
+[Install]
+WantedBy=multi-user.target
+```
+
+```shell script
+$ cat /etc/systemd/system/cncli-sendtip.service 
+[Unit]
+Description=cncli sendtip
+After=syslog.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=5
+User=westbam
+LimitNOFILE=131072
+WorkingDirectory=/home/westbam/Development/cncli
+ExecStart=/home/westbam/.cargo/bin/cncli sendtip --config /home/westbam/Development/cncli/pooltool.json
+SuccessExitStatus=143
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier=cncli-sendtip
+                
+[Install]
+WantedBy=multi-user.target
+```
