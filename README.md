@@ -273,3 +273,65 @@ $ cncli leaderlog --pool-id 00beef284975ef87856c1343f6bf50172253177fdebc756524d4
  "errorMessage": "Query returned no rows"
 }
 ```
+
+### Sendtip command
+The sendtip command is used to communicate with [pooltool.io](https://pooltool.io) so you can have a green badge on their website with your current tip height.
+![pooltool tip image](images/pooltool_sendtip.png)
+
+It is important to point this command at your core nodes. This will help pooltool capture any orphan blocks. There is no guarantee that an orphan block you make will be seen by pooltool. Pointing to your core nodes should help with that.
+
+#### Sendtip help
+```shell script
+$ cncli sendtip --help
+cncli-sendtip 0.2.0
+
+USAGE:
+    cncli sendtip [OPTIONS]
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -c, --config <config>    pooltool config file for sending tips [default: ./pooltool.json]
+```
+
+#### Configuring pooltool.json
+You need to create a pooltool.json file so that the sendtip command knows what node(s) to connect to. It also contains your pooltool configuration. Your pooltool api key can be found on your pooltool profile page. Your node version can be found by looking at any cardano-node logfile. Each log message should contain this version. If you upgrade your nodes to a new version, you will have to update this config file version manually.
+
+```json
+{
+  "api_key": "a47811d3-0008-4ecd-9f3e-9c22bdb7c82d",
+  "node_version": "1.21.2:9577e",
+  "pools": [
+    ...
+  	{
+  		"name": "TCKR",
+  		"pool_id": "a7398d649be2f6d897ed24a613cf547bb20cd282a04edfc53d477114",
+  		"host" : "123.123.123.12",
+  		"port": 3001
+  	},
+  	{
+  		"name": "TCKR1",
+  		"pool_id": "b73d891285526062d41cd7293746048c6a9a13ab8b591920cf40c706",
+  		"host" : "123.123.123.35",
+  		"port": 3001
+  	},
+    ...
+  ]
+}
+```
+
+#### Sending tips to pooltool
+```shell script
+$ cncli sendtip --config pooltool.json
+ 2020-11-08T18:37:52.323Z INFO  cncli::nodeclient::protocols::mux_protocol > Connecting to 123.123.123.12:3001
+ 2020-11-08T18:37:52.358Z WARN  cncli::nodeclient::protocols::transaction_protocol > TxSubmissionProtocol::State::Done
+ 2020-11-08T18:37:52.358Z WARN  cncli::nodeclient::protocols::chainsync_protocol   > rollback to slot: 4492799
+ 2020-11-08T18:37:52.359Z WARN  cncli::nodeclient::protocols::chainsync_protocol   > rollback to slot: 13294373
+ 2020-11-08T18:37:54.402Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > Pooltool (TCKR, a7398d64): (4925270, 4d65b09dc1d5c6c2), json: {"success":true,"message":null}
+ 2020-11-08T18:38:36.323Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > Pooltool (TCKR, a7398d64): (4925271, 47d6beb189f24c9e), json: {"success":true,"message":null}
+ 2020-11-08T18:38:37.424Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > Pooltool (TCKR, a7398d64): (4925272, defe4ba88985c305), json: {"success":true,"message":null}
+ ...
+ ...
+```
