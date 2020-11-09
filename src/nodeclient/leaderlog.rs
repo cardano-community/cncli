@@ -363,7 +363,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
     }
 }
 
-fn handle_error<T: Display>(error_message: T) {
+pub fn handle_error<T: Display>(error_message: T) {
     println!("{{\n\
             \x20\"status\": \"error\",\n\
             \x20\"errorMessage\": \"{}\"\n\

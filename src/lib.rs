@@ -11,6 +11,7 @@ pub mod nodeclient {
     use serde::Deserialize;
     use structopt::StructOpt;
 
+    use crate::nodeclient::leaderlog::handle_error;
     use crate::nodeclient::protocols::mux_protocol::Cmd;
 
     mod protocols;
@@ -100,6 +101,11 @@ pub mod nodeclient {
                 leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey);
             }
             Command::Sendtip { ref config } => {
+                if !config.exists() {
+                    handle_error("config not found!");
+                    return;
+                }
+
                 let buf = BufReader::new(File::open(config).unwrap());
                 let pooltool_config: PooltoolConfig = serde_json::from_reader(buf).unwrap();
                 let mut handles: Vec<JoinHandle<_>> = vec![];
