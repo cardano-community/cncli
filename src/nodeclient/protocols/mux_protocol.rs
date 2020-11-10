@@ -24,7 +24,7 @@ pub enum Cmd {
 // Sync a cardano-node database
 //
 // Connect to cardano-node and run protocols depending on command type
-pub fn start(cmd: Cmd, db: &std::path::PathBuf, host: &String, port: u16, network_magic: u32, pooltool_api_key: &String, node_version: &String, pool_name: &String, pool_id: &String) {
+pub fn start(cmd: Cmd, db: &std::path::PathBuf, host: &String, port: u16, network_magic: u32, pooltool_api_key: &String, cardano_node_path: &std::path::PathBuf, pool_name: &String, pool_id: &String) {
     let start_time = Instant::now();
 
     // continually retry connection
@@ -87,7 +87,7 @@ pub fn start(cmd: Cmd, db: &std::path::PathBuf, host: &String, port: u16, networ
                                 }
 
                                 // Add and Remove protocols depending on status
-                                mux_add_remove_protocols(&cmd, db, network_magic, &mut protocols, host, port, pooltool_api_key, node_version, pool_name, pool_id);
+                                mux_add_remove_protocols(&cmd, db, network_magic, &mut protocols, host, port, pooltool_api_key, cardano_node_path, pool_name, pool_id);
 
                                 if protocols.is_empty() {
                                     match cmd {
@@ -198,7 +198,7 @@ fn mux_receive_data(protocols: &mut Vec<MiniProtocol>, stream: &mut TcpStream) -
     Ok(did_receive_data)
 }
 
-fn mux_add_remove_protocols(cmd: &Cmd, db: &PathBuf, network_magic: u32, protocols: &mut Vec<MiniProtocol>, host: &String, port: u16, pooltool_api_key: &String, node_version: &String, pool_name: &String, pool_id: &String) {
+fn mux_add_remove_protocols(cmd: &Cmd, db: &PathBuf, network_magic: u32, protocols: &mut Vec<MiniProtocol>, host: &String, port: u16, pooltool_api_key: &String, cardano_node_path: &PathBuf, pool_name: &String, pool_id: &String) {
     let mut protocols_to_add: Vec<MiniProtocol> = Vec::new();
     // Remove any protocols that have a result (are done)
     protocols.retain(|protocol| {
@@ -238,7 +238,7 @@ fn mux_add_remove_protocols(cmd: &Cmd, db: &PathBuf, network_magic: u32, protoco
                                                 mode: Mode::SendTip,
                                                 network_magic,
                                                 pooltool_api_key: pooltool_api_key.clone(),
-                                                node_version: node_version.clone(),
+                                                cardano_node_path: cardano_node_path.clone(),
                                                 pool_name: pool_name.clone(),
                                                 pool_id: pool_id.clone(),
                                                 ..Default::default()

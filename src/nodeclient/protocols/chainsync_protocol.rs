@@ -1,10 +1,12 @@
 use std::ops::Sub;
 use std::path::PathBuf;
+use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use blake2b_simd::Params;
 use chrono::{SecondsFormat, Utc};
 use log::{debug, error, info, trace, warn};
+use regex::Regex;
 use rusqlite::{Connection, Error, named_params, NO_PARAMS};
 use serde::Serialize;
 use serde_cbor::{de, ser, Value};
@@ -64,7 +66,9 @@ pub struct ChainSyncProtocol {
     pub(crate) result: Option<Result<String, String>>,
     pub(crate) is_intersect_found: bool,
     pub(crate) pooltool_api_key: String,
+    pub(crate) cardano_node_path: PathBuf,
     pub(crate) node_version: String,
+    pub(crate) last_node_version_time: Instant,
     pub(crate) pool_name: String,
     pub(crate) pool_id: String,
     pub(crate) tip_to_intersect: Option<Tip>,
@@ -83,7 +87,9 @@ impl Default for ChainSyncProtocol {
             result: None,
             is_intersect_found: false,
             pooltool_api_key: String::new(),
+            cardano_node_path: PathBuf::new(),
             node_version: String::new(),
+            last_node_version_time: Instant::now().sub(Duration::from_secs(7200)), // 2 hours ago
             pool_name: String::new(),
             pool_id: String::new(),
             tip_to_intersect: None,
@@ -424,6 +430,20 @@ impl Protocol for ChainSyncProtocol {
                                     Mode::Sync => { self.save_block(msg_roll_forward).unwrap(); }
                                     Mode::SendTip => {
                                         if msg_roll_forward.slot_number == tip.slot_number && msg_roll_forward.hash == tip.hash {
+                                            if self.last_node_version_time.elapsed() > Duration::from_secs(3600) {
+                                                // Our node version is outdated. Make a call to update it.
+                                                let output = Command::new(&self.cardano_node_path)
+                                                    .arg("--version")
+                                                    .stdin(Stdio::null())
+                                                    .stdout(Stdio::piped())
+                                                    .output()
+                                                    .expect(&*format!("Failed to execute {:?}", &self.cardano_node_path));
+                                                let version_string = String::from_utf8_lossy(&output.stdout);
+                                                let cap = Regex::new("cardano-node (\\d+\\.\\d+\\.\\d+) .*\ngit rev ([a-f0-9]{5}).*").unwrap().captures(&*version_string).unwrap();
+                                                self.node_version = format!("{}:{}", cap.get(1).map_or("", |m| m.as_str()), cap.get(2).map_or("", |m| m.as_str()));
+                                                info!("Checking cardano-node version: {}", &self.node_version);
+                                                self.last_node_version_time = Instant::now();
+                                            }
                                             let client = reqwest::blocking::Client::new();
                                             let pooltool_result = client.post("https://api.pooltool.io/v0/sendstats").body(
                                                 serde_json::ser::to_string(

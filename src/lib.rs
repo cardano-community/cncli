@@ -80,29 +80,35 @@ pub mod nodeclient {
             pool_vrf_skey: std::path::PathBuf,
         },
         Sendtip {
-            #[structopt(parse(from_os_str), short, long, default_value = "./pooltool.json", help = "pooltool config file for sending tips")]
+            #[structopt(parse(from_os_str), long, default_value = "./pooltool.json", help = "pooltool config file for sending tips")]
             config: std::path::PathBuf,
+            #[structopt(parse(from_os_str), long, help = "path to cardano-node executable for gathering version info")]
+            cardano_node: std::path::PathBuf,
         },
     }
 
     pub fn start(cmd: Command) {
         match cmd {
             Command::Ping { ref host, ref port, ref network_magic } => {
-                protocols::mux_protocol::start(Cmd::Ping, &PathBuf::new(), host, *port, *network_magic, &String::new(), &String::new(), &String::new(), &String::new());
+                protocols::mux_protocol::start(Cmd::Ping, &PathBuf::new(), host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
             }
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash);
             }
             Command::Sync { ref db, ref host, ref port, ref network_magic } => {
                 info!("Starting NodeClient...");
-                protocols::mux_protocol::start(Cmd::Sync, db, host, *port, *network_magic, &String::new(), &String::new(), &String::new(), &String::new());
+                protocols::mux_protocol::start(Cmd::Sync, db, host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
             }
             Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey } => {
                 leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey);
             }
-            Command::Sendtip { ref config } => {
+            Command::Sendtip { ref config, ref cardano_node } => {
                 if !config.exists() {
                     handle_error("config not found!");
+                    return;
+                }
+                if !cardano_node.exists() {
+                    handle_error("cardano-node not found!");
                     return;
                 }
 
@@ -111,11 +117,11 @@ pub mod nodeclient {
                 let mut handles: Vec<JoinHandle<_>> = vec![];
                 for pool in pooltool_config.pools.into_iter() {
                     let api_key = pooltool_config.api_key.clone();
-                    let node_version = pooltool_config.node_version.clone();
+                    let cardano_node_path = cardano_node.clone();
                     handles.push(
                         thread::spawn(move || {
                             // PoolTool is hard-coded to mainnet network magic
-                            protocols::mux_protocol::start(Cmd::SendTip, &PathBuf::new(), &pool.host, pool.port, 764824073, &api_key, &node_version, &pool.name, &pool.pool_id);
+                            protocols::mux_protocol::start(Cmd::SendTip, &PathBuf::new(), &pool.host, pool.port, 764824073, &api_key, &cardano_node_path, &pool.name, &pool.pool_id);
                         })
                     );
                 }
@@ -130,7 +136,6 @@ pub mod nodeclient {
     #[derive(Debug, Deserialize)]
     struct PooltoolConfig {
         api_key: String,
-        node_version: String,
         pools: Vec<Pool>,
     }
 

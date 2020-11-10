@@ -282,18 +282,19 @@ It is important to point this command at your core nodes. This will help pooltoo
 
 #### Sendtip help
 ```shell script
-$ cncli sendtip --help
-cncli-sendtip 0.2.0
+$ cncli sendtip --help          
+cncli-sendtip 0.2.2
 
 USAGE:
-    cncli sendtip [OPTIONS]
+    cncli sendtip [OPTIONS] --cardano-node <cardano-node>
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-    -c, --config <config>    pooltool config file for sending tips [default: ./pooltool.json]
+        --cardano-node <cardano-node>    path to cardano-node executable for gathering version info
+        --config <config>                pooltool config file for sending tips [default: ./pooltool.json]
 ```
 
 #### Configuring pooltool.json
@@ -302,7 +303,6 @@ You need to create a pooltool.json file so that the sendtip command knows what n
 ```json
 {
   "api_key": "a47811d3-0008-4ecd-9f3e-9c22bdb7c82d",
-  "node_version": "1.21.2:9577e",
   "pools": [
     ...
   	{
@@ -324,7 +324,7 @@ You need to create a pooltool.json file so that the sendtip command knows what n
 
 #### Sending tips to pooltool
 ```shell script
-$ cncli sendtip --config pooltool.json
+$ cncli sendtip --cardano-node /home/westbam/.local/bin/cardano-node --config pooltool.json
  2020-11-08T18:37:52.323Z INFO  cncli::nodeclient::protocols::mux_protocol > Connecting to 123.123.123.12:3001
  2020-11-08T18:37:52.358Z WARN  cncli::nodeclient::protocols::transaction_protocol > TxSubmissionProtocol::State::Done
  2020-11-08T18:37:52.358Z WARN  cncli::nodeclient::protocols::chainsync_protocol   > rollback to slot: 4492799
@@ -377,7 +377,7 @@ RestartSec=5
 User=westbam
 LimitNOFILE=131072
 WorkingDirectory=/home/westbam/Development/cncli
-ExecStart=/home/westbam/.cargo/bin/cncli sendtip --config /home/westbam/Development/cncli/pooltool.json
+ExecStart=/home/westbam/.cargo/bin/cncli sendtip --cardano-node /home/westbam/.local/bin/cardano-node --config /home/westbam/Development/cncli/pooltool.json
 SuccessExitStatus=143
 StandardOutput=syslog
 StandardError=syslog
