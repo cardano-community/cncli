@@ -143,6 +143,7 @@ impl ChainSyncProtocol {
                 db.execute("CREATE INDEX IF NOT EXISTS idx_chain_slot_number ON chain(slot_number)", NO_PARAMS)?;
                 db.execute("CREATE INDEX IF NOT EXISTS idx_chain_orphaned ON chain(orphaned)", NO_PARAMS)?;
                 db.execute("CREATE INDEX IF NOT EXISTS idx_chain_hash ON chain(hash)", NO_PARAMS)?;
+                db.execute("CREATE INDEX IF NOT EXISTS idx_chain_block_number ON chain(block_number)", NO_PARAMS)?;
             }
 
             // Upgrade their database to version ...
@@ -187,7 +188,7 @@ impl ChainSyncProtocol {
 
             let tx = db.transaction()?;
             { // scope for db transaction
-                let mut orphan_stmt = tx.prepare("UPDATE chain SET orphaned = 1 WHERE slot_number >= ?1")?;
+                let mut orphan_stmt = tx.prepare("UPDATE chain SET orphaned = 1 WHERE block_number >= ?1")?;
                 let mut insert_stmt = tx.prepare("INSERT INTO chain (\
                 block_number, \
                 slot_number, \
@@ -231,7 +232,7 @@ impl ChainSyncProtocol {
 
                 for block in self.pending_blocks.drain(..) {
                     // Set any necessary blocks as orphans
-                    let orphan_num = orphan_stmt.execute(&[&block.slot_number])?;
+                    let orphan_num = orphan_stmt.execute(&[&block.block_number])?;
 
                     if orphan_num > 0 {
                         // get the last block eta_v (nonce) in the db

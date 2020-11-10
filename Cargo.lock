@@ -148,7 +148,7 @@ dependencies = [
 
 [[package]]
 name = "cncli"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "blake2b_simd",
  "byteorder",
