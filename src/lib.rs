@@ -78,6 +78,8 @@ pub mod nodeclient {
             pool_id: String,
             #[structopt(parse(from_os_str), long, help = "pool's vrf.skey file")]
             pool_vrf_skey: std::path::PathBuf,
+            #[structopt(long = "tz", default_value = "America/Los_Angeles", help = "TimeZone string from the IANA database - https://en.wikipedia.org/wiki/List_of_tz_database_time_zones")]
+            timezone: String,
         },
         Sendtip {
             #[structopt(parse(from_os_str), long, default_value = "./pooltool.json", help = "pooltool config file for sending tips")]
@@ -99,8 +101,8 @@ pub mod nodeclient {
                 info!("Starting NodeClient...");
                 protocols::mux_protocol::start(Cmd::Sync, db, host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
             }
-            Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey } => {
-                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey);
+            Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey, ref timezone } => {
+                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey, timezone);
             }
             Command::Sendtip { ref config, ref cardano_node } => {
                 if !config.exists() {

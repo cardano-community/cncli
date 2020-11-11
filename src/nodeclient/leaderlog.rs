@@ -5,7 +5,8 @@ use std::path::PathBuf;
 
 use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
-use chrono::{Duration, Local, NaiveDateTime, TimeZone};
+use chrono::{Duration, NaiveDateTime, TimeZone};
+use chrono_tz::Tz;
 use fixed::types::I30F34;
 use log::{debug, trace};
 use rug::{Integer, Rational};
@@ -68,6 +69,7 @@ struct LeaderLog {
     status: String,
     epoch: i64,
     epoch_nonce: String,
+    epoch_slots: i64,
     pool_id: String,
     sigma: f64,
     d: f64,
@@ -139,7 +141,7 @@ fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, curre
     (epoch, first_slot_of_epoch)
 }
 
-fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64) -> String {
+fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64, tz: &Tz) -> String {
     let shelley_transition_epoch: i64 = if shelley.network_magic == 764824073 {
         // mainnet
         208
@@ -157,7 +159,8 @@ fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64) 
     let shelley_secs = shelley_slots * shelley.slot_length;
 
     let slot_time = network_start_time + Duration::seconds(byron_secs) + Duration::seconds(shelley_secs);
-    Local.from_utc_datetime(&slot_time).to_rfc3339()
+
+    tz.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
 fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &I30F34) -> bool {
@@ -227,6 +230,7 @@ fn taylor_exp_cmp(bound_x: i32, cmp: I30F34, x: I30F34) -> TaylorCmp {
 // @param eta0 The epoch nonce value
 // @param pool_vrf_skey The vrf signing key for the pool
 fn is_slot_leader(slot: i64, f: &f64, sigma: &Rational, eta0: &Vec<u8>, pool_vrf_skey: &Vec<u8>) -> Result<bool, String> {
+    trace!("is_slot_leader: {}", slot);
     let seed = mk_seed(slot, eta0);
     trace!("seed: {}", hex::encode(&seed));
     let cert_nat = vrf_eval_certified(seed, pool_vrf_skey)?;
@@ -247,7 +251,15 @@ fn is_slot_leader(slot: i64, f: &f64, sigma: &Rational, eta0: &Vec<u8>, pool_vrf
     }
 }
 
-pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, shelley_genesis: &PathBuf, ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String, pool_vrf_skey_path: &PathBuf) {
+pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, shelley_genesis: &PathBuf, ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String, pool_vrf_skey_path: &PathBuf, timezone: &String) {
+    let tz: Tz = match timezone.parse::<Tz>() {
+        Err(_) => {
+            handle_error("timezone parse error!");
+            return;
+        }
+        Ok(zone) => { zone }
+    };
+
     if !db_path.exists() {
         handle_error("database not found!");
         return;
@@ -299,6 +311,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                         status: "ok".to_string(),
                                                         epoch,
                                                         epoch_nonce: hex::encode(&epoch_nonce),
+                                                        epoch_slots: 0,
                                                         pool_id: pool_id.clone(),
                                                         sigma: sigma.to_f64(),
                                                         d: decentralization_param.to_string().parse().unwrap(),
@@ -322,9 +335,10 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                                             no,
                                                                             slot,
                                                                             slot_in_epoch: slot - first_slot_of_epoch,
-                                                                            at: slot_to_timestamp(&byron, &shelley, slot),
+                                                                            at: slot_to_timestamp(&byron, &shelley, slot, &tz),
                                                                         }
                                                                     );
+                                                                    leader_log.epoch_slots = no;
                                                                 }
                                                             }
                                                             Err(error) => { handle_error(error) }

@@ -1,4 +1,5 @@
 extern crate libc;
+extern crate chrono_tz;
 use std::env::{set_var, var};
 
 use structopt::StructOpt;

@@ -218,7 +218,7 @@ $ cardano-cli shelley query ledger-state --cardano-mode --mainnet > /tmp/ledger-
 #### Show Help
 ```shell script
 $ cncli leaderlog --help
-cncli-leaderlog 0.1.0
+cncli-leaderlog 0.2.4
 
 USAGE:
     cncli leaderlog [OPTIONS] --byron-genesis <byron-genesis> --ledger-state <ledger-state> --pool-id <pool-id> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
@@ -236,6 +236,9 @@ OPTIONS:
         --pool-id <pool-id>                    lower-case hex pool id
         --pool-vrf-skey <pool-vrf-skey>        pool's vrf.skey file
         --shelley-genesis <shelley-genesis>    shelley genesis json file
+        --tz <timezone>                        TimeZone string from the IANA database -
+                                               https://en.wikipedia.org/wiki/List_of_tz_database_time_zones [default:
+                                               America/Los_Angeles]
 ```
 
 #### Calculate leaderlog
