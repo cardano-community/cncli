@@ -1,11 +1,12 @@
-extern crate libc;
 extern crate chrono_tz;
+extern crate libc;
+
+use std::{panic, process};
 use std::env::{set_var, var};
 
 use structopt::StructOpt;
 
 use cncli::nodeclient::{self, Command};
-
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "cncli", about = "A community-built cardano-node CLI")]
@@ -23,6 +24,14 @@ fn main() {
         }
     }
     pretty_env_logger::init_timed();
+
+    // take_hook() returns the default hook in case when a custom one is not set
+    let orig_hook = panic::take_hook();
+    panic::set_hook(Box::new(move |panic_info| {
+        // invoke the default handler and exit the process
+        orig_hook(panic_info);
+        process::exit(1);
+    }));
 
     let args = Cli::from_args();
     nodeclient::start(args.cmd)
