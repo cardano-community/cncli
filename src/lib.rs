@@ -87,6 +87,14 @@ pub mod nodeclient {
             #[structopt(parse(from_os_str), long, help = "path to cardano-node executable for gathering version info")]
             cardano_node: std::path::PathBuf,
         },
+        Status {
+            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            db: std::path::PathBuf,
+            #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
+            byron_genesis: std::path::PathBuf,
+            #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
+            shelley_genesis: std::path::PathBuf,
+        },
     }
 
     pub fn start(cmd: Command) {
@@ -131,6 +139,9 @@ pub mod nodeclient {
                 for handle in handles {
                     handle.join().unwrap()
                 }
+            }
+            Command::Status { ref db, ref byron_genesis, ref shelley_genesis } => {
+                leaderlog::status(db, byron_genesis, shelley_genesis);
             }
         }
     }

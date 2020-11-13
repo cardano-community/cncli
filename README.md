@@ -149,6 +149,42 @@ $ cncli sync --host 127.0.0.1 --port 6000
  2020-10-31T16:57:17.958Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4891066 of 4891066, 100.00% synced
  2020-10-31T16:57:30.927Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4891067 of 4891067, 100.00% synced
 ```
+### Status Command
+This simple command gives you an ok if the database is fully synced. It will return a status of error if not.
+#### Show Help
+```shell script
+$ cncli status --help
+cncli-status 0.2.5
+
+USAGE:
+    cncli status [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+        --byron-genesis <byron-genesis>        byron genesis json file
+    -d, --db <db>                              sqlite database file [default: ./cncli.db]
+        --shelley-genesis <shelley-genesis>    shelley genesis json file
+``` 
+
+#### Status when fully synced
+```shell script
+$ cncli status --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json              
+{
+ "status": "ok"
+}
+```
+
+#### Status when not fully synced
+```shell script
+$ cncli status --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json --db dummy.db
+{
+ "status": "error",
+ "errorMessage": "db not fully synced!"
+}
+```
 
 ### Validate Command
 This command validates that a block hash or partial block hash is on-chain. You must run `sync` command separately to build up the database and have it sync to 100%.

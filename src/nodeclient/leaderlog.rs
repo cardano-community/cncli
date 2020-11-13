@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
-use chrono::{Duration, NaiveDateTime, TimeZone};
+use chrono::{Duration, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use log::{debug, trace};
 use rug::{Float, Integer, Rational};
@@ -142,7 +142,7 @@ fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, curre
     (epoch, first_slot_of_epoch)
 }
 
-fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64, tz: &Tz) -> String {
+fn slot_to_naivedatetime(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64) -> NaiveDateTime {
     let shelley_transition_epoch: i64 = if shelley.network_magic == 764824073 {
         // mainnet
         208
@@ -159,8 +159,11 @@ fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64, 
     let byron_secs = (byron.block_version_data.slot_duration * byron_slots) / 1000;
     let shelley_secs = shelley_slots * shelley.slot_length;
 
-    let slot_time = network_start_time + Duration::seconds(byron_secs) + Duration::seconds(shelley_secs);
+    network_start_time + Duration::seconds(byron_secs) + Duration::seconds(shelley_secs)
+}
 
+fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64, tz: &Tz) -> String {
+    let slot_time = slot_to_naivedatetime(byron, shelley, slot);
     tz.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
@@ -381,6 +384,53 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
         }
         _ => {}
     }
+}
+
+pub(crate) fn status(db_path: &PathBuf, byron_genesis: &PathBuf, shelley_genesis: &PathBuf) {
+    if !db_path.exists() {
+        handle_error("database not found!");
+        return;
+    }
+    let db = Connection::open(db_path).unwrap();
+
+    match read_byron_genesis(byron_genesis) {
+        Ok(byron) => {
+            debug!("{:?}", byron);
+            match read_shelley_genesis(shelley_genesis) {
+                Ok(shelley) => {
+                    debug!("{:?}", shelley);
+                    match get_tip_slot_number(&db) {
+                        Ok(tip_slot_number) => {
+                            debug!("tip_slot_number: {}", tip_slot_number);
+                            let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
+                            let system_time = Utc::now().timestamp();
+                            if system_time - tip_time < 120 {
+                                print_status_synced();
+                            } else {
+                                handle_error("db not fully synced!")
+                            }
+                        }
+                        Err(error) => { handle_error(error) }
+                    }
+                }
+                Err(error) => { handle_error(error) }
+            }
+        }
+        Err(error) => { handle_error(error) }
+    }
+
+    match db.close() {
+        Err(error) => {
+            handle_error(format!("db close error: {}", error.1));
+        }
+        _ => {}
+    }
+}
+
+fn print_status_synced() {
+    println!("{{\n\
+            \x20\"status\": \"ok\"\n\
+            }}");
 }
 
 pub fn handle_error<T: Display>(error_message: T) {
