@@ -3,9 +3,8 @@ use std::fs::File;
 use std::io::{BufReader, Error};
 use std::path::PathBuf;
 
-use fixed::types::I15F113;
 use log::debug;
-use rug::Rational;
+use rug::{Float, Rational};
 use serde::Deserialize;
 
 use crate::nodeclient::leaderlog::deserialize::fixed_number;
@@ -30,7 +29,7 @@ struct Ledger {
 #[serde(rename_all = "camelCase")]
 struct ProtocolParams {
     #[serde(deserialize_with = "fixed_number")]
-    decentralisation_param: I15F113,
+    decentralisation_param: Float,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,7 +59,7 @@ struct Proposals {
 struct Proposal {
     #[serde(rename(deserialize = "_d"))]
     #[serde(deserialize_with = "fixed_number")]
-    decentralisation_param: I15F113,
+    decentralisation_param: Float,
 }
 
 #[derive(Debug, Deserialize)]
@@ -149,7 +148,7 @@ fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> Rational {
     Rational::from((numerator, denominator))
 }
 
-pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<(Rational, I15F113), Error> {
+pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<(Rational, Float), Error> {
     let ledger: Ledger = match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(File::open(ledger_state)?)) {
         Ok(ledger2) => { ledger2.nes_es }
         Err(_) => { serde_json::from_reader(BufReader::new(File::open(ledger_state)?))? }
@@ -175,7 +174,7 @@ pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_
                 if ledger.es_l_state.utxo_state.ppups.proposals.proposal.is_empty() {
                     ledger.es_pp.decentralisation_param
                 } else {
-                    ledger.es_l_state.utxo_state.ppups.proposals.proposal.iter().next().unwrap().1.decentralisation_param
+                    ledger.es_l_state.utxo_state.ppups.proposals.proposal.iter().next().unwrap().1.decentralisation_param.clone()
                 }
             }
             LedgerSet::Set => { ledger.es_pp.decentralisation_param }

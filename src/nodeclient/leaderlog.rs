@@ -1,17 +1,17 @@
 use std::fs::File;
 use std::io::{BufReader, Error};
-use std::ops::Mul;
+use std::ops::{Div, Mul};
 use std::path::PathBuf;
 
 use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
 use chrono::{Duration, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
-use fixed::types::I15F113;
 use log::{debug, trace};
-use rug::{Integer, Rational};
+use rug::{Float, Integer, Rational};
+use rug::float::Round;
 use rug::integer::Order;
-use rug::ops::Pow;
+use rug::ops::{Pow, SubFrom};
 use rusqlite::{Connection, NO_PARAMS};
 use serde::{Deserialize, Serialize};
 use serde::export::fmt::Display;
@@ -164,9 +164,10 @@ fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64, 
     tz.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
-fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &I15F113) -> bool {
-    let diff_slot: i128 = (current_slot - first_slot_of_epoch).abs() as i128;
-    d.mul(diff_slot).ceil() < d.mul(diff_slot + 1).ceil()
+fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &Float) -> bool {
+    let diff_slot = Float::with_val(120, (current_slot - first_slot_of_epoch).abs());
+    let diff_slot_inc = Float::with_val(120, &diff_slot + 1);
+    (d * diff_slot).ceil() < (d * diff_slot_inc).ceil()
 }
 
 //
@@ -200,23 +201,24 @@ enum TaylorCmp {
     MaxReached,
 }
 
-fn taylor_exp_cmp(bound_x: i32, cmp: I15F113, x: I15F113) -> TaylorCmp {
-    let max_n = 1000;
-    let mut divisor = 1;
-    let mut acc: I15F113 = I15F113::from_num(1);
-    let mut err = x;
-    let mut error_term = err * I15F113::from_num(bound_x);
-    let mut next_x: I15F113;
+fn taylor_exp_cmp(bound_x: i32, cmp: Float, x: Float) -> TaylorCmp {
+    let max_n: i32 = 1000;
+    let bound_xf: Float = Float::with_val(120, bound_x);
+    let mut divisor: i32 = 1;
+    let mut acc: Float = Float::with_val(120, 1);
+    let mut err: Float = x.clone();
+    let mut error_term: Float = Float::with_val(120, &err * &bound_xf);
+    let mut next_x: Float;
     for _n in 0..max_n {
-        if cmp >= acc + error_term {
+        if cmp >= Float::with_val(120, &acc + &error_term) {
             return TaylorCmp::Above;
-        } else if cmp < acc - error_term {
+        } else if cmp < Float::with_val(120, &acc - &error_term) {
             return TaylorCmp::Below;
         } else {
             divisor += 1;
-            next_x = err;
-            err = (err * x) / divisor;
-            error_term = err * I15F113::from_num(bound_x);
+            next_x = err.clone();
+            err = Float::with_val(120, err.mul(&x).div(divisor));
+            error_term = Float::with_val(120, &err * &bound_xf);
             acc += next_x;
         }
     }
@@ -232,18 +234,20 @@ fn taylor_exp_cmp(bound_x: i32, cmp: I15F113, x: I15F113) -> TaylorCmp {
 // @param pool_vrf_skey The vrf signing key for the pool
 fn is_slot_leader(slot: i64, f: &f64, sigma: &Rational, eta0: &Vec<u8>, pool_vrf_skey: &Vec<u8>) -> Result<bool, String> {
     trace!("is_slot_leader: {}", slot);
-    let seed = mk_seed(slot, eta0);
+    let seed: Vec<u8> = mk_seed(slot, eta0);
     trace!("seed: {}", hex::encode(&seed));
-    let cert_nat = vrf_eval_certified(seed, pool_vrf_skey)?;
+    let cert_nat: Integer = vrf_eval_certified(seed, pool_vrf_skey)?;
     trace!("cert_nat: {}", &cert_nat);
-    let cert_nat_max = Integer::from(2).pow(512);
+    let cert_nat_max: Integer = Integer::from(2).pow(512);
     let denominator = &cert_nat_max - cert_nat;
-    let recip_q: I15F113 = I15F113::from_num(Rational::from((cert_nat_max, denominator)).to_f64());
-    trace!("recip_q: {}", &recip_q);
-    let c = (1f64 - f).ln();
-    trace!("c: {}", &c);
-    let x: I15F113 = I15F113::from_num(-sigma.to_f64() * c);
-    trace!("x: {}", &x);
+    let recip_q: Float = Float::with_val(120, Rational::from((cert_nat_max, denominator)));
+    trace!("recip_q: {}", &recip_q.to_string_radix(10, None));
+    let mut c: Float = Float::with_val(120, f);
+    c.sub_from(1);
+    c.ln_round(Round::Down);
+    trace!("c: {}", &c.to_string_radix(10, None));
+    let x: Float = -c * sigma;
+    trace!("x: {}", &x.to_string_radix(10, None));
 
     match taylor_exp_cmp(3, recip_q, x) {
         TaylorCmp::Above => { Ok(false) }
@@ -278,7 +282,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                             match calculate_ledger_state_sigma_and_d(ledger_state, ledger_set, pool_id) {
                                 Ok((sigma, decentralization_param)) => {
                                     debug!("sigma: {:?}", sigma);
-                                    debug!("decentralization_param: {:?}", decentralization_param);
+                                    debug!("decentralization_param: {}", &decentralization_param.to_string_radix(10, Some(2)));
                                     let tip_slot_number = get_tip_slot_number(&db).unwrap();
                                     debug!("tip_slot_number: {}", tip_slot_number);
                                     // pretend we're on a different slot number if we want to calculate past or future epochs.
