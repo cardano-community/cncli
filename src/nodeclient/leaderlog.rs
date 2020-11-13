@@ -7,7 +7,7 @@ use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
 use chrono::{Duration, NaiveDateTime, TimeZone};
 use chrono_tz::Tz;
-use fixed::types::I30F34;
+use fixed::types::I15F113;
 use log::{debug, trace};
 use rug::{Integer, Rational};
 use rug::integer::Order;
@@ -73,6 +73,7 @@ struct LeaderLog {
     pool_id: String,
     sigma: f64,
     d: f64,
+    f: f64,
     assigned_slots: Vec<Slot>,
 }
 
@@ -163,8 +164,8 @@ fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64, 
     tz.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
-fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &I30F34) -> bool {
-    let diff_slot = (current_slot - first_slot_of_epoch).abs();
+fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &I15F113) -> bool {
+    let diff_slot: i128 = (current_slot - first_slot_of_epoch).abs() as i128;
     d.mul(diff_slot).ceil() < d.mul(diff_slot + 1).ceil()
 }
 
@@ -199,13 +200,13 @@ enum TaylorCmp {
     MaxReached,
 }
 
-fn taylor_exp_cmp(bound_x: i32, cmp: I30F34, x: I30F34) -> TaylorCmp {
+fn taylor_exp_cmp(bound_x: i32, cmp: I15F113, x: I15F113) -> TaylorCmp {
     let max_n = 1000;
     let mut divisor = 1;
-    let mut acc: I30F34 = I30F34::from_num(1);
+    let mut acc: I15F113 = I15F113::from_num(1);
     let mut err = x;
-    let mut error_term = err * I30F34::from_num(bound_x);
-    let mut next_x: I30F34;
+    let mut error_term = err * I15F113::from_num(bound_x);
+    let mut next_x: I15F113;
     for _n in 0..max_n {
         if cmp >= acc + error_term {
             return TaylorCmp::Above;
@@ -215,7 +216,7 @@ fn taylor_exp_cmp(bound_x: i32, cmp: I30F34, x: I30F34) -> TaylorCmp {
             divisor += 1;
             next_x = err;
             err = (err * x) / divisor;
-            error_term = err * I30F34::from_num(bound_x);
+            error_term = err * I15F113::from_num(bound_x);
             acc += next_x;
         }
     }
@@ -237,11 +238,11 @@ fn is_slot_leader(slot: i64, f: &f64, sigma: &Rational, eta0: &Vec<u8>, pool_vrf
     trace!("cert_nat: {}", &cert_nat);
     let cert_nat_max = Integer::from(2).pow(512);
     let denominator = &cert_nat_max - cert_nat;
-    let recip_q: I30F34 = I30F34::from_num(Rational::from((cert_nat_max, denominator)).to_f64());
+    let recip_q: I15F113 = I15F113::from_num(Rational::from((cert_nat_max, denominator)).to_f64());
     trace!("recip_q: {}", &recip_q);
     let c = (1f64 - f).ln();
     trace!("c: {}", &c);
-    let x: I30F34 = I30F34::from_num(-sigma.to_f64() * c);
+    let x: I15F113 = I15F113::from_num(-sigma.to_f64() * c);
     trace!("x: {}", &x);
 
     match taylor_exp_cmp(3, recip_q, x) {
@@ -315,6 +316,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                         pool_id: pool_id.clone(),
                                                         sigma: sigma.to_f64(),
                                                         d: decentralization_param.to_string().parse().unwrap(),
+                                                        f: shelley.active_slots_coeff.clone(),
                                                         assigned_slots: vec![],
                                                     };
 
