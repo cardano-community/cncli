@@ -70,6 +70,8 @@ struct LeaderLog {
     epoch: i64,
     epoch_nonce: String,
     epoch_slots: i64,
+    epoch_slots_ideal: f64,
+    max_performance: f64,
     pool_id: String,
     sigma: f64,
     d: f64,
@@ -315,15 +317,20 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                     let epoch_nonce = Params::new().hash_length(32).to_state().update(&*hex::decode(nc_nh).unwrap()).finalize().as_bytes().to_owned();
                                                     debug!("epoch_nonce: {}", hex::encode(&epoch_nonce));
 
+                                                    let d: f64 = decentralization_param.to_string().parse().unwrap();
+                                                    let epoch_slots_ideal = (sigma.to_f64() * 21600.0 * (1.0 - d) * 100.0).round() / 100.0;
                                                     let mut leader_log = LeaderLog {
                                                         status: "ok".to_string(),
                                                         epoch,
                                                         epoch_nonce: hex::encode(&epoch_nonce),
                                                         epoch_slots: 0,
+                                                        epoch_slots_ideal,
+                                                        max_performance: 0.0,
                                                         pool_id: pool_id.clone(),
                                                         sigma: sigma.to_f64(),
-                                                        d: decentralization_param.to_string().parse().unwrap(),
+                                                        d,
                                                         f: shelley.active_slots_coeff.clone(),
+
                                                         assigned_slots: vec![],
                                                     };
 
@@ -353,6 +360,8 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                             Err(error) => { handle_error(error) }
                                                         }
                                                     }
+                                                    leader_log.max_performance = (leader_log.epoch_slots as f64 / epoch_slots_ideal * 10000.0).round() / 100.0;
+
                                                     match serde_json::to_string_pretty(&leader_log) {
                                                         Ok(leader_log_json) => {
                                                             println!("{}", leader_log_json);
