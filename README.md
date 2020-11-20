@@ -239,6 +239,38 @@ $ cncli validate --hash ffffff
  "errorMessage": "Query returned no rows"
 }
 ```
+### Nonce Command
+This command calculates the epoch nonce value.
+
+This command requires that you:
+
+1.) Use the `sync` command above to build a 100% sync'd cncli.db database file.
+
+#### Show Help
+```shell script
+$ cncli nonce --help
+cncli-nonce 0.2.7
+
+USAGE:
+    cncli nonce [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+        --byron-genesis <byron-genesis>        byron genesis json file
+    -d, --db <db>                              sqlite database file [default: ./cncli.db]
+        --ledger-set <ledger-set>              Which ledger data to use. prev - previous epoch, current - current epoch,
+                                               next - future epoch [default: current]
+        --shelley-genesis <shelley-genesis>    shelley genesis json file
+```
+
+#### Calculate nonce
+```shell script
+$ cncli nonce --byron-genesis ~/haskell/test/byron-genesis.json --shelley-genesis ~/haskell/test/shelley-genesis.json --ledger-set next
+60d68963ece4f16a30934f473fc3be51526f7c6ff2ac0b3f8a40a38623411f8e
+```
 
 ### Leaderlog Command
 This command calculates a stakepool's expected slot list. "prev" and "current" logs are available as long as you have a sync'd database. "next" logs are only available 1.5 days before the end of the epoch.

@@ -261,7 +261,7 @@ fn is_slot_leader(slot: i64, f: &f64, sigma: &Rational, eta0: &Vec<u8>, pool_vrf
     }
 }
 
-pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, shelley_genesis: &PathBuf, ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String, pool_vrf_skey_path: &PathBuf, timezone: &String) {
+pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, shelley_genesis: &PathBuf, ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String, pool_vrf_skey_path: &PathBuf, timezone: &String, is_just_nonce: bool) {
     let tz: Tz = match timezone.parse::<Tz>() {
         Err(_) => {
             handle_error("timezone parse error!");
@@ -282,40 +282,47 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
             match read_shelley_genesis(shelley_genesis) {
                 Ok(shelley) => {
                     debug!("{:?}", shelley);
-                    match read_vrf_skey(pool_vrf_skey_path) {
-                        Ok(pool_vrf_skey) => {
-                            match calculate_ledger_state_sigma_and_d(ledger_state, ledger_set, pool_id) {
-                                Ok((sigma, decentralization_param)) => {
-                                    debug!("sigma: {:?}", sigma);
-                                    debug!("decentralization_param: {}", &decentralization_param.to_string_radix(10, Some(2)));
-                                    let tip_slot_number = get_tip_slot_number(&db).unwrap();
-                                    debug!("tip_slot_number: {}", tip_slot_number);
-                                    // pretend we're on a different slot number if we want to calculate past or future epochs.
-                                    let additional_slots: i64 = match ledger_set {
-                                        LedgerSet::Mark => { shelley.epoch_length }
-                                        LedgerSet::Set => { 0 }
-                                        LedgerSet::Go => { -shelley.epoch_length }
-                                    };
-                                    let (epoch, first_slot_of_epoch) = get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots);
-                                    debug!("epoch: {}", epoch);
-                                    let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
-                                    debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
-                                    debug!("first_slot_of_prev_epoch: {}", first_slot_of_prev_epoch);
-                                    let stability_window: i64 = ((3 * byron.protocol_consts.k) as f64 / shelley.active_slots_coeff).ceil() as i64;
-                                    let stability_window_start = first_slot_of_epoch - stability_window;
-                                    debug!("stability_window: {}", stability_window);
-                                    debug!("stability_window_start: {}", stability_window_start);
-                                    match get_eta_v_before_slot(&db, stability_window_start) {
-                                        Ok(nc) => {
-                                            debug!("nc: {}", nc);
-                                            match get_prev_hash_before_slot(&db, first_slot_of_prev_epoch) {
-                                                Ok(nh) => {
-                                                    debug!("nh: {}", nh);
-                                                    let mut nc_nh = String::new();
-                                                    nc_nh.push_str(&*nc);
-                                                    nc_nh.push_str(&*nh);
-                                                    let epoch_nonce = Params::new().hash_length(32).to_state().update(&*hex::decode(nc_nh).unwrap()).finalize().as_bytes().to_owned();
-                                                    debug!("epoch_nonce: {}", hex::encode(&epoch_nonce));
+
+                    let tip_slot_number = get_tip_slot_number(&db).unwrap();
+                    debug!("tip_slot_number: {}", tip_slot_number);
+                    // pretend we're on a different slot number if we want to calculate past or future epochs.
+                    let additional_slots: i64 = match ledger_set {
+                        LedgerSet::Mark => { shelley.epoch_length }
+                        LedgerSet::Set => { 0 }
+                        LedgerSet::Go => { -shelley.epoch_length }
+                    };
+                    let (epoch, first_slot_of_epoch) = get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots);
+                    debug!("epoch: {}", epoch);
+                    let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
+                    debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
+                    debug!("first_slot_of_prev_epoch: {}", first_slot_of_prev_epoch);
+                    let stability_window: i64 = ((3 * byron.protocol_consts.k) as f64 / shelley.active_slots_coeff).ceil() as i64;
+                    let stability_window_start = first_slot_of_epoch - stability_window;
+                    debug!("stability_window: {}", stability_window);
+                    debug!("stability_window_start: {}", stability_window_start);
+
+                    match get_eta_v_before_slot(&db, stability_window_start) {
+                        Ok(nc) => {
+                            debug!("nc: {}", nc);
+                            match get_prev_hash_before_slot(&db, first_slot_of_prev_epoch) {
+                                Ok(nh) => {
+                                    debug!("nh: {}", nh);
+                                    let mut nc_nh = String::new();
+                                    nc_nh.push_str(&*nc);
+                                    nc_nh.push_str(&*nh);
+                                    let epoch_nonce = Params::new().hash_length(32).to_state().update(&*hex::decode(nc_nh).unwrap()).finalize().as_bytes().to_owned();
+                                    debug!("epoch_nonce: {}", hex::encode(&epoch_nonce));
+                                    if is_just_nonce {
+                                        println!("{}", hex::encode(&epoch_nonce));
+                                        return;
+                                    }
+
+                                    match read_vrf_skey(pool_vrf_skey_path) {
+                                        Ok(pool_vrf_skey) => {
+                                            match calculate_ledger_state_sigma_and_d(ledger_state, ledger_set, pool_id) {
+                                                Ok((sigma, decentralization_param)) => {
+                                                    debug!("sigma: {:?}", sigma);
+                                                    debug!("decentralization_param: {}", &decentralization_param.to_string_radix(10, Some(2)));
 
                                                     let d: f64 = decentralization_param.to_string().parse().unwrap();
                                                     let epoch_slots_ideal = (sigma.to_f64() * 21600.0 * (1.0 - d) * 100.0).round() / 100.0;

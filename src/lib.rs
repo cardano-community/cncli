@@ -95,6 +95,16 @@ pub mod nodeclient {
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
             shelley_genesis: std::path::PathBuf,
         },
+        Nonce {
+            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            db: std::path::PathBuf,
+            #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
+            byron_genesis: std::path::PathBuf,
+            #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
+            shelley_genesis: std::path::PathBuf,
+            #[structopt(long, default_value = "current", help = "Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch")]
+            ledger_set: LedgerSet,
+        },
     }
 
     pub fn start(cmd: Command) {
@@ -110,7 +120,10 @@ pub mod nodeclient {
                 protocols::mux_protocol::start(Cmd::Sync, db, host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
             }
             Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey, ref timezone } => {
-                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey, timezone);
+                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey, timezone, false);
+            }
+            Command::Nonce { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_set } => {
+                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, &PathBuf::new(), ledger_set, &String::new(), &PathBuf::new(), &"America/Los_Angeles".to_string(), true)
             }
             Command::Sendtip { ref config, ref cardano_node } => {
                 if !config.exists() {
