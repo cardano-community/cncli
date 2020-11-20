@@ -4,7 +4,7 @@ use std::io::{BufReader, Error};
 use std::path::PathBuf;
 
 use log::debug;
-use rug::{Float, Rational};
+use rug::Float;
 use serde::Deserialize;
 
 use crate::nodeclient::leaderlog::deserialize::fixed_number;
@@ -100,7 +100,7 @@ struct Key {
     key: String
 }
 
-fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> Rational {
+fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> (u64, u64) {
     let stake_keys: Vec<String> = stake_group.delegations.into_iter().filter_map(|delegation| {
         if delegation.len() != 2 {
             return None;
@@ -117,6 +117,7 @@ fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> Rational {
         if out_pool_id != *pool_id {
             None
         } else {
+            debug!("Found delegation key: {:?}", &stake_key);
             Some(stake_key)
         }
     }).collect();
@@ -139,16 +140,18 @@ fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> Rational {
         denominator += lovelace;
 
         if stake_keys.iter().any(|delegated_key| *delegated_key == key) {
+            debug!("Found delegated amount: {}", lovelace);
             Some(lovelace)
         } else {
             None
         }
     }).sum();
-
-    Rational::from((numerator, denominator))
+    debug!("activeStake: {}", numerator);
+    debug!("totalActiveStake: {}", denominator);
+    (numerator, denominator)
 }
 
-pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<(Rational, Float), Error> {
+pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<((u64, u64), Float), Error> {
     let ledger: Ledger = match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(File::open(ledger_state)?)) {
         Ok(ledger2) => { ledger2.nes_es }
         Err(_) => { serde_json::from_reader(BufReader::new(File::open(ledger_state)?))? }

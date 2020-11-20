@@ -322,7 +322,8 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                     match read_vrf_skey(pool_vrf_skey_path) {
                                         Ok(pool_vrf_skey) => {
                                             match calculate_ledger_state_sigma_and_d(ledger_state, ledger_set, pool_id) {
-                                                Ok((sigma, decentralization_param)) => {
+                                                Ok(((active_stake, total_active_stake), decentralization_param)) => {
+                                                    let sigma = Rational::from((active_stake, total_active_stake));
                                                     debug!("sigma: {:?}", sigma);
                                                     debug!("decentralization_param: {}", &decentralization_param.to_string_radix(10, Some(2)));
 
@@ -337,8 +338,8 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                         max_performance: 0.0,
                                                         pool_id: pool_id.clone(),
                                                         sigma: sigma.to_f64(),
-                                                        active_stake: sigma.numer().to_u64().unwrap(),
-                                                        total_active_stake: sigma.denom().to_u64().unwrap(),
+                                                        active_stake,
+                                                        total_active_stake,
                                                         d,
                                                         f: shelley.active_slots_coeff.clone(),
 
@@ -357,14 +358,14 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                             Ok(is_leader) => {
                                                                 if is_leader {
                                                                     no += 1;
-                                                                    leader_log.assigned_slots.push(
-                                                                        Slot {
-                                                                            no,
-                                                                            slot,
-                                                                            slot_in_epoch: slot - first_slot_of_epoch,
-                                                                            at: slot_to_timestamp(&byron, &shelley, slot, &tz),
-                                                                        }
-                                                                    );
+                                                                    let slot = Slot {
+                                                                        no,
+                                                                        slot,
+                                                                        slot_in_epoch: slot - first_slot_of_epoch,
+                                                                        at: slot_to_timestamp(&byron, &shelley, slot, &tz),
+                                                                    };
+                                                                    debug!("Found assigned slot: {:?}", &slot);
+                                                                    leader_log.assigned_slots.push(slot);
                                                                     leader_log.epoch_slots = no;
                                                                 }
                                                             }
