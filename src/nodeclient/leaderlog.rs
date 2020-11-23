@@ -58,6 +58,8 @@ struct ShelleyGenesis {
 
 #[derive(Debug, Deserialize)]
 struct VrfSkey {
+    #[serde(rename(deserialize = "type"))]
+    key_type: String,
     #[serde(deserialize_with = "cbor_hex")]
     #[serde(rename(deserialize = "cborHex"))]
     key: Vec<u8>
@@ -321,6 +323,10 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
 
                                     match read_vrf_skey(pool_vrf_skey_path) {
                                         Ok(pool_vrf_skey) => {
+                                            if pool_vrf_skey.key_type != "VrfSigningKey_PraosVRF" {
+                                                handle_error("Pool VRF Skey must be of type: VrfSigningKey_PraosVRF");
+                                                return;
+                                            }
                                             match calculate_ledger_state_sigma_and_d(ledger_state, ledger_set, pool_id) {
                                                 Ok(((active_stake, total_active_stake), decentralization_param)) => {
                                                     let sigma = Rational::from((active_stake, total_active_stake));
