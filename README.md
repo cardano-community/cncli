@@ -67,6 +67,7 @@ $ cncli ping --host north-america.relays-new.cardano-mainnet.iohk.io
  "status": "ok",
  "host": "north-america.relays-new.cardano-mainnet.iohk.io",
  "port": 3001,
+ "connectDurationMs": 98,
  "durationMs": 118
 }
 ```
@@ -97,6 +98,7 @@ $ cncli ping --host north-america.relays-new.cardano-testnet.iohkdev.io --port 3
  "status": "ok",
  "host": "north-america.relays-new.cardano-testnet.iohkdev.io",
  "port": 3001,
+ "connectDurationMs": 18,
  "durationMs": 38
 }
 ```

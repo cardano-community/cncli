@@ -48,6 +48,7 @@ pub fn start(cmd: Cmd, db: &std::path::PathBuf, host: &String, port: u16, networ
                     let socket_addr: SocketAddr = into_iter.nth(0).unwrap();
                     match TcpStream::connect_timeout(&socket_addr, Duration::from_secs(1)) {
                         Ok(mut stream) => {
+                            let connect_duration = start_time.elapsed();
                             stream.set_nodelay(true).unwrap();
                             stream.set_keepalive_ms(Some(10_000u32)).unwrap();
                             let mut last_data_timestamp = Instant::now();
@@ -93,7 +94,7 @@ pub fn start(cmd: Cmd, db: &std::path::PathBuf, host: &String, port: u16, networ
                                     match cmd {
                                         Cmd::Ping => {
                                             // for ping, we need to print the final output
-                                            ping_json_success(start_time.elapsed(), host, port);
+                                            ping_json_success(connect_duration, start_time.elapsed(), host, port);
                                         }
                                         _ => { warn!("No more active protocols, exiting..."); }
                                     }
@@ -294,13 +295,14 @@ fn mux_add_remove_protocols(cmd: &Cmd, db: &PathBuf, network_magic: u32, protoco
     protocols.append(&mut protocols_to_add);
 }
 
-fn ping_json_success(duration: Duration, host: &String, port: u16) {
+fn ping_json_success(connect_duration: Duration, total_duration: Duration, host: &String, port: u16) {
     println!("{{\n\
         \x20\"status\": \"ok\",\n\
         \x20\"host\": \"{}\",\n\
         \x20\"port\": {},\n\
+        \x20\"connectDurationMs\": {},\n\
         \x20\"durationMs\": {}\n\
-    }}", host, port, duration.as_millis())
+    }}", host, port, connect_duration.as_millis(), total_duration.as_millis());
 }
 
 fn handle_error(cmd: &Cmd, message: String, host: &String, port: u16) {
