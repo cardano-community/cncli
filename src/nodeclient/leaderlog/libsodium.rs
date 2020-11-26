@@ -1,5 +1,4 @@
-
-#[link(name = "sodium")]
+#[link(name = "sodium", kind = "static")]
 extern {
     // int crypto_vrf_prove(unsigned char *proof, const unsigned char *sk, const unsigned char *m, unsigned long long mlen);
     fn crypto_vrf_prove(proof: *mut u8, sk: *const u8, m: *const u8, mlen: u64) -> i32;
