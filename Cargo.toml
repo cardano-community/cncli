@@ -17,7 +17,7 @@ net2 = "0.2.35"
 regex = "1.4.2"
 reqwest = { version = "0.10.8", features = ["blocking"] }
 rug = { version = "1.11.0", default-features = false, features = ["integer", "rational", "float", "serde"] }
-rusqlite = "0.24.1"
+rusqlite = { version = "0.24.1", features = ["bundled"] }
 serde = { version = "1.0.117", features = ["derive"] }
 serde-aux = "1.1.0"
 serde_cbor = "0.10.2"
@@ -28,3 +28,6 @@ structopt = "0.3.20"
 log = "0.4.11"
 env_logger = "0.8.1"
 pretty_env_logger = "0.4.0"
+
+# c code
+gcc = "0.3.55"
