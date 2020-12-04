@@ -7,7 +7,7 @@ use log::debug;
 use rug::Float;
 use serde::Deserialize;
 
-use crate::nodeclient::leaderlog::deserialize::fixed_number;
+use crate::nodeclient::leaderlog::deserialize::{fixed_number, fixed_number_optional};
 use crate::nodeclient::LedgerSet;
 
 #[derive(Debug, Deserialize)]
@@ -58,8 +58,8 @@ struct Proposals {
 #[derive(Debug, Deserialize)]
 struct Proposal {
     #[serde(rename(deserialize = "_d"))]
-    #[serde(deserialize_with = "fixed_number")]
-    decentralisation_param: Float,
+    #[serde(deserialize_with = "fixed_number_optional")]
+    decentralisation_param: Option<Float>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -154,7 +154,10 @@ fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> (u64, u64) {
 pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<((u64, u64), Float), Error> {
     let ledger: Ledger = match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(File::open(ledger_state)?)) {
         Ok(ledger2) => { ledger2.nes_es }
-        Err(_) => { serde_json::from_reader(BufReader::new(File::open(ledger_state)?))? }
+        Err(error) => {
+            debug!("Falling back to old ledger state: {:?}", error);
+            serde_json::from_reader(BufReader::new(File::open(ledger_state)?))?
+        }
     };
 
     Ok((
@@ -174,10 +177,10 @@ pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_
         },
         match ledger_set {
             LedgerSet::Mark => {
-                if ledger.es_l_state.utxo_state.ppups.proposals.proposal.is_empty() {
-                    ledger.es_pp.decentralisation_param
+                if !ledger.es_l_state.utxo_state.ppups.proposals.proposal.is_empty() && ledger.es_l_state.utxo_state.ppups.proposals.proposal.iter().next().unwrap().1.decentralisation_param.is_some() {
+                    ledger.es_l_state.utxo_state.ppups.proposals.proposal.iter().next().unwrap().1.decentralisation_param.clone().unwrap()
                 } else {
-                    ledger.es_l_state.utxo_state.ppups.proposals.proposal.iter().next().unwrap().1.decentralisation_param.clone()
+                    ledger.es_pp.decentralisation_param
                 }
             }
             LedgerSet::Set => { ledger.es_pp.decentralisation_param }

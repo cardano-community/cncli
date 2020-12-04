@@ -8,6 +8,16 @@ pub(crate) fn fixed_number<'de, D: Deserializer<'de>>(d: D) -> Result<Float, D::
     Ok(Float::with_val(120, Float::parse(&*n.to_string()).unwrap()))
 }
 
+pub(crate) fn fixed_number_optional<'de, D: Deserializer<'de>>(d: D) -> Result<Option<Float>, D::Error> {
+    let n: Option<Number> = Deserialize::deserialize(d)?;
+    match n {
+        None => { Ok(None) }
+        Some(number) => {
+            Ok(Some(Float::with_val(120, Float::parse(&*number.to_string()).unwrap())))
+        }
+    }
+}
+
 pub(crate) fn cbor_hex<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
     let cbor: String = Deserialize::deserialize(d)?;
     let cbor_vec = hex::decode(cbor).unwrap();
