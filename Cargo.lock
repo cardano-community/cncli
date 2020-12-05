@@ -103,7 +103,7 @@ checksum = "0e4cec68f03f32e44924783795810fa50a7035d8c8ebe78580ad7e6c703fba38"
 [[package]]
 name = "cardano_ouroboros_network"
 version = "0.0.1-dev"
-source = "git+https://github.com/2nd-Layer/rust-cardano-ouroboros-network?rev=42eeb60#42eeb6046acf5331ffd947bcfb82e68e96408b5d"
+source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=ce18c50#ce18c504ed7900ea1ab3b2e3dc1cc8999e6dd435"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -1134,9 +1134,9 @@ dependencies = [
 
 [[package]]
 name = "serde"
-version = "1.0.117"
+version = "1.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b88fa983de7720629c9387e9f517353ed404164b1e482c970a90c1a4aaf7dc1a"
+checksum = "06c64263859d87aa2eb554587e2d23183398d617427327cf2b3d0ed8c69e4800"
 dependencies = [
  "serde_derive",
 ]
@@ -1175,9 +1175,9 @@ dependencies = [
 
 [[package]]
 name = "serde_derive"
-version = "1.0.117"
+version = "1.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbd1ae72adb44aab48f325a02444a5fc079349a8d804c1fc922aed3f7454c74e"
+checksum = "c84d3526699cd55261af4b941e4e725444df67aa4f9e6a3564f18030d12672df"
 dependencies = [
  "proc-macro2",
  "quote",

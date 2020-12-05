@@ -12,8 +12,8 @@ pub mod nodeclient {
     use structopt::StructOpt;
 
     use crate::nodeclient::leaderlog::handle_error;
-    use cardano_ouroboros_network::protocols::mux_protocol;
-    use cardano_ouroboros_network::protocols::mux_protocol::Cmd;
+    use cardano_ouroboros_network::mux;
+    use cardano_ouroboros_network::mux::Cmd;
 
     mod validate;
     pub mod leaderlog;
@@ -120,14 +120,14 @@ pub mod nodeclient {
     pub fn start(cmd: Command) {
         match cmd {
             Command::Ping { ref host, ref port, ref network_magic } => {
-                mux_protocol::start(Cmd::Ping, &PathBuf::new(), host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
+                mux::start(Cmd::Ping, &PathBuf::new(), host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
             }
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash);
             }
             Command::Sync { ref db, ref host, ref port, ref network_magic } => {
                 info!("Starting NodeClient...");
-                mux_protocol::start(Cmd::Sync, db, host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
+                mux::start(Cmd::Sync, db, host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
             }
             Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey, ref timezone } => {
                 leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey, timezone, false);
@@ -153,7 +153,7 @@ pub mod nodeclient {
                     handles.push(
                         thread::spawn(move || {
                             // PoolTool is hard-coded to mainnet network magic
-                            mux_protocol::start(Cmd::SendTip, &PathBuf::new(), &pool.host, pool.port, 764824073, &api_key, &cardano_node_path, &pool.name, &pool.pool_id);
+                            mux::start(Cmd::SendTip, &PathBuf::new(), &pool.host, pool.port, 764824073, &api_key, &cardano_node_path, &pool.name, &pool.pool_id);
                         })
                     );
                 }
