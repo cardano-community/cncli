@@ -101,6 +101,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e4cec68f03f32e44924783795810fa50a7035d8c8ebe78580ad7e6c703fba38"
 
 [[package]]
+name = "cardano_ouroboros_network"
+version = "0.0.1-dev"
+source = "git+https://github.com/2nd-Layer/rust-cardano-ouroboros-network?rev=42eeb60#42eeb6046acf5331ffd947bcfb82e68e96408b5d"
+dependencies = [
+ "blake2b_simd",
+ "byteorder",
+ "chrono",
+ "hex 0.4.2",
+ "log",
+ "net2",
+ "regex",
+ "reqwest",
+ "rusqlite",
+ "serde",
+ "serde_cbor 0.11.1",
+ "serde_json",
+]
+
+[[package]]
 name = "cc"
 version = "1.0.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -158,14 +177,15 @@ dependencies = [
 
 [[package]]
 name = "cncli"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "blake2b_simd",
  "byteorder",
+ "cardano_ouroboros_network",
  "chrono",
  "chrono-tz",
  "env_logger 0.8.2",
- "hex",
+ "hex 0.3.2",
  "libc",
  "log",
  "net2",
@@ -176,7 +196,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde-aux",
- "serde_cbor",
+ "serde_cbor 0.10.2",
  "serde_json",
  "structopt",
 ]
@@ -446,6 +466,12 @@ name = "hex"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "805026a5d0141ffc30abb3be3173848ad46a1b1664fe632428479619a3644d77"
+
+[[package]]
+name = "hex"
+version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "644f9158b2f133fd50f5fb3242878846d9eb792e445c893805ff0e3824006e35"
 
 [[package]]
 name = "http"
@@ -1133,6 +1159,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7081ed758ec726a6ed8ee7e92f5d3f6e6f8c3901b1f972e3a4a2f2599fad14f"
 dependencies = [
  "byteorder",
+ "half",
+ "serde",
+]
+
+[[package]]
+name = "serde_cbor"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e18acfa2f90e8b735b2836ab8d538de304cbb6729a7360729ea5a895d15a622"
+dependencies = [
  "half",
  "serde",
 ]
