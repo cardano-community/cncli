@@ -205,10 +205,17 @@ fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64, 
     tz.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
-fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &Float) -> bool {
-    let diff_slot = Float::with_val(120, (current_slot - first_slot_of_epoch).abs());
-    let diff_slot_inc = Float::with_val(120, &diff_slot + 1);
-    (d * diff_slot).ceil() < (d * diff_slot_inc).ceil()
+pub fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &Rational) -> bool {
+    trace!("d: {:?}", &d);
+    let diff_slot = Rational::from((current_slot - first_slot_of_epoch).abs());
+    trace!("diff_slot: {:?}", &diff_slot);
+    let diff_slot_inc: Rational = Rational::from(&diff_slot + 1);
+    trace!("diff_slot_inc: {:?}", &diff_slot_inc);
+    let left = (d * diff_slot).ceil();
+    trace!("left: {:?}", &left);
+    let right = (d * diff_slot_inc).ceil();
+    trace!("right: {:?}", &right);
+    left < right
 }
 
 //
@@ -363,9 +370,9 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                 Ok(((active_stake, total_active_stake), decentralization_param)) => {
                                                     let sigma = Rational::from((active_stake, total_active_stake));
                                                     debug!("sigma: {:?}", sigma);
-                                                    debug!("decentralization_param: {}", &decentralization_param.to_string_radix(10, Some(2)));
+                                                    debug!("decentralization_param: {:?}", &decentralization_param);
 
-                                                    let d: f64 = decentralization_param.to_string().parse().unwrap();
+                                                    let d: f64 = decentralization_param.to_f64();
                                                     let epoch_slots_ideal = (sigma.to_f64() * 21600.0 * (1.0 - d) * 100.0).round() / 100.0;
                                                     let mut leader_log = LeaderLog {
                                                         status: "ok".to_string(),

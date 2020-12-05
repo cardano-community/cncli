@@ -4,10 +4,10 @@ use std::io::{BufReader, Error};
 use std::path::PathBuf;
 
 use log::debug;
-use rug::Float;
+use rug::Rational;
 use serde::Deserialize;
 
-use crate::nodeclient::leaderlog::deserialize::{fixed_number, fixed_number_optional};
+use crate::nodeclient::leaderlog::deserialize::{rational, rational_optional};
 use crate::nodeclient::LedgerSet;
 
 #[derive(Debug, Deserialize)]
@@ -28,8 +28,8 @@ struct Ledger {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProtocolParams {
-    #[serde(deserialize_with = "fixed_number")]
-    decentralisation_param: Float,
+    #[serde(deserialize_with = "rational")]
+    decentralisation_param: Rational,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,8 +58,8 @@ struct Proposals {
 #[derive(Debug, Deserialize)]
 struct Proposal {
     #[serde(rename(deserialize = "_d"))]
-    #[serde(deserialize_with = "fixed_number_optional")]
-    decentralisation_param: Option<Float>,
+    #[serde(deserialize_with = "rational_optional")]
+    decentralisation_param: Option<Rational>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -151,7 +151,7 @@ fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> (u64, u64) {
     (numerator, denominator)
 }
 
-pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<((u64, u64), Float), Error> {
+pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<((u64, u64), Rational), Error> {
     let ledger: Ledger = match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(File::open(ledger_state)?)) {
         Ok(ledger2) => { ledger2.nes_es }
         Err(error) => {

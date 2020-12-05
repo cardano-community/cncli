@@ -36,3 +36,6 @@ fn main() {
     let args = Cli::from_args();
     nodeclient::start(args.cmd)
 }
+
+#[cfg(test)]
+mod test;

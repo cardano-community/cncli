@@ -16,7 +16,7 @@ pub mod nodeclient {
 
     mod protocols;
     mod validate;
-    mod leaderlog;
+    pub mod leaderlog;
 
     #[derive(Debug)]
     pub enum LedgerSet {
