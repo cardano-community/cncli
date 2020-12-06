@@ -373,7 +373,7 @@ OPTIONS:
 ```
 
 #### Configuring pooltool.json
-You need to create a pooltool.json file so that the sendtip command knows what node(s) to connect to. It also contains your pooltool configuration. Your pooltool api key can be found on your pooltool profile page. Your node version can be found by looking at any cardano-node logfile. Each log message should contain this version. If you upgrade your nodes to a new version, you will have to update this config file version manually.
+You need to create a pooltool.json file so that the sendtip command knows what node(s) to connect to. It also contains your pooltool configuration. Your pooltool api key can be found on your pooltool profile page.
 
 ```json
 {
