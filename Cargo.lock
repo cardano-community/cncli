@@ -103,7 +103,7 @@ checksum = "0e4cec68f03f32e44924783795810fa50a7035d8c8ebe78580ad7e6c703fba38"
 [[package]]
 name = "cardano_ouroboros_network"
 version = "0.0.1-dev"
-source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=4f44cd5#4f44cd52c195c1b22a6067eca26bef31ddca1cb9"
+source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=b1a246a#b1a246ac6f0eaee93455372f4c236f526389d228"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -177,7 +177,7 @@ dependencies = [
 
 [[package]]
 name = "cncli"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "blake2b_simd",
  "byteorder",
