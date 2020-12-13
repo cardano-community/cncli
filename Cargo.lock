@@ -103,7 +103,7 @@ checksum = "0e4cec68f03f32e44924783795810fa50a7035d8c8ebe78580ad7e6c703fba38"
 [[package]]
 name = "cardano_ouroboros_network"
 version = "0.0.1-dev"
-source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=ae939c2#ae939c2d43b4c1d5d0b66aae7c70558205e60def"
+source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=4454ec1#4454ec1124aef75352f48cc9f9e99fde2b0221ee"
 dependencies = [
  "blake2b_simd",
  "byteorder",
