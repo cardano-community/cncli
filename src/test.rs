@@ -1,7 +1,5 @@
 use std::path::PathBuf;
 
-use cardano_ouroboros_network::mux;
-use cardano_ouroboros_network::mux::Cmd;
 use rug::{Float, Rational};
 use rug::float::Round;
 use rug::ops::MulAssignRound;
@@ -9,6 +7,7 @@ use rug::ops::MulAssignRound;
 use nodeclient::leaderlog::is_overlay_slot;
 
 use super::*;
+use cncli::nodeclient::ping;
 
 #[test]
 fn test_is_overlay_slot() {
@@ -35,7 +34,7 @@ fn test_ping() {
     let network_magic = 1097911063;
     let mut stdout: Vec<u8> = Vec::new();
 
-    mux::start(&mut stdout, Cmd::Ping, &PathBuf::new(), &host, port, network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
+    ping::ping(&mut stdout, &host, port, network_magic);
 
     assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..99], "{\n \"status\": \"ok\",\n \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n \"port\": 3001,\n ");
 }
