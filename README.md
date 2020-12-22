@@ -22,6 +22,7 @@ $ rustup update
 ```
 #### Install dependencies and build cncli
 ```shell script
+$ source $HOME/.cargo/env
 $ sudo apt-get update -y
 $ sudo apt-get install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf -y
 $ git clone https://github.com/AndrewWestberg/cncli
