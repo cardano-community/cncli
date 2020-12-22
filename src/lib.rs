@@ -7,18 +7,17 @@ pub mod nodeclient {
     use std::thread;
     use std::thread::JoinHandle;
 
-    use log::info;
     use serde::Deserialize;
     use structopt::StructOpt;
 
     use crate::nodeclient::leaderlog::handle_error;
-    use futures::executor::block_on;
-    use cardano_ouroboros_network::mux::tcp::Channel;
-    use futures::io::Error;
 
     mod validate;
     pub mod leaderlog;
     pub mod ping;
+    pub mod sync;
+    pub mod sqlite;
+    pub mod pooltool;
 
     #[derive(Debug)]
     pub enum LedgerSet {
@@ -122,58 +121,56 @@ pub mod nodeclient {
     pub fn start(cmd: Command) {
         match cmd {
             Command::Ping { ref host, ref port, ref network_magic } => {
-                ping::ping(&mut stdout(), host, *port, *network_magic);
+                ping::ping(&mut stdout(), host.as_str(), *port, *network_magic);
             }
             Command::Validate { ref db, ref hash } => {
-                // validate::validate_block(db, hash);
+                validate::validate_block(db, hash);
             }
             Command::Sync { ref db, ref host, ref port, ref network_magic } => {
-                // info!("Starting NodeClient...");
-                // mux::start(&mut stdout(), Cmd::Sync, db, host, *port, *network_magic, &String::new(), &PathBuf::new(), &String::new(), &String::new());
+                sync::sync(db, host.as_str(), *port, *network_magic);
             }
             Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey, ref timezone } => {
-                // leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey, timezone, false);
+                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey, timezone, false);
             }
             Command::Nonce { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_set } => {
-                // leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, &PathBuf::new(), ledger_set, &String::new(), &PathBuf::new(), &"America/Los_Angeles".to_string(), true)
+                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, &PathBuf::new(), ledger_set, &String::new(), &PathBuf::new(), &"America/Los_Angeles".to_string(), true)
             }
             Command::Sendtip { ref config, ref cardano_node } => {
-                // if !config.exists() {
-                //     handle_error("config not found!");
-                //     return;
-                // }
-                // if !cardano_node.exists() {
-                //     handle_error("cardano-node not found!");
-                //     return;
-                // }
-                //
-                // let pooltool_config: PooltoolConfig = get_pooltool_config(config);
-                // let mut handles: Vec<JoinHandle<_>> = vec![];
-                // for pool in pooltool_config.pools.into_iter() {
-                //     let api_key = pooltool_config.api_key.clone();
-                //     let cardano_node_path = cardano_node.clone();
-                //     handles.push(
-                //         thread::spawn(move || {
-                //             // PoolTool is hard-coded to mainnet network magic
-                //             mux::start(&mut stdout(), Cmd::SendTip, &PathBuf::new(), &pool.host, pool.port, 764824073, &api_key, &cardano_node_path, &pool.name, &pool.pool_id);
-                //         })
-                //     );
-                // }
-                //
-                // for handle in handles {
-                //     handle.join().unwrap()
-                // }
+                if !config.exists() {
+                    handle_error("config not found!");
+                    return;
+                }
+                if !cardano_node.exists() {
+                    handle_error("cardano-node not found!");
+                    return;
+                }
+
+                let pooltool_config: PooltoolConfig = get_pooltool_config(config);
+                let mut handles: Vec<JoinHandle<_>> = vec![];
+                for pool in pooltool_config.pools.into_iter() {
+                    let api_key = pooltool_config.api_key.clone();
+                    let cardano_node_path = cardano_node.clone();
+                    handles.push(
+                        thread::spawn(move || {
+                            sync::sendtip(pool.name, pool.pool_id, pool.host, pool.port, api_key,  cardano_node_path);
+                        })
+                    );
+                }
+
+                for handle in handles {
+                    handle.join().unwrap()
+                }
             }
             Command::Sendslots { ref config, ref db, ref byron_genesis, ref shelley_genesis } => {
-                // if !config.exists() {
-                //     handle_error("config not found!");
-                //     return;
-                // }
-                // let pooltool_config: PooltoolConfig = get_pooltool_config(config);
-                // leaderlog::send_slots(db, byron_genesis, shelley_genesis, pooltool_config);
+                if !config.exists() {
+                    handle_error("config not found!");
+                    return;
+                }
+                let pooltool_config: PooltoolConfig = get_pooltool_config(config);
+                leaderlog::send_slots(db, byron_genesis, shelley_genesis, pooltool_config);
             }
             Command::Status { ref db, ref byron_genesis, ref shelley_genesis } => {
-                // leaderlog::status(db, byron_genesis, shelley_genesis);
+                leaderlog::status(db, byron_genesis, shelley_genesis);
             }
         }
     }

@@ -4,5 +4,7 @@
 *.skey
 pooltool.json
 testnet
+currentslots.sh
 sendslots.sh
 nextslots.sh
+prevslots.sh
