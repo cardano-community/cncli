@@ -1,5 +1,7 @@
 use std::path::PathBuf;
+use std::time::Duration;
 
+use async_std::task;
 use cardano_ouroboros_network::{
     mux,
     protocols::{
@@ -18,56 +20,71 @@ use crate::nodeclient::sqlite;
 
 pub(crate) fn sync(db: &PathBuf, host: &str, port: u16, network_magic: u32) {
     block_on(async {
-        let block_store = sqlite::SQLiteBlockStore::new(db).unwrap();
-        match mux::tcp::connect(host, port).await {
-            Ok(channel) => {
-                match channel.handshake(network_magic).await {
-                    Ok(_) => {
-                        try_join!(
-                            channel.execute(TxSubmissionProtocol::default()),
-                            channel.execute({ChainSyncProtocol {
-                                mode: Mode::Sync,
-                                network_magic: network_magic,
-                                store: Some(Box::new(block_store)),
-                                ..Default::default()
-                            }}),
-                        ).unwrap();
+        loop {
+            // Retry to establish connection forever
+            let block_store = sqlite::SQLiteBlockStore::new(db).unwrap();
+            match mux::tcp::connect(host, port).await {
+                Ok(channel) => {
+                    match channel.handshake(network_magic).await {
+                        Ok(_) => {
+                            match try_join!(
+                                channel.execute(TxSubmissionProtocol::default()),
+                                channel.execute({ChainSyncProtocol {
+                                    mode: Mode::Sync,
+                                    network_magic: network_magic,
+                                    store: Some(Box::new(block_store)),
+                                    ..Default::default()
+                                }}),
+                            ) {
+                                Ok(_) => {}
+                                Err(error) => { error!("{}", error); }
+                            }
+                        }
+                        Err(error) => { error!("{}", error); }
                     }
-                    Err(error) => { error!("{}", error); }
                 }
+                Err(error) => { error!("{:?}", error); }
             }
-            Err(error) => { error!("{:?}", error); }
+
+            task::sleep(Duration::from_secs(5)).await;
         }
     });
 }
 
 pub(crate) fn sendtip(pool_name: String, pool_id: String, host: String, port: u16, api_key: String, cardano_node_path: PathBuf) {
     block_on(async {
-        let pooltool_notifier = pooltool::PoolToolNotifier {
-            pool_name,
-            pool_id,
-            api_key,
-            cardano_node_path,
-            ..Default::default()
-        };
-        match mux::tcp::connect(&*host, port).await {
-            Ok(channel) => {
-                match channel.handshake(764824073).await {
-                    Ok(_) => {
-                        try_join!(
-                            channel.execute(TxSubmissionProtocol::default()),
-                            channel.execute({ChainSyncProtocol {
-                                mode: Mode::SendTip,
-                                network_magic: 764824073, // hardcoded to mainnet for pooltool
-                                notify: Some(Box::new(pooltool_notifier)),
-                                ..Default::default()
-                            }}),
-                        ).unwrap();
+        loop {
+            let pooltool_notifier = pooltool::PoolToolNotifier {
+                pool_name: pool_name.clone(),
+                pool_id: pool_id.clone(),
+                api_key: api_key.clone(),
+                cardano_node_path: cardano_node_path.clone(),
+                ..Default::default()
+            };
+            match mux::tcp::connect(&*host, port).await {
+                Ok(channel) => {
+                    match channel.handshake(764824073).await {
+                        Ok(_) => {
+                            match try_join!(
+                                channel.execute(TxSubmissionProtocol::default()),
+                                channel.execute({ChainSyncProtocol {
+                                    mode: Mode::SendTip,
+                                    network_magic: 764824073, // hardcoded to mainnet for pooltool
+                                    notify: Some(Box::new(pooltool_notifier)),
+                                    ..Default::default()
+                                }}),
+                            ) {
+                                Ok(_) => {}
+                                Err(error) => { error!("{}", error); }
+                            }
+                        }
+                        Err(error) => { error!("{}", error); }
                     }
-                    Err(error) => { error!("{}", error); }
                 }
+                Err(error) => { error!("{:?}", error); }
             }
-            Err(error) => { error!("{:?}", error); }
+
+            task::sleep(Duration::from_secs(5)).await;
         }
     });
 }

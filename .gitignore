@@ -8,3 +8,4 @@ currentslots.sh
 sendslots.sh
 nextslots.sh
 prevslots.sh
+pingall.sh
