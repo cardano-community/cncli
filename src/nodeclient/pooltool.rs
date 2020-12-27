@@ -3,12 +3,12 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use cardano_ouroboros_network::Notifier;
-use cardano_ouroboros_network::storage::msg_roll_forward::{MsgRollForward, Tip};
+use cardano_ouroboros_network::storage::msg_roll_forward::MsgRollForward;
 use chrono::{SecondsFormat, Utc};
 use log::{error, info};
 use regex::Regex;
 use serde::Serialize;
+use cardano_ouroboros_network::protocols::chainsync::Listener;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -29,6 +29,7 @@ struct PooltoolData {
     block_hash: String,
     parent_hash: String,
     leader_vrf: String,
+    leader_vrf_proof: String,
     node_v_key: String,
     platform: String,
 }
@@ -56,7 +57,7 @@ impl Default for PoolToolNotifier {
 }
 
 impl PoolToolNotifier {
-    pub fn send_to_pooltool(&mut self, tip: Tip, msg_roll_forward: MsgRollForward) {
+    pub fn send_to_pooltool(&mut self, header: &MsgRollForward) {
         if self.last_node_version_time.elapsed() > Duration::from_secs(3600) {
             // Our node version is outdated. Make a call to update it.
             let output = Command::new(&self.cardano_node_path)
@@ -81,12 +82,13 @@ impl PoolToolNotifier {
                         node_id: "".to_string(),
                         version: self.node_version.clone(),
                         at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-                        block_no: tip.block_number,
-                        slot_no: tip.slot_number,
-                        block_hash: hex::encode(&tip.hash),
-                        parent_hash: hex::encode(&msg_roll_forward.prev_hash),
-                        leader_vrf: hex::encode(&msg_roll_forward.leader_vrf_0),
-                        node_v_key: hex::encode(&msg_roll_forward.node_vkey),
+                        block_no: header.block_number,
+                        slot_no: header.slot_number,
+                        block_hash: hex::encode(&header.hash),
+                        parent_hash: hex::encode(&header.prev_hash),
+                        leader_vrf: hex::encode(&header.leader_vrf_0),
+                        leader_vrf_proof: hex::encode(&header.leader_vrf_1),
+                        node_v_key: hex::encode(&header.node_vkey),
                         platform: "cncli".to_string(),
                     },
                 }
@@ -97,7 +99,7 @@ impl PoolToolNotifier {
             Ok(response) => {
                 match response.text() {
                     Ok(text) => {
-                        info!("Pooltool ({}, {}): ({}, {}), json: {}", &self.pool_name, &self.pool_id[..8], &tip.block_number, hex::encode(&tip.hash[..8]), text);
+                        info!("Pooltool ({}, {}): ({}, {}), json: {}", &self.pool_name, &self.pool_id[..8], &header.block_number, hex::encode(&header.hash[..8]), text);
                     }
                     Err(error) => { error!("PoolTool error: {}", error); }
                 }
@@ -107,8 +109,8 @@ impl PoolToolNotifier {
     }
 }
 
-impl Notifier for PoolToolNotifier {
-    fn notify_tip(&mut self, tip: Tip, msg_roll_forward: MsgRollForward) {
-        self.send_to_pooltool(tip, msg_roll_forward);
+impl Listener for PoolToolNotifier {
+    fn handle_tip(&mut self, msg_roll_forward: &MsgRollForward) {
+        self.send_to_pooltool(msg_roll_forward);
     }
 }
