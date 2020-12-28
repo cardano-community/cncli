@@ -140,12 +140,30 @@ impl SQLiteBlockStore {
                     match db.query_row("SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0", NO_PARAMS, |row| row.get(0)) {
                         Ok(eta_v) => { eta_v }
                         Err(_) => {
-                            if network_magic == 764824073 {
-                                // mainnet genesis hash
-                                String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
-                            } else {
-                                // assume testnet genesis hash
-                                String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                            match network_magic {
+                                764824073 => {
+                                    // mainnet genesis hash
+                                    info!("Start nonce calculation for mainnet.");
+                                    String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
+                                }
+                                1097911063 => {
+                                    // Testnet genesis hash
+                                    info!("Start nonce calculation for testnet.");
+                                    String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                                }
+                                3 => {
+                                    // Launchpad genesis hash
+                                    info!("Start nonce calculation for launchpad.");
+                                    String::from("8587fca9128b0470dcaf928f00bb2bd99dec5047e080a2da3aa419bd17023d75")
+                                }
+                                12 => {
+                                    // allegra genesis hash
+                                    info!("Start nonce calculation for allegra testnet.");
+                                    String::from("47daa6201f436c90f9c76e343e0fd6536262b7ca2455ec306aa2fcc45c97bb4d")
+                                }
+                                _ => {
+                                    panic!("Unknown genesis hash for network_magic {}", network_magic);
+                                }
                             }
                         }
                     }

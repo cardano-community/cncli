@@ -4,6 +4,7 @@
 *.skey
 pooltool.json
 testnet
+launchpad
 currentslots.sh
 sendslots.sh
 nextslots.sh

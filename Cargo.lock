@@ -230,7 +230,7 @@ checksum = "631ae5198c9be5e753e5cc215e1bd73c2b466a3565173db433f52bb9d3e66dba"
 [[package]]
 name = "cardano_ouroboros_network"
 version = "0.0.1-dev"
-source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=10b04bd#10b04bda65b8f8790707e4fddd24966159ff658b"
+source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=05e6418#05e64183827206c3208b1c4f2186f1d2289fffed"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -303,7 +303,7 @@ dependencies = [
 
 [[package]]
 name = "cncli"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "async-std",
  "blake2b_simd",
@@ -830,9 +830,9 @@ checksum = "47be2f14c678be2fdcab04ab1171db51b2762ce6f0a8ee87c8dd4a04ed216135"
 
 [[package]]
 name = "itoa"
-version = "0.4.6"
+version = "0.4.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc6f3ad7b9d11a0c00842ff8de1b60ee58661048eb8049ed33c73594f359d7e6"
+checksum = "dd25036021b0de88a0aff6b850051563c6516d0bf53f8638938edbb9de732736"
 
 [[package]]
 name = "js-sys"
