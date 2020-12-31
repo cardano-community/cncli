@@ -6,7 +6,7 @@ use std::{
 use blake2b_simd::Params;
 use cardano_ouroboros_network::{
     BlockStore,
-    storage::msg_roll_forward::MsgRollForward,
+    BlockHeader,
 };
 use log::{debug, info};
 use rusqlite::{Connection, Error, named_params, NO_PARAMS};
@@ -130,7 +130,7 @@ impl SQLiteBlockStore {
         Ok(SQLiteBlockStore { db })
     }
 
-    fn sql_save_block(&mut self, pending_blocks: &mut Vec<MsgRollForward>, network_magic: u32) -> Result<(), rusqlite::Error> {
+    fn sql_save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, network_magic: u32) -> Result<(), rusqlite::Error> {
         let db = &mut self.db;
 
         // get the last block eta_v (nonce) in the db
@@ -281,7 +281,7 @@ impl SQLiteBlockStore {
 }
 
 impl BlockStore for SQLiteBlockStore {
-    fn save_block(&mut self, mut pending_blocks: &mut Vec<MsgRollForward>, network_magic: u32) -> io::Result<()> {
+    fn save_block(&mut self, mut pending_blocks: &mut Vec<BlockHeader>, network_magic: u32) -> io::Result<()> {
         match self.sql_save_block(&mut pending_blocks, network_magic) {
             Ok(_) => Ok(()),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Database error!")),

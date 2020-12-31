@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "0.5.3"
+version = "0.5.4"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -11,7 +11,7 @@ build = "build.rs"
 async-std = "1.8.0"
 blake2b_simd = "0.5.11"
 byteorder = "1.3.4"
-cardano_ouroboros_network = { git = "https://github.com/AndrewWestberg/rust-cardano-ouroboros-network", rev = "05e6418" }
+cardano_ouroboros_network = { git = "https://github.com/AndrewWestberg/rust-cardano-ouroboros-network", rev = "cb6bf37" }
 #cardano_ouroboros_network = { path = "/home/westbam/Development/rust-cardano-ouroboros-network" }
 chrono = "0.4.19"
 chrono-tz = "0.5.3"

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use cardano_ouroboros_network::storage::msg_roll_forward::MsgRollForward;
+use cardano_ouroboros_network::BlockHeader;
 use chrono::{SecondsFormat, Utc};
 use log::{error, info};
 use regex::Regex;
@@ -57,7 +57,7 @@ impl Default for PoolToolNotifier {
 }
 
 impl PoolToolNotifier {
-    pub fn send_to_pooltool(&mut self, header: &MsgRollForward) {
+    pub fn send_to_pooltool(&mut self, header: &BlockHeader) {
         if self.last_node_version_time.elapsed() > Duration::from_secs(3600) {
             // Our node version is outdated. Make a call to update it.
             let output = Command::new(&self.cardano_node_path)
@@ -110,7 +110,7 @@ impl PoolToolNotifier {
 }
 
 impl Listener for PoolToolNotifier {
-    fn handle_tip(&mut self, msg_roll_forward: &MsgRollForward) {
-        self.send_to_pooltool(msg_roll_forward);
+    fn handle_tip(&mut self, block_header: &BlockHeader) {
+        self.send_to_pooltool(block_header);
     }
 }
