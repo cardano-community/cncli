@@ -4,6 +4,26 @@ use std::time::{Duration, Instant};
 use cardano_ouroboros_network::mux;
 use futures::executor::block_on;
 use log::debug;
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PingSuccess {
+    status: String,
+    host: String,
+    port: u16,
+    connect_duration_ms: u128,
+    duration_ms: u128,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PingError {
+    status: String,
+    host: String,
+    port: u16,
+    error_message: String,
+}
 
 pub fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u32) {
     block_on(async {
@@ -30,20 +50,20 @@ pub fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u32) {
 }
 
 fn ping_json_success<W: Write>(out: &mut W, connect_duration: Duration, total_duration: Duration, host: &str, port: u16) {
-    write!(out, "{{\n\
-        \x20\"status\": \"ok\",\n\
-        \x20\"host\": \"{}\",\n\
-        \x20\"port\": {},\n\
-        \x20\"connectDurationMs\": {},\n\
-        \x20\"durationMs\": {}\n\
-    }}", host, port, connect_duration.as_millis(), total_duration.as_millis()).unwrap();
+    serde_json::ser::to_writer_pretty(out, &PingSuccess {
+        status: "ok".to_string(),
+        host: host.to_string(),
+        port,
+        connect_duration_ms: connect_duration.as_millis(),
+        duration_ms: total_duration.as_millis(),
+    }).unwrap();
 }
 
 fn ping_json_error<W: Write>(out: &mut W, message: String, host: &str, port: u16) {
-    write!(out, "{{\n\
-        \x20\"status\": \"error\",\n\
-        \x20\"host\": \"{}\",\n\
-        \x20\"port\": {},\n\
-        \x20\"errorMessage\": \"{}\"\n\
-    }}", host, port, message).unwrap();
+    serde_json::ser::to_writer_pretty(out, &PingError {
+        status: "error".to_string(),
+        host: host.to_string(),
+        port,
+        error_message: message,
+    }).unwrap();
 }
