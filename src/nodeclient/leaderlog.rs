@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{BufReader, Error};
+use std::io::{BufReader, Error, stdout};
 use std::ops::{Div, Mul};
 use std::path::PathBuf;
 
@@ -25,6 +25,14 @@ use crate::nodeclient::leaderlog::libsodium::{sodium_crypto_vrf_proof_to_hash, s
 mod ledgerstate;
 mod libsodium;
 mod deserialize;
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LeaderLogError {
+    status: String,
+    error_message: String,
+}
+
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -314,9 +322,30 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
     };
 
     if !db_path.exists() {
-        handle_error("database not found!");
+        handle_error(format!("Invalid Path: --db {}", db_path.to_string_lossy()));
         return;
     }
+
+    if !byron_genesis.exists() {
+        handle_error(format!("Invalid Path: --byron-genesis {}", byron_genesis.to_string_lossy()));
+        return;
+    }
+
+    if !shelley_genesis.exists() {
+        handle_error(format!("Invalid Path: --shelley-genesis {}", shelley_genesis.to_string_lossy()));
+        return;
+    }
+
+    if !pool_vrf_skey_path.exists() {
+        handle_error(format!("Invalid Path: --pool_vrf_skey {}", pool_vrf_skey_path.to_string_lossy()));
+        return;
+    }
+
+    if !ledger_state.exists() {
+        handle_error(format!("Invalid Path: --ledger-state {}", ledger_state.to_string_lossy()));
+        return;
+    }
+
     let db = Connection::open(db_path).unwrap();
 
     match read_byron_genesis(byron_genesis) {
@@ -614,8 +643,8 @@ fn print_status_synced() {
 }
 
 pub fn handle_error<T: Display>(error_message: T) {
-    println!("{{\n\
-            \x20\"status\": \"error\",\n\
-            \x20\"errorMessage\": \"{}\"\n\
-            }}", error_message);
+    serde_json::ser::to_writer_pretty(&mut stdout(), &LeaderLogError {
+        status: "error".to_string(),
+        error_message: format!("{}", error_message),
+    }).unwrap();
 }

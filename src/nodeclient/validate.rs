@@ -44,6 +44,10 @@ pub fn validate_block(db_path: &PathBuf, hash: &String) {
 }
 
 fn query_block(db_path: &PathBuf, like: String) -> Result<Block, Error> {
+    if !db_path.exists() {
+        return Err(Error::InvalidPath(db_path.clone()));
+    }
+
     let db = Connection::open(db_path)?;
     let query_result = db.query_row("SELECT block_number,slot_number,hash,prev_hash,pool_id,leader_vrf_0,orphaned FROM chain WHERE hash LIKE ?",
                                     &[&like],
