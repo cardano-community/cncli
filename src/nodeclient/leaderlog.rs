@@ -357,6 +357,15 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
 
                     let tip_slot_number = get_tip_slot_number(&db).unwrap();
                     debug!("tip_slot_number: {}", tip_slot_number);
+
+                    // Make sure we're fully sync'd
+                    let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
+                    let system_time = Utc::now().timestamp();
+                    if system_time - tip_time > 900 {
+                        handle_error("db not fully synced!");
+                        return;
+                    }
+
                     // pretend we're on a different slot number if we want to calculate past or future epochs.
                     let additional_slots: i64 = match ledger_set {
                         LedgerSet::Mark => { shelley.epoch_length }
