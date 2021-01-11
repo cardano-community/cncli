@@ -28,7 +28,7 @@ $ sudo apt-get install automake build-essential pkg-config libffi-dev libgmp-dev
 $ git clone https://github.com/AndrewWestberg/cncli
 $ cd cncli
 $ git checkout <latest_tag_name>
-$ cargo install --path . --force      
+$ cargo install --path . --force --locked    
 $ cncli --version
 ```
 
@@ -38,7 +38,7 @@ $ rustup update
 $ cd cncli
 $ git fetch --all --prune
 $ git checkout <latest_tag_name>
-$ cargo install --path . --force
+$ cargo install --path . --force --locked
 $ cncli --version
 ```
 
