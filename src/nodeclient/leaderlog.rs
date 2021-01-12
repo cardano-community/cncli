@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::fs::File;
 use std::io::{BufReader, Error, stdout};
 use std::ops::{Div, Mul};
@@ -14,7 +15,6 @@ use rug::integer::Order;
 use rug::ops::{Pow, SubFrom};
 use rusqlite::{Connection, named_params, NO_PARAMS, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use serde::export::fmt::Display;
 use serde_aux::prelude::deserialize_number_from_string;
 
 use crate::nodeclient::{LedgerSet, PooltoolConfig};
