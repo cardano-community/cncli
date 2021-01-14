@@ -336,14 +336,16 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
         return;
     }
 
-    if !pool_vrf_skey_path.exists() {
-        handle_error(format!("Invalid Path: --pool_vrf_skey {}", pool_vrf_skey_path.to_string_lossy()));
-        return;
-    }
+    if !is_just_nonce {
+        if !pool_vrf_skey_path.exists() {
+            handle_error(format!("Invalid Path: --pool_vrf_skey {}", pool_vrf_skey_path.to_string_lossy()));
+            return;
+        }
 
-    if !ledger_state.exists() {
-        handle_error(format!("Invalid Path: --ledger-state {}", ledger_state.to_string_lossy()));
-        return;
+        if !ledger_state.exists() {
+            handle_error(format!("Invalid Path: --ledger-state {}", ledger_state.to_string_lossy()));
+            return;
+        }
     }
 
     let db = Connection::open(db_path).unwrap();
