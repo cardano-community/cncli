@@ -2,23 +2,30 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use async_std::task;
-use cardano_ouroboros_network::{
-    mux,
-    protocols::{
-        chainsync::{ChainSyncProtocol, Mode},
-        transaction::TxSubmissionProtocol,
-    },
-};
+use cardano_ouroboros_network::{mux, protocols::{
+    chainsync::{ChainSyncProtocol, Mode},
+    transaction::TxSubmissionProtocol,
+}, BlockHeader};
 use futures::{
     executor::block_on,
     try_join,
 };
-use log::error;
+use log::{info, error};
 
 use crate::nodeclient::pooltool;
 use crate::nodeclient::sqlite;
+use cardano_ouroboros_network::protocols::chainsync::Listener;
 
-pub(crate) fn sync(db: &PathBuf, host: &str, port: u16, network_magic: u32) {
+struct SyncExit {}
+
+impl Listener for SyncExit {
+    fn handle_tip(&mut self, _msg_roll_forward: &BlockHeader) {
+        info!("Exiting...");
+        std::process::exit(0);
+    }
+}
+
+pub(crate) fn sync(db: &PathBuf, host: &str, port: u16, network_magic: u32, no_service: bool) {
     block_on(async {
         loop {
             // Retry to establish connection forever
@@ -27,14 +34,25 @@ pub(crate) fn sync(db: &PathBuf, host: &str, port: u16, network_magic: u32) {
                 Ok(channel) => {
                     match channel.handshake(network_magic).await {
                         Ok(_) => {
-                            match try_join!(
-                                channel.execute(TxSubmissionProtocol::default()),
-                                channel.execute({ChainSyncProtocol {
+                            let chain_sync_protocol = if no_service {
+                                ChainSyncProtocol {
                                     mode: Mode::Sync,
-                                    network_magic: network_magic,
+                                    network_magic,
+                                    store: Some(Box::new(block_store)),
+                                    notify: Some(Box::new(SyncExit{})),
+                                    ..Default::default()
+                                }
+                            } else {
+                                ChainSyncProtocol {
+                                    mode: Mode::Sync,
+                                    network_magic,
                                     store: Some(Box::new(block_store)),
                                     ..Default::default()
-                                }}),
+                                }
+                            };
+                            match try_join!(
+                                channel.execute(TxSubmissionProtocol::default()),
+                                channel.execute(chain_sync_protocol),
                             ) {
                                 Ok(_) => {}
                                 Err(error) => { error!("{}", error); }

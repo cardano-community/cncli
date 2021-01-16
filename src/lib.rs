@@ -63,6 +63,8 @@ pub mod nodeclient {
             port: u16,
             #[structopt(long, default_value = "764824073", help = "network magic.")]
             network_magic: u32,
+            #[structopt(long, help = "Exit at 100% sync'd.")]
+            no_service: bool,
         },
         Leaderlog {
             #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
@@ -126,8 +128,8 @@ pub mod nodeclient {
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash);
             }
-            Command::Sync { ref db, ref host, ref port, ref network_magic } => {
-                sync::sync(db, host.as_str(), *port, *network_magic);
+            Command::Sync { ref db, ref host, ref port, ref network_magic, ref no_service } => {
+                sync::sync(db, host.as_str(), *port, *network_magic, *no_service);
             }
             Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey, ref timezone } => {
                 leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey, timezone, false);

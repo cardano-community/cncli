@@ -111,14 +111,15 @@ This command connects to a remote node and synchronizes blocks to a local sqlite
 #### Show Help
 ```shell script
 $ cncli sync --help
-cncli-sync 0.1.0
+cncli-sync 0.5.10
 
 USAGE:
-    cncli sync [OPTIONS] --host <host>
+    cncli sync [FLAGS] [OPTIONS] --host <host>
 
 FLAGS:
-        --help       Prints help information
-    -V, --version    Prints version information
+        --help          Prints help information
+        --no-service    Exit at 100% sync'd.
+    -V, --version       Prints version information
 
 OPTIONS:
     -d, --db <db>                          sqlite database file [default: ./cncli.db]
