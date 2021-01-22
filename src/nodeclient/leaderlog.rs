@@ -1,18 +1,17 @@
 use std::fmt::Display;
 use std::fs::File;
 use std::io::{BufReader, Error, stdout};
-use std::ops::{Div, Mul};
 use std::path::PathBuf;
+use std::str::FromStr;
 
+use bigdecimal::{BigDecimal, FromPrimitive, One, ToPrimitive};
 use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
 use chrono::{Duration, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use log::{debug, error, info, trace};
-use rug::{Float, Integer, Rational};
-use rug::float::Round;
-use rug::integer::Order;
-use rug::ops::{Pow, SubFrom};
+use num_bigint::{BigInt, Sign};
+use rug::Rational;
 use rusqlite::{Connection, named_params, NO_PARAMS, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
@@ -21,6 +20,7 @@ use crate::nodeclient::{LedgerSet, PooltoolConfig};
 use crate::nodeclient::leaderlog::deserialize::cbor_hex;
 use crate::nodeclient::leaderlog::ledgerstate::calculate_ledger_state_sigma_and_d;
 use crate::nodeclient::leaderlog::libsodium::{sodium_crypto_vrf_proof_to_hash, sodium_crypto_vrf_prove};
+use crate::nodeclient::math::{ln, normalize, round, taylor_exp_cmp, TaylorCmp};
 
 mod ledgerstate;
 mod libsodium;
@@ -245,67 +245,33 @@ fn mk_seed(slot: i64, eta0: &Vec<u8>) -> Vec<u8> {
     UC_NONCE.iter().enumerate().map(|(i, byte)| byte ^ slot_to_seed[i]).collect()
 }
 
-fn vrf_eval_certified(seed: Vec<u8>, pool_vrf_skey: &Vec<u8>) -> Result<Integer, String> {
+fn vrf_eval_certified(seed: Vec<u8>, pool_vrf_skey: &Vec<u8>) -> Result<BigInt, String> {
     let certified_proof: Vec<u8> = sodium_crypto_vrf_prove(pool_vrf_skey, seed)?;
     let certified_proof_hash: Vec<u8> = sodium_crypto_vrf_proof_to_hash(certified_proof)?;
-    Ok(Integer::from_digits(&*certified_proof_hash, Order::MsfBe))
-}
-
-enum TaylorCmp {
-    Above,
-    Below,
-    MaxReached,
-}
-
-fn taylor_exp_cmp(bound_x: i32, cmp: Float, x: Float) -> TaylorCmp {
-    let max_n: i32 = 1000;
-    let bound_xf: Float = Float::with_val(120, bound_x);
-    let mut divisor: i32 = 1;
-    let mut acc: Float = Float::with_val(120, 1);
-    let mut err: Float = x.clone();
-    let mut error_term: Float = Float::with_val(120, &err * &bound_xf);
-    let mut next_x: Float;
-    for _n in 0..max_n {
-        if cmp >= Float::with_val(120, &acc + &error_term) {
-            return TaylorCmp::Above;
-        } else if cmp < Float::with_val(120, &acc - &error_term) {
-            return TaylorCmp::Below;
-        } else {
-            divisor += 1;
-            next_x = err.clone();
-            err = Float::with_val(120, err.mul(&x).div(divisor));
-            error_term = Float::with_val(120, &err * &bound_xf);
-            acc += next_x;
-        }
-    }
-
-    TaylorCmp::MaxReached
+    Ok(BigInt::from_bytes_be(Sign::Plus, &*certified_proof_hash))
 }
 
 // Determine if our pool is a slot leader for this given slot
 // @param slot The slot to check
-// @param f The activeSlotsCoeff value from protocol params
 // @param sigma The controlled stake proportion for the pool
 // @param eta0 The epoch nonce value
 // @param pool_vrf_skey The vrf signing key for the pool
-fn is_slot_leader(slot: i64, f: &f64, sigma: &Rational, eta0: &Vec<u8>, pool_vrf_skey: &Vec<u8>) -> Result<bool, String> {
+// @param cert_nat_max The value 2^512
+// @param c 1-activeSlotsCoeff - usually 0.95
+fn is_slot_leader(slot: i64, sigma: &BigDecimal, eta0: &Vec<u8>, pool_vrf_skey: &Vec<u8>, cert_nat_max: &BigDecimal, c: &BigDecimal) -> Result<bool, String> {
     trace!("is_slot_leader: {}", slot);
     let seed: Vec<u8> = mk_seed(slot, eta0);
     trace!("seed: {}", hex::encode(&seed));
-    let cert_nat: Integer = vrf_eval_certified(seed, pool_vrf_skey)?;
+    let cert_nat: BigInt = vrf_eval_certified(seed, pool_vrf_skey)?;
     trace!("cert_nat: {}", &cert_nat);
-    let cert_nat_max: Integer = Integer::from(2).pow(512);
-    let denominator = &cert_nat_max - cert_nat;
-    let recip_q: Float = Float::with_val(120, Rational::from((cert_nat_max, denominator)));
-    trace!("recip_q: {}", &recip_q.to_string_radix(10, None));
-    let mut c: Float = Float::with_val(120, f);
-    c.sub_from(1);
-    c.ln_round(Round::Down);
-    trace!("c: {}", &c.to_string_radix(10, None));
-    let x: Float = -c * sigma;
-    trace!("x: {}", &x.to_string_radix(10, None));
+    let denominator = cert_nat_max - BigDecimal::from(cert_nat);
+    let recip_q: BigDecimal = normalize(cert_nat_max / denominator);
+    trace!("recip_q: {}", &recip_q);
+    trace!("c: {}", c);
+    let x: BigDecimal = round(-c * sigma);
+    trace!("x: {}", &x);
 
-    match taylor_exp_cmp(3, recip_q, x) {
+    match taylor_exp_cmp(3, &recip_q, &x) {
         TaylorCmp::Above => { Ok(false) }
         TaylorCmp::Below => { Ok(true) }
         TaylorCmp::MaxReached => { Ok(false) }
@@ -408,12 +374,12 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                             }
                                             match calculate_ledger_state_sigma_and_d(ledger_state, ledger_set, pool_id) {
                                                 Ok(((active_stake, total_active_stake), decentralization_param)) => {
-                                                    let sigma = Rational::from((active_stake, total_active_stake));
+                                                    let sigma = normalize(BigDecimal::from(active_stake) / BigDecimal::from(total_active_stake));
                                                     debug!("sigma: {:?}", sigma);
                                                     debug!("decentralization_param: {:?}", &decentralization_param);
 
                                                     let d: f64 = (decentralization_param.to_f64() * 100.0).round() / 100.0;
-                                                    let epoch_slots_ideal = (sigma.to_f64() * 21600.0 * (1.0 - d) * 100.0).round() / 100.0;
+                                                    let epoch_slots_ideal = (sigma.to_f64().unwrap() * 21600.0 * (1.0 - d) * 100.0).round() / 100.0;
                                                     let mut leader_log = LeaderLog {
                                                         status: "ok".to_string(),
                                                         epoch,
@@ -422,24 +388,25 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                         epoch_slots_ideal,
                                                         max_performance: 0.0,
                                                         pool_id: pool_id.clone(),
-                                                        sigma: sigma.to_f64(),
+                                                        sigma: sigma.to_f64().unwrap(),
                                                         active_stake,
                                                         total_active_stake,
                                                         d,
                                                         f: shelley.active_slots_coeff.clone(),
-
                                                         assigned_slots: vec![],
                                                     };
 
+                                                    let cert_nat_max: BigDecimal = BigDecimal::from_str("13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096").unwrap(); // 2^512
+                                                    let c: BigDecimal = ln(&(BigDecimal::one() - BigDecimal::from_f64(shelley.active_slots_coeff).unwrap()));
                                                     let mut no = 0i64;
                                                     for slot_in_epoch in 0..shelley.epoch_length {
                                                         let slot = first_slot_of_epoch + slot_in_epoch;
                                                         if is_overlay_slot(&first_slot_of_epoch, &slot, &decentralization_param) {
-                                                            // Nobody is allowed to make a block in tis slot except maybe BFT nodes.
+                                                            // Nobody is allowed to make a block in this slot except BFT nodes.
                                                             continue;
                                                         }
 
-                                                        match is_slot_leader(slot, &shelley.active_slots_coeff, &sigma, &epoch_nonce, &pool_vrf_skey.key) {
+                                                        match is_slot_leader(slot, &sigma, &epoch_nonce, &pool_vrf_skey.key, &cert_nat_max, &c) {
                                                             Ok(is_leader) => {
                                                                 if is_leader {
                                                                     no += 1;

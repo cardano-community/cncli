@@ -18,6 +18,7 @@ pub mod nodeclient {
     pub mod sync;
     pub mod sqlite;
     pub mod pooltool;
+    pub mod math;
 
     #[derive(Debug)]
     pub enum LedgerSet {

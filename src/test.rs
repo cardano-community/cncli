@@ -1,9 +1,14 @@
+use std::str::FromStr;
+
+use bigdecimal::{BigDecimal, One, Zero};
 use rug::{Float, Rational};
 use rug::float::Round;
 use rug::ops::MulAssignRound;
 
+use cncli::nodeclient::math::{ceiling, exp, find_e, ln, split_ln, round};
 use cncli::nodeclient::ping;
 use nodeclient::leaderlog::is_overlay_slot;
+use nodeclient::math::ipow;
 
 use super::*;
 
@@ -72,3 +77,112 @@ fn test_ping_failure_bad_magic() {
 
     assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1097911063}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 111111}, diffusionMode = InitiatorAndResponderDiffusionMode}\"\n}");
 }
+
+#[test]
+fn test_eps() {
+    let eps = BigDecimal::from_str("1.E-24").unwrap();
+    // println!("1/10^24 = {}", eps);
+    assert_eq!(eps.to_string(), "0.000000000000000000000001");
+}
+
+#[test]
+fn test_ceiling() {
+    let x = BigDecimal::from_str("1234.00000").unwrap();
+    let ceil_x = ceiling(&x);
+    assert_eq!(ceil_x, BigDecimal::from(1234));
+
+    let y = BigDecimal::from_str("1234.0000000000123").unwrap();
+    let ceil_y = ceiling(&y);
+    assert_eq!(ceil_y, BigDecimal::from(1235))
+}
+
+#[test]
+fn test_exp() {
+    let x = BigDecimal::zero();
+    let exp_x = exp(&x);
+    assert_eq!(exp_x, BigDecimal::one());
+
+    let x = BigDecimal::one();
+    let exp_x = exp(&x);
+    assert_eq!(exp_x.to_string(), "2.7182818284590452353602874043083282");
+
+    let x = BigDecimal::from_str("-54.268914").unwrap();
+    let exp_x = exp(&x);
+    assert_eq!(exp_x.to_string(), "0.0000000000000000000000026996664594");
+}
+
+#[test]
+fn test_find_e() {
+    let exp1 = exp(&BigDecimal::one());
+    let x = BigDecimal::from_str("8.5").unwrap();
+    let n = find_e(&exp1, &x);
+    println!("find_e({}) = {}", &x, n);
+    assert_eq!(n, 2);
+}
+
+#[test]
+fn test_split_ln() {
+    let exp1 = exp(&BigDecimal::one());
+    let x = BigDecimal::from_str("2.9").unwrap();
+    let (n, xp) = split_ln(&exp1, &x);
+    println!("n: {}, xp: {}", n, xp);
+}
+
+#[test]
+fn test_ln() {
+    let x = BigDecimal::one();
+    let ln_x = ln(&x);
+    assert_eq!(ln_x.to_string(), "0.0000000000000000000000000000000000");
+
+    let x = BigDecimal::from_str("0.95").unwrap();
+    let ln_x = ln(&x);
+    assert_eq!(ln_x.to_string(), "-0.0512932943875505334261962382072846");
+    println!("ln(1-f) = ln (0.95) = {}", ln_x);
+}
+
+#[test]
+fn test_infinite_range_stuff() {
+    let mut range = 1..;
+
+    let mut i = 0;
+
+    while i < 1024 {
+        let an = range.by_ref().take(1).next().unwrap();
+        let bn = an * an;
+        println!("an: {}, bn: {}, range: {:?}", an, bn, &range);
+        i += 1;
+    }
+
+
+    // let x:&[i32] = &(1..1025).collect()[..];
+    // let y: &[i32] = &(1..1025).map(|m| m * m).collect()[..];
+    //
+    // println!("x: {:?}", x);
+    // println!("y: {:?}", y);
+}
+
+#[test]
+fn test_pow() {
+    let mut x = BigDecimal::from_str("0.2587").unwrap();
+    let mut y = ipow(&x, 5);
+    println!("{}^5 = {}", x, y);
+
+    x = BigDecimal::from_str("-17.2589").unwrap();
+    y = ipow(&x, 5);
+    println!("{}^5 = {}", x, y);
+
+    x = BigDecimal::from(2);
+    y = ipow(&x, 512);
+    println!("{}^512 = {}", x, y);
+}
+
+#[test]
+fn test_leaderlog_math() {
+    let sigma = BigDecimal::from_str("0.0077949348290607914969808129687391").unwrap();
+    let c = BigDecimal::from_str("-0.0512932943875505334261962382072846").unwrap();
+    //let x = round(&(-c * sigma), 34);
+    let x = round(-c * sigma);
+    println!("x: {}", x);
+    assert_eq!(x.to_string(), "0.0003998278869187860731522824872380")
+}
+
