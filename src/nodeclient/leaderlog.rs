@@ -570,21 +570,25 @@ pub(crate) fn send_slots(db_path: &PathBuf, byron_genesis: &PathBuf, shelley_gen
                                                         }
                                                     ).unwrap();
                                                     info!("Sending: {}", &request);
-                                                    let client = reqwest::blocking::Client::new();
-                                                    let pooltool_result = client.post("https://api.pooltool.io/v0/sendslots").body(
-                                                        request
-                                                    ).send();
+                                                    match reqwest::blocking::Client::builder().build() {
+                                                        Ok(client) => {
+                                                            let pooltool_result = client.post("https://api.pooltool.io/v0/sendslots").body(
+                                                                request
+                                                            ).send();
 
-                                                    match pooltool_result {
-                                                        Ok(response) => {
-                                                            match response.text() {
-                                                                Ok(text) => {
-                                                                    info!("Pooltool Response: {}", text);
+                                                            match pooltool_result {
+                                                                Ok(response) => {
+                                                                    match response.text() {
+                                                                        Ok(text) => {
+                                                                            info!("Pooltool Response: {}", text);
+                                                                        }
+                                                                        Err(error) => { error!("PoolTool error: {}", error); }
+                                                                    }
                                                                 }
                                                                 Err(error) => { error!("PoolTool error: {}", error); }
                                                             }
                                                         }
-                                                        Err(error) => { error!("PoolTool error: {}", error); }
+                                                        Err(err) => { error!("Could not set up the reqwest client!: {}", err) }
                                                     }
                                                 }
                                                 Err(error) => { error!("Db Error: {}", error) }

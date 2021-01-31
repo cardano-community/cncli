@@ -4,11 +4,11 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use cardano_ouroboros_network::BlockHeader;
+use cardano_ouroboros_network::protocols::chainsync::Listener;
 use chrono::{SecondsFormat, Utc};
 use log::{error, info};
 use regex::Regex;
 use serde::Serialize;
-use cardano_ouroboros_network::protocols::chainsync::Listener;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -72,39 +72,43 @@ impl PoolToolNotifier {
             info!("Checking cardano-node version: {}", &self.node_version);
             self.last_node_version_time = Instant::now();
         }
-        let client = reqwest::blocking::Client::new();
-        let pooltool_result = client.post("https://api.pooltool.io/v0/sendstats").body(
-            serde_json::ser::to_string(
-                &PooltoolStats {
-                    api_key: self.api_key.clone(),
-                    pool_id: self.pool_id.clone(),
-                    data: PooltoolData {
-                        node_id: "".to_string(),
-                        version: self.node_version.clone(),
-                        at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-                        block_no: header.block_number,
-                        slot_no: header.slot_number,
-                        block_hash: hex::encode(&header.hash),
-                        parent_hash: hex::encode(&header.prev_hash),
-                        leader_vrf: hex::encode(&header.leader_vrf_0),
-                        leader_vrf_proof: hex::encode(&header.leader_vrf_1),
-                        node_v_key: hex::encode(&header.node_vkey),
-                        platform: "cncli".to_string(),
-                    },
-                }
-            ).unwrap()
-        ).send();
+        match reqwest::blocking::Client::builder().build() {
+            Ok(client) => {
+                let pooltool_result = client.post("https://api.pooltool.io/v0/sendstats").body(
+                    serde_json::ser::to_string(
+                        &PooltoolStats {
+                            api_key: self.api_key.clone(),
+                            pool_id: self.pool_id.clone(),
+                            data: PooltoolData {
+                                node_id: "".to_string(),
+                                version: self.node_version.clone(),
+                                at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+                                block_no: header.block_number,
+                                slot_no: header.slot_number,
+                                block_hash: hex::encode(&header.hash),
+                                parent_hash: hex::encode(&header.prev_hash),
+                                leader_vrf: hex::encode(&header.leader_vrf_0),
+                                leader_vrf_proof: hex::encode(&header.leader_vrf_1),
+                                node_v_key: hex::encode(&header.node_vkey),
+                                platform: "cncli".to_string(),
+                            },
+                        }
+                    ).unwrap()
+                ).send();
 
-        match pooltool_result {
-            Ok(response) => {
-                match response.text() {
-                    Ok(text) => {
-                        info!("Pooltool ({}, {}): ({}, {}), json: {}", &self.pool_name, &self.pool_id[..8], &header.block_number, hex::encode(&header.hash[..8]), text);
+                match pooltool_result {
+                    Ok(response) => {
+                        match response.text() {
+                            Ok(text) => {
+                                info!("Pooltool ({}, {}): ({}, {}), json: {}", &self.pool_name, &self.pool_id[..8], &header.block_number, hex::encode(&header.hash[..8]), text);
+                            }
+                            Err(error) => { error!("PoolTool error: {}", error); }
+                        }
                     }
                     Err(error) => { error!("PoolTool error: {}", error); }
                 }
             }
-            Err(error) => { error!("PoolTool error: {}", error); }
+            Err(err) => { error!("Could not set up the reqwest client!: {}", err) }
         }
     }
 }
