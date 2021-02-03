@@ -161,6 +161,11 @@ impl SQLiteBlockStore {
                                     info!("Start nonce calculation for allegra testnet.");
                                     String::from("47daa6201f436c90f9c76e343e0fd6536262b7ca2455ec306aa2fcc45c97bb4d")
                                 }
+                                141 => {
+                                    // guild genesis hash
+                                    info!("Start nonce calculation for guild testnet.");
+                                    String::from("24c22740688a4bb783b3f8dbbaced2ecb661c3ffc3defbc3bed6157c055e36cf")
+                                }
                                 _ => {
                                     panic!("Unknown genesis hash for network_magic {}", network_magic);
                                 }
@@ -227,12 +232,19 @@ impl SQLiteBlockStore {
                             match tx.query_row("SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0", NO_PARAMS, |row| row.get(0)) {
                                 Ok(eta_v) => { eta_v }
                                 Err(_) => {
-                                    if network_magic == 764824073 {
-                                        // mainnet genesis hash
-                                        String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
-                                    } else {
-                                        // assume testnet genesis hash
-                                        String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                                    match network_magic {
+                                        764824073 => {
+                                            // mainnet genesis hash
+                                            String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
+                                        }
+                                        141 => {
+                                            // guild genesis hash
+                                            String::from("24c22740688a4bb783b3f8dbbaced2ecb661c3ffc3defbc3bed6157c055e36cf")
+                                        }
+                                        _ => {
+                                            // assume testnet genesis hash
+                                            String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                                        }
                                     }
                                 }
                             }
