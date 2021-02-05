@@ -5,6 +5,7 @@
 pooltool.json
 testnet
 launchpad
+guild
 currentslots.sh
 sendslots.sh
 nextslots.sh

@@ -258,7 +258,7 @@ checksum = "631ae5198c9be5e753e5cc215e1bd73c2b466a3565173db433f52bb9d3e66dba"
 [[package]]
 name = "cardano_ouroboros_network"
 version = "0.2.0-dev"
-source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=7e40794#7e407944ff36151ba47dc87314690b8b8a44852f"
+source = "git+https://github.com/AndrewWestberg/rust-cardano-ouroboros-network?rev=c93a909#c93a909db33cf984fc668cb517e5ee84c8b9ecf3"
 dependencies = [
  "blake2b_simd",
  "byteorder",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "cncli"
-version = "1.0.4"
+version = "1.1.0"
 dependencies = [
  "async-std",
  "bigdecimal",
@@ -1770,9 +1770,9 @@ dependencies = [
 
 [[package]]
 name = "thread_local"
-version = "1.1.2"
+version = "1.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8208a331e1cb318dd5bd76951d2b8fc48ca38a69f5f4e4af1b6a9f8c6236915"
+checksum = "8018d24e04c95ac8790716a5987d0fec4f8b27249ffa0f7d33f1369bdfb88cbd"
 dependencies = [
  "once_cell",
 ]
@@ -1892,9 +1892,9 @@ checksum = "360dfd1d6d30e05fda32ace2c8c70e9c0a9da713275777f5a4dbb8a1893930c6"
 
 [[package]]
 name = "tracing"
-version = "0.1.22"
+version = "0.1.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f47026cdc4080c07e49b37087de021820269d996f581aac150ef9e5583eefe3"
+checksum = "f7d40a22fd029e33300d8d89a5cc8ffce18bb7c587662f54629e94c9de5487f3"
 dependencies = [
  "cfg-if 1.0.0",
  "log",

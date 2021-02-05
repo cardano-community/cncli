@@ -170,14 +170,25 @@ fn get_prev_slots(db: &Connection, epoch: i64, pool_id: &String) -> Result<Optio
     }).optional()
 }
 
+fn get_shelley_transition_epoch(network_magic: u32) -> i64 {
+    match network_magic {
+        764824073 => {
+            // mainnet
+            208
+        }
+        141 => {
+            // guild
+            1
+        }
+        _ => {
+            // testnet
+            74
+        }
+    }
+}
+
 fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, current_slot: i64) -> (i64, i64) {
-    let shelley_transition_epoch: i64 = if shelley.network_magic == 764824073 {
-        // mainnet
-        208
-    } else {
-        // testnet
-        74
-    };
+    let shelley_transition_epoch = get_shelley_transition_epoch(shelley.network_magic);
     let byron_epoch_length = 10 * byron.protocol_consts.k;
     let byron_slots = byron_epoch_length * shelley_transition_epoch;
     let shelley_slots = current_slot - byron_slots;
@@ -189,14 +200,7 @@ fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, curre
 }
 
 fn slot_to_naivedatetime(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64) -> NaiveDateTime {
-    let shelley_transition_epoch: i64 = if shelley.network_magic == 764824073 {
-        // mainnet
-        208
-    } else {
-        // testnet
-        74
-    };
-
+    let shelley_transition_epoch = get_shelley_transition_epoch(shelley.network_magic);
     let network_start_time = NaiveDateTime::from_timestamp(byron.start_time, 0);
     let byron_epoch_length = 10 * byron.protocol_consts.k;
     let byron_slots = byron_epoch_length * shelley_transition_epoch;
@@ -330,7 +334,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                     let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
                     let system_time = Utc::now().timestamp();
                     if system_time - tip_time > 900 {
-                        handle_error("db not fully synced!");
+                        handle_error(format!("db not fully synced! system_time: {}, tip_time: {}", system_time, tip_time));
                         return;
                     }
 
