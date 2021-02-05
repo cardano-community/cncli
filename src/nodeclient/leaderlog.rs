@@ -383,7 +383,7 @@ pub(crate) fn calculate_leader_logs(db_path: &PathBuf, byron_genesis: &PathBuf, 
                                                     debug!("decentralization_param: {:?}", &decentralization_param);
 
                                                     let d: f64 = (decentralization_param.to_f64() * 100.0).round() / 100.0;
-                                                    let epoch_slots_ideal = (sigma.to_f64().unwrap() * 21600.0 * (1.0 - d) * 100.0).round() / 100.0;
+                                                    let epoch_slots_ideal = (sigma.to_f64().unwrap() * (shelley.epoch_length.to_f64().unwrap() * shelley.active_slots_coeff) * (1.0 - d) * 100.0).round() / 100.0;
                                                     let mut leader_log = LeaderLog {
                                                         status: "ok".to_string(),
                                                         epoch,
