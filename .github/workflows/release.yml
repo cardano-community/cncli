@@ -1,10 +1,13 @@
-on: [push, pull_request]
+on:
+  push:
+    tags:
+      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
 
-name: Continuous Integration
+name: Create Release
 
 jobs:
   build:
-    name: Build
+    name: Release
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -25,21 +28,8 @@ jobs:
       - name: Install Dependencies (OSX)
         if: matrix.os == 'macos-latest'
         run: brew install libsodium
-      - name: Check
+      - name: Build Release
         uses: actions-rs/cargo@v1
         with:
-          command: check
-      - name: Lint
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-      - name: Clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
-      - name: Test
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+          command: build
+          args: --release
