@@ -49,21 +49,35 @@ pub fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u32) {
     });
 }
 
-fn ping_json_success<W: Write>(out: &mut W, connect_duration: Duration, total_duration: Duration, host: &str, port: u16) {
-    serde_json::ser::to_writer_pretty(out, &PingSuccess {
-        status: "ok".to_string(),
-        host: host.to_string(),
-        port,
-        connect_duration_ms: connect_duration.as_millis(),
-        duration_ms: total_duration.as_millis(),
-    }).unwrap();
+fn ping_json_success<W: Write>(
+    out: &mut W,
+    connect_duration: Duration,
+    total_duration: Duration,
+    host: &str,
+    port: u16,
+) {
+    serde_json::ser::to_writer_pretty(
+        out,
+        &PingSuccess {
+            status: "ok".to_string(),
+            host: host.to_string(),
+            port,
+            connect_duration_ms: connect_duration.as_millis(),
+            duration_ms: total_duration.as_millis(),
+        },
+    )
+    .unwrap();
 }
 
 fn ping_json_error<W: Write>(out: &mut W, message: String, host: &str, port: u16) {
-    serde_json::ser::to_writer_pretty(out, &PingError {
-        status: "error".to_string(),
-        host: host.to_string(),
-        port,
-        error_message: message,
-    }).unwrap();
+    serde_json::ser::to_writer_pretty(
+        out,
+        &PingError {
+            status: "error".to_string(),
+            host: host.to_string(),
+            port,
+            error_message: message,
+        },
+    )
+    .unwrap();
 }

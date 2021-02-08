@@ -1,6 +1,6 @@
 pub mod nodeclient {
     use std::fs::File;
-    use std::io::{BufReader, stdout};
+    use std::io::{stdout, BufReader};
     use std::path::PathBuf;
     use std::str::FromStr;
     use std::string::ParseError;
@@ -12,13 +12,13 @@ pub mod nodeclient {
 
     use crate::nodeclient::leaderlog::handle_error;
 
-    mod validate;
     pub mod leaderlog;
-    pub mod ping;
-    pub mod sync;
-    pub mod sqlite;
-    pub mod pooltool;
     pub mod math;
+    pub mod ping;
+    pub mod pooltool;
+    pub mod sqlite;
+    pub mod sync;
+    mod validate;
 
     #[derive(Debug)]
     pub enum LedgerSet {
@@ -34,7 +34,7 @@ pub mod nodeclient {
                 "next" => Ok(LedgerSet::Mark),
                 "current" => Ok(LedgerSet::Set),
                 "prev" => Ok(LedgerSet::Go),
-                _ => Ok(LedgerSet::Set)
+                _ => Ok(LedgerSet::Set),
             }
         }
     }
@@ -52,11 +52,23 @@ pub mod nodeclient {
         Validate {
             #[structopt(long, help = "full or partial block hash to validate")]
             hash: String,
-            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            #[structopt(
+                parse(from_os_str),
+                short,
+                long,
+                default_value = "./cncli.db",
+                help = "sqlite database file"
+            )]
             db: std::path::PathBuf,
         },
         Sync {
-            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            #[structopt(
+                parse(from_os_str),
+                short,
+                long,
+                default_value = "./cncli.db",
+                help = "sqlite database file"
+            )]
             db: std::path::PathBuf,
             #[structopt(short, long, help = "cardano-node hostname to connect to")]
             host: String,
@@ -68,7 +80,13 @@ pub mod nodeclient {
             no_service: bool,
         },
         Leaderlog {
-            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            #[structopt(
+                parse(from_os_str),
+                short,
+                long,
+                default_value = "./cncli.db",
+                help = "sqlite database file"
+            )]
             db: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
             byron_genesis: std::path::PathBuf,
@@ -76,25 +94,53 @@ pub mod nodeclient {
             shelley_genesis: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "ledger state json file")]
             ledger_state: std::path::PathBuf,
-            #[structopt(long, default_value = "current", help = "Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch")]
+            #[structopt(
+                long,
+                default_value = "current",
+                help = "Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch"
+            )]
             ledger_set: LedgerSet,
             #[structopt(long, help = "lower-case hex pool id")]
             pool_id: String,
             #[structopt(parse(from_os_str), long, help = "pool's vrf.skey file")]
             pool_vrf_skey: std::path::PathBuf,
-            #[structopt(long = "tz", default_value = "America/Los_Angeles", help = "TimeZone string from the IANA database - https://en.wikipedia.org/wiki/List_of_tz_database_time_zones")]
+            #[structopt(
+                long = "tz",
+                default_value = "America/Los_Angeles",
+                help = "TimeZone string from the IANA database - https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
+            )]
             timezone: String,
         },
         Sendtip {
-            #[structopt(parse(from_os_str), long, default_value = "./pooltool.json", help = "pooltool config file for sending tips")]
+            #[structopt(
+                parse(from_os_str),
+                long,
+                default_value = "./pooltool.json",
+                help = "pooltool config file for sending tips"
+            )]
             config: std::path::PathBuf,
-            #[structopt(parse(from_os_str), long, help = "path to cardano-node executable for gathering version info")]
+            #[structopt(
+                parse(from_os_str),
+                long,
+                help = "path to cardano-node executable for gathering version info"
+            )]
             cardano_node: std::path::PathBuf,
         },
         Sendslots {
-            #[structopt(parse(from_os_str), long, default_value = "./pooltool.json", help = "pooltool config file for sending slots")]
+            #[structopt(
+                parse(from_os_str),
+                long,
+                default_value = "./pooltool.json",
+                help = "pooltool config file for sending slots"
+            )]
             config: std::path::PathBuf,
-            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            #[structopt(
+                parse(from_os_str),
+                short,
+                long,
+                default_value = "./cncli.db",
+                help = "sqlite database file"
+            )]
             db: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
             byron_genesis: std::path::PathBuf,
@@ -102,7 +148,13 @@ pub mod nodeclient {
             shelley_genesis: std::path::PathBuf,
         },
         Status {
-            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            #[structopt(
+                parse(from_os_str),
+                short,
+                long,
+                default_value = "./cncli.db",
+                help = "sqlite database file"
+            )]
             db: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
             byron_genesis: std::path::PathBuf,
@@ -110,35 +162,90 @@ pub mod nodeclient {
             shelley_genesis: std::path::PathBuf,
         },
         Nonce {
-            #[structopt(parse(from_os_str), short, long, default_value = "./cncli.db", help = "sqlite database file")]
+            #[structopt(
+                parse(from_os_str),
+                short,
+                long,
+                default_value = "./cncli.db",
+                help = "sqlite database file"
+            )]
             db: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
             byron_genesis: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
             shelley_genesis: std::path::PathBuf,
-            #[structopt(long, default_value = "current", help = "Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch")]
+            #[structopt(
+                long,
+                default_value = "current",
+                help = "Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch"
+            )]
             ledger_set: LedgerSet,
         },
     }
 
     pub fn start(cmd: Command) {
         match cmd {
-            Command::Ping { ref host, ref port, ref network_magic } => {
+            Command::Ping {
+                ref host,
+                ref port,
+                ref network_magic,
+            } => {
                 ping::ping(&mut stdout(), host.as_str(), *port, *network_magic);
             }
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash);
             }
-            Command::Sync { ref db, ref host, ref port, ref network_magic, ref no_service } => {
+            Command::Sync {
+                ref db,
+                ref host,
+                ref port,
+                ref network_magic,
+                ref no_service,
+            } => {
                 sync::sync(db, host.as_str(), *port, *network_magic, *no_service);
             }
-            Command::Leaderlog { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_state, ref ledger_set, ref pool_id, ref pool_vrf_skey, ref timezone } => {
-                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, ledger_state, ledger_set, pool_id, pool_vrf_skey, timezone, false);
+            Command::Leaderlog {
+                ref db,
+                ref byron_genesis,
+                ref shelley_genesis,
+                ref ledger_state,
+                ref ledger_set,
+                ref pool_id,
+                ref pool_vrf_skey,
+                ref timezone,
+            } => {
+                leaderlog::calculate_leader_logs(
+                    db,
+                    byron_genesis,
+                    shelley_genesis,
+                    ledger_state,
+                    ledger_set,
+                    pool_id,
+                    pool_vrf_skey,
+                    timezone,
+                    false,
+                );
             }
-            Command::Nonce { ref db, ref byron_genesis, ref shelley_genesis, ref ledger_set } => {
-                leaderlog::calculate_leader_logs(db, byron_genesis, shelley_genesis, &PathBuf::new(), ledger_set, &String::new(), &PathBuf::new(), &"America/Los_Angeles".to_string(), true)
-            }
-            Command::Sendtip { ref config, ref cardano_node } => {
+            Command::Nonce {
+                ref db,
+                ref byron_genesis,
+                ref shelley_genesis,
+                ref ledger_set,
+            } => leaderlog::calculate_leader_logs(
+                db,
+                byron_genesis,
+                shelley_genesis,
+                &PathBuf::new(),
+                ledger_set,
+                &String::new(),
+                &PathBuf::new(),
+                &"America/Los_Angeles".to_string(),
+                true,
+            ),
+            Command::Sendtip {
+                ref config,
+                ref cardano_node,
+            } => {
                 if !config.exists() {
                     handle_error("config not found!");
                     return;
@@ -153,18 +260,28 @@ pub mod nodeclient {
                 for pool in pooltool_config.pools.into_iter() {
                     let api_key = pooltool_config.api_key.clone();
                     let cardano_node_path = cardano_node.clone();
-                    handles.push(
-                        thread::spawn(move || {
-                            sync::sendtip(pool.name, pool.pool_id, pool.host, pool.port, api_key,  cardano_node_path);
-                        })
-                    );
+                    handles.push(thread::spawn(move || {
+                        sync::sendtip(
+                            pool.name,
+                            pool.pool_id,
+                            pool.host,
+                            pool.port,
+                            api_key,
+                            cardano_node_path,
+                        );
+                    }));
                 }
 
                 for handle in handles {
                     handle.join().unwrap()
                 }
             }
-            Command::Sendslots { ref config, ref db, ref byron_genesis, ref shelley_genesis } => {
+            Command::Sendslots {
+                ref config,
+                ref db,
+                ref byron_genesis,
+                ref shelley_genesis,
+            } => {
                 if !config.exists() {
                     handle_error("config not found!");
                     return;
@@ -172,7 +289,11 @@ pub mod nodeclient {
                 let pooltool_config: PooltoolConfig = get_pooltool_config(config);
                 leaderlog::send_slots(db, byron_genesis, shelley_genesis, pooltool_config);
             }
-            Command::Status { ref db, ref byron_genesis, ref shelley_genesis } => {
+            Command::Status {
+                ref db,
+                ref byron_genesis,
+                ref shelley_genesis,
+            } => {
                 leaderlog::status(db, byron_genesis, shelley_genesis);
             }
         }

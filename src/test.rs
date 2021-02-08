@@ -1,11 +1,11 @@
 use std::str::FromStr;
 
 use bigdecimal::{BigDecimal, One, Zero};
-use rug::{Float, Rational};
 use rug::float::Round;
 use rug::ops::MulAssignRound;
+use rug::{Float, Rational};
 
-use cncli::nodeclient::math::{ceiling, exp, find_e, ln, split_ln, round};
+use cncli::nodeclient::math::{ceiling, exp, find_e, ln, round, split_ln};
 use cncli::nodeclient::ping;
 use nodeclient::leaderlog::is_overlay_slot;
 use nodeclient::math::ipow;
@@ -23,11 +23,17 @@ fn test_is_overlay_slot() {
     d.mul_assign_round(100, Round::Nearest);
     let r: Rational = Rational::from((d.to_integer().unwrap(), 100));
 
-    assert_eq!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &r), false);
+    assert_eq!(
+        is_overlay_slot(&first_slot_of_epoch, &current_slot, &r),
+        false
+    );
 
     // AD test
     current_slot = 15920150_i64;
-    assert_eq!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &r), true);
+    assert_eq!(
+        is_overlay_slot(&first_slot_of_epoch, &current_slot, &r),
+        true
+    );
 }
 
 #[test]
@@ -51,7 +57,7 @@ fn test_ping_failure_address() {
 
     ping::ping(&mut stdout, &host, port, network_magic);
 
-    assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"failed to lookup address information: Name or service not known\"\n}");
+    assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"failed to lookup address information: nodename nor servname provided, or not known\"\n}");
 }
 
 #[test]
@@ -153,7 +159,6 @@ fn test_infinite_range_stuff() {
         i += 1;
     }
 
-
     // let x:&[i32] = &(1..1025).collect()[..];
     // let y: &[i32] = &(1..1025).map(|m| m * m).collect()[..];
     //
@@ -185,4 +190,3 @@ fn test_leaderlog_math() {
     println!("x: {}", x);
     assert_eq!(x.to_string(), "0.0003998278869187860731522824872380")
 }
-

@@ -4,6 +4,7 @@ version = "1.1.0"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
+links = "libsodium"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -18,17 +19,17 @@ cardano_ouroboros_network = { git = "https://github.com/AndrewWestberg/rust-card
 chrono = "0.4.19"
 chrono-tz = "0.5.3"
 futures = "0.3.8"
-hex = "0.3.1"
+hex = "0.4.2"
 libc = "0.2.80"
 net2 = "0.2.35"
 regex = "1.4.2"
-reqwest = { version = "0.10.8", features = ["blocking"] }
+reqwest = { version = "0.11.0", features = ["blocking"] }
 rug = { version = "1.11.0", default-features = false, features = ["integer", "rational", "float", "serde"] }
 rusqlite = { version = "0.24.1", features = ["bundled"] }
 serde = { version = "1.0.117", features = ["derive"] }
-serde-aux = "1.1.0"
-serde_cbor = "0.10.2"
-serde_json = "1.0.59"
+serde-aux = "2.1.1"
+serde_cbor = "0.11.1"
+serde_json = "1.0.62"
 structopt = "0.3.20"
 
 # logging
@@ -37,4 +38,7 @@ env_logger = "0.8.1"
 pretty_env_logger = "0.4.0"
 
 # fix cross-compile
-gmp-mpfr-sys = { features=["force-cross"] }
+gmp-mpfr-sys = { version="1.4", features=["force-cross"] }
+
+[build-dependencies]
+pkg-config = "0.3.16"

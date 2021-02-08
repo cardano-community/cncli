@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use bigdecimal::{BigDecimal, One, ToPrimitive, Zero, Signed};
+use bigdecimal::{BigDecimal, One, Signed, ToPrimitive, Zero};
 use num_bigint::BigInt;
 
 // ipow' :: Num a => a -> Integer -> a
@@ -56,7 +56,15 @@ fn lncf(max_n: i32, x: &BigDecimal) -> BigDecimal {
     }
 
     let eps = BigDecimal::from_str("1.E-24").unwrap();
-    return cf(max_n, x, &eps, &BigDecimal::one(), &BigDecimal::zero(), &BigDecimal::zero(), &BigDecimal::one());
+    return cf(
+        max_n,
+        x,
+        &eps,
+        &BigDecimal::one(),
+        &BigDecimal::zero(),
+        &BigDecimal::zero(),
+        &BigDecimal::one(),
+    );
 }
 
 // -- | Compute natural logarithm via continued fraction, first splitting integral
@@ -172,7 +180,15 @@ pub fn ln(x: &BigDecimal) -> BigDecimal {
 //             return xn
 //         x_ = xn
 //     return x_
-fn cf(max_n: i32, x: &BigDecimal, epsilon: &BigDecimal, a_nm_2: &BigDecimal, b_nm_2: &BigDecimal, a_nm_1: &BigDecimal, b_nm_1: &BigDecimal) -> BigDecimal {
+fn cf(
+    max_n: i32,
+    x: &BigDecimal,
+    epsilon: &BigDecimal,
+    a_nm_2: &BigDecimal,
+    b_nm_2: &BigDecimal,
+    a_nm_1: &BigDecimal,
+    b_nm_1: &BigDecimal,
+) -> BigDecimal {
     let mut an = x.clone();
     let mut bn = BigDecimal::one();
     let mut a_n = normalize(&bn * a_nm_1 + &an * a_nm_2);
@@ -209,7 +225,15 @@ fn cf(max_n: i32, x: &BigDecimal, epsilon: &BigDecimal, a_nm_2: &BigDecimal, b_n
 // | abs nextX < eps = acc
 // | otherwise = taylorExp maxN (n + 1) x nextX (acc + nextX) (divisor + 1)
 // where nextX = (lastX * x) / divisor
-fn taylor_exp(eps: &BigDecimal, max_n: i32, n: i32, x: &BigDecimal, last_x: &BigDecimal, acc: &BigDecimal, divisor: &BigDecimal) -> BigDecimal {
+fn taylor_exp(
+    eps: &BigDecimal,
+    max_n: i32,
+    n: i32,
+    x: &BigDecimal,
+    last_x: &BigDecimal,
+    acc: &BigDecimal,
+    divisor: &BigDecimal,
+) -> BigDecimal {
     if max_n == n {
         return acc.clone();
     }
@@ -218,7 +242,15 @@ fn taylor_exp(eps: &BigDecimal, max_n: i32, n: i32, x: &BigDecimal, last_x: &Big
         return acc.clone();
     }
 
-    taylor_exp(eps, max_n, n + 1, x, &next_x, &(acc + &next_x), &(divisor + BigDecimal::one()))
+    taylor_exp(
+        eps,
+        max_n,
+        n + 1,
+        x,
+        &next_x,
+        &(acc + &next_x),
+        &(divisor + BigDecimal::one()),
+    )
 }
 
 pub enum TaylorCmp {
@@ -296,7 +328,15 @@ pub fn exp(x: &BigDecimal) -> BigDecimal {
     } else {
         let (n, x_) = scale_exp(x);
         let eps = BigDecimal::from_str("1.E-24").unwrap();
-        let xp = taylor_exp(&eps, 1000, 1, &x_, &BigDecimal::one(), &BigDecimal::one(), &BigDecimal::one());
+        let xp = taylor_exp(
+            &eps,
+            1000,
+            1,
+            &x_,
+            &BigDecimal::one(),
+            &BigDecimal::one(),
+            &BigDecimal::one(),
+        );
         ipow(&xp, n)
     };
 }
@@ -327,7 +367,14 @@ pub fn find_e(e: &BigDecimal, x: &BigDecimal) -> i32 {
 // bound factor x x' x'' l u
 //   | x' <= x && x <= x'' = (l, u)
 //   | otherwise = bound factor x (x' * x') (x'' * x'') (2 * l) (2 * u)
-fn bound(factor: &BigDecimal, x: &BigDecimal, xp: &BigDecimal, xpp: &BigDecimal, l: i32, u: i32) -> (i32, i32) {
+fn bound(
+    factor: &BigDecimal,
+    x: &BigDecimal,
+    xp: &BigDecimal,
+    xpp: &BigDecimal,
+    l: i32,
+    u: i32,
+) -> (i32, i32) {
     return if xp <= x && x <= xpp {
         (l, u)
     } else {

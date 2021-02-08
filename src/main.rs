@@ -1,8 +1,8 @@
 extern crate chrono_tz;
 extern crate libc;
 
-use std::{panic, process};
 use std::env::{set_var, var};
+use std::{panic, process};
 
 use structopt::StructOpt;
 

@@ -16,7 +16,8 @@ pub fn validate_block(db_path: &PathBuf, hash: &String) {
     let like = format!("{}%", hash);
     match query_block(db_path, like) {
         Ok(block) => {
-            println!("{{\n\
+            println!(
+                "{{\n\
             \x20\"status\": \"{}\",\n\
             \x20\"block_number\": \"{}\",\n\
             \x20\"slot_number\": \"{}\",\n\
@@ -25,20 +26,23 @@ pub fn validate_block(db_path: &PathBuf, hash: &String) {
             \x20\"prev_hash\": \"{}\",\n\
             \x20\"leader_vrf\": \"{}\"\n\
             }}",
-                     if block.orphaned { "orphaned" } else { "ok" },
-                     block.block_number,
-                     block.slot_number,
-                     block.pool_id,
-                     block.hash,
-                     block.prev_hash,
-                     block.leader_vrf
+                if block.orphaned { "orphaned" } else { "ok" },
+                block.block_number,
+                block.slot_number,
+                block.pool_id,
+                block.hash,
+                block.prev_hash,
+                block.leader_vrf
             );
         }
         Err(error) => {
-            println!("{{\n\
+            println!(
+                "{{\n\
             \x20\"status\": \"error\",\n\
             \x20\"errorMessage\": \"{}\"\n\
-            }}", error);
+            }}",
+                error
+            );
         }
     }
 }

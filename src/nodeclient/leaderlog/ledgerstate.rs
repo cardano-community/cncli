@@ -35,13 +35,13 @@ struct ProtocolParams {
 #[derive(Debug, Deserialize)]
 struct EsLState {
     #[serde(rename(deserialize = "_utxoState"))]
-    utxo_state: UtxoState
+    utxo_state: UtxoState,
 }
 
 #[derive(Debug, Deserialize)]
 struct UtxoState {
     #[serde(rename(deserialize = "_ppups"))]
-    ppups: Ppups
+    ppups: Ppups,
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,7 +52,7 @@ struct Ppups {
 #[derive(Debug, Deserialize)]
 struct Proposals {
     #[serde(flatten)]
-    proposal: HashMap<String, Proposal>
+    proposal: HashMap<String, Proposal>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -97,63 +97,75 @@ enum Delegation {
 #[derive(Debug, Deserialize)]
 struct Key {
     #[serde(rename(deserialize = "key hash"))]
-    key: String
+    key: String,
 }
 
 fn calculate_sigma(stake_group: StakeGroup, pool_id: &String) -> (u64, u64) {
-    let stake_keys: Vec<String> = stake_group.delegations.into_iter().filter_map(|delegation| {
-        if delegation.len() != 2 {
-            return None;
-        }
-        let mut out_pool_id: String = "".to_string();
-        let mut stake_key: String = "".to_string();
-        for item in delegation.into_iter() {
-            match item {
-                Delegation::StakeKey(key) => { stake_key = key.key }
-                Delegation::PoolId(poolid) => { out_pool_id = poolid }
+    let stake_keys: Vec<String> = stake_group
+        .delegations
+        .into_iter()
+        .filter_map(|delegation| {
+            if delegation.len() != 2 {
+                return None;
             }
-        }
+            let mut out_pool_id: String = "".to_string();
+            let mut stake_key: String = "".to_string();
+            for item in delegation.into_iter() {
+                match item {
+                    Delegation::StakeKey(key) => stake_key = key.key,
+                    Delegation::PoolId(poolid) => out_pool_id = poolid,
+                }
+            }
 
-        if out_pool_id != *pool_id {
-            None
-        } else {
-            debug!("Found delegation key: {:?}", &stake_key);
-            Some(stake_key)
-        }
-    }).collect();
+            if out_pool_id != *pool_id {
+                None
+            } else {
+                debug!("Found delegation key: {:?}", &stake_key);
+                Some(stake_key)
+            }
+        })
+        .collect();
 
     let mut denominator = 0u64;
-    let numerator: u64 = stake_group.stake.into_iter().filter_map(|stake| {
-        if stake.len() != 2 {
-            return None;
-        }
-        let mut lovelace = 0u64;
-        let mut key: String = "".to_string();
-        for item in stake.into_iter() {
-            match item {
-                Stake::StakeKey(stake_key) => {
-                    key = stake_key.key
-                }
-                Stake::Lovelace(amount) => { lovelace = amount }
+    let numerator: u64 = stake_group
+        .stake
+        .into_iter()
+        .filter_map(|stake| {
+            if stake.len() != 2 {
+                return None;
             }
-        }
-        denominator += lovelace;
+            let mut lovelace = 0u64;
+            let mut key: String = "".to_string();
+            for item in stake.into_iter() {
+                match item {
+                    Stake::StakeKey(stake_key) => key = stake_key.key,
+                    Stake::Lovelace(amount) => lovelace = amount,
+                }
+            }
+            denominator += lovelace;
 
-        if stake_keys.iter().any(|delegated_key| *delegated_key == key) {
-            debug!("Found delegated amount: {}", lovelace);
-            Some(lovelace)
-        } else {
-            None
-        }
-    }).sum();
+            if stake_keys.iter().any(|delegated_key| *delegated_key == key) {
+                debug!("Found delegated amount: {}", lovelace);
+                Some(lovelace)
+            } else {
+                None
+            }
+        })
+        .sum();
     debug!("activeStake: {}", numerator);
     debug!("totalActiveStake: {}", denominator);
     (numerator, denominator)
 }
 
-pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_set: &LedgerSet, pool_id: &String) -> Result<((u64, u64), Rational), Error> {
-    let ledger: Ledger = match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(File::open(ledger_state)?)) {
-        Ok(ledger2) => { ledger2.nes_es }
+pub(super) fn calculate_ledger_state_sigma_and_d(
+    ledger_state: &PathBuf,
+    ledger_set: &LedgerSet,
+    pool_id: &String,
+) -> Result<((u64, u64), Rational), Error> {
+    let ledger: Ledger = match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(
+        File::open(ledger_state)?,
+    )) {
+        Ok(ledger2) => ledger2.nes_es,
         Err(error) => {
             debug!("Falling back to old ledger state: {:?}", error);
             serde_json::from_reader(BufReader::new(File::open(ledger_state)?))?
@@ -177,14 +189,45 @@ pub(super) fn calculate_ledger_state_sigma_and_d(ledger_state: &PathBuf, ledger_
         },
         match ledger_set {
             LedgerSet::Mark => {
-                if !ledger.es_l_state.utxo_state.ppups.proposals.proposal.is_empty() && ledger.es_l_state.utxo_state.ppups.proposals.proposal.iter().next().unwrap().1.decentralisation_param.is_some() {
-                    ledger.es_l_state.utxo_state.ppups.proposals.proposal.iter().next().unwrap().1.decentralisation_param.clone().unwrap()
+                if !ledger
+                    .es_l_state
+                    .utxo_state
+                    .ppups
+                    .proposals
+                    .proposal
+                    .is_empty()
+                    && ledger
+                        .es_l_state
+                        .utxo_state
+                        .ppups
+                        .proposals
+                        .proposal
+                        .iter()
+                        .next()
+                        .unwrap()
+                        .1
+                        .decentralisation_param
+                        .is_some()
+                {
+                    ledger
+                        .es_l_state
+                        .utxo_state
+                        .ppups
+                        .proposals
+                        .proposal
+                        .iter()
+                        .next()
+                        .unwrap()
+                        .1
+                        .decentralisation_param
+                        .clone()
+                        .unwrap()
                 } else {
                     ledger.es_pp.decentralisation_param
                 }
             }
-            LedgerSet::Set => { ledger.es_pp.decentralisation_param }
-            LedgerSet::Go => { ledger.es_prev_pp.decentralisation_param }
-        }
+            LedgerSet::Set => ledger.es_pp.decentralisation_param,
+            LedgerSet::Go => ledger.es_prev_pp.decentralisation_param,
+        },
     ))
 }

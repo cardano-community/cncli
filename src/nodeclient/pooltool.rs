@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use cardano_ouroboros_network::BlockHeader;
 use cardano_ouroboros_network::protocols::chainsync::Listener;
+use cardano_ouroboros_network::BlockHeader;
 use chrono::{SecondsFormat, Utc};
 use log::{error, info};
 use regex::Regex;
@@ -67,16 +67,24 @@ impl PoolToolNotifier {
                 .output()
                 .expect(&*format!("Failed to execute {:?}", &self.cardano_node_path));
             let version_string = String::from_utf8_lossy(&output.stdout);
-            let cap = Regex::new("cardano-node (\\d+\\.\\d+\\.\\d+) .*\ngit rev ([a-f0-9]{5}).*").unwrap().captures(&*version_string).unwrap();
-            self.node_version = format!("{}:{}", cap.get(1).map_or("", |m| m.as_str()), cap.get(2).map_or("", |m| m.as_str()));
+            let cap = Regex::new("cardano-node (\\d+\\.\\d+\\.\\d+) .*\ngit rev ([a-f0-9]{5}).*")
+                .unwrap()
+                .captures(&*version_string)
+                .unwrap();
+            self.node_version = format!(
+                "{}:{}",
+                cap.get(1).map_or("", |m| m.as_str()),
+                cap.get(2).map_or("", |m| m.as_str())
+            );
             info!("Checking cardano-node version: {}", &self.node_version);
             self.last_node_version_time = Instant::now();
         }
         match reqwest::blocking::Client::builder().build() {
             Ok(client) => {
-                let pooltool_result = client.post("https://api.pooltool.io/v0/sendstats").body(
-                    serde_json::ser::to_string(
-                        &PooltoolStats {
+                let pooltool_result = client
+                    .post("https://api.pooltool.io/v0/sendstats")
+                    .body(
+                        serde_json::ser::to_string(&PooltoolStats {
                             api_key: self.api_key.clone(),
                             pool_id: self.pool_id.clone(),
                             data: PooltoolData {
@@ -92,23 +100,35 @@ impl PoolToolNotifier {
                                 node_v_key: hex::encode(&header.node_vkey),
                                 platform: "cncli".to_string(),
                             },
-                        }
-                    ).unwrap()
-                ).send();
+                        })
+                        .unwrap(),
+                    )
+                    .send();
 
                 match pooltool_result {
-                    Ok(response) => {
-                        match response.text() {
-                            Ok(text) => {
-                                info!("Pooltool ({}, {}): ({}, {}), json: {}", &self.pool_name, &self.pool_id[..8], &header.block_number, hex::encode(&header.hash[..8]), text);
-                            }
-                            Err(error) => { error!("PoolTool error: {}", error); }
+                    Ok(response) => match response.text() {
+                        Ok(text) => {
+                            info!(
+                                "Pooltool ({}, {}): ({}, {}), json: {}",
+                                &self.pool_name,
+                                &self.pool_id[..8],
+                                &header.block_number,
+                                hex::encode(&header.hash[..8]),
+                                text
+                            );
                         }
+                        Err(error) => {
+                            error!("PoolTool error: {}", error);
+                        }
+                    },
+                    Err(error) => {
+                        error!("PoolTool error: {}", error);
                     }
-                    Err(error) => { error!("PoolTool error: {}", error); }
                 }
             }
-            Err(err) => { error!("Could not set up the reqwest client!: {}", err) }
+            Err(err) => {
+                error!("Could not set up the reqwest client!: {}", err)
+            }
         }
     }
 }

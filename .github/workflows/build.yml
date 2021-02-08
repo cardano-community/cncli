@@ -1,0 +1,38 @@
+on: [push, pull_request]
+
+name: Continuous Integration
+
+jobs:
+  build:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Install Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+          components: rustfmt, clippy
+      - name: Install Dependencies
+        run: apt-get install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf libsodium-dev -y
+      - name: Check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+      - name: Lint
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+      - name: Clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
