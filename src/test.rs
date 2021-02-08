@@ -57,7 +57,11 @@ fn test_ping_failure_address() {
 
     ping::ping(&mut stdout, &host, port, network_magic);
 
+    #[cfg(target_os = "macos")]
     assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"failed to lookup address information: nodename nor servname provided, or not known\"\n}");
+
+    #[cfg(target_os = "linux")]
+    assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"failed to lookup address information: Name or service not known\"\n}");
 }
 
 #[test]
