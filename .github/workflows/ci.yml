@@ -52,7 +52,4 @@ jobs:
         with:
           command: build
           args: --debug
-        env:
-          LD_LIBRARY_PATH: /usr/local/lib:$LD_LIBRARY_PATH
-          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
         

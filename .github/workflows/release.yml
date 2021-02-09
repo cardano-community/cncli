@@ -1,13 +1,10 @@
-on:
-  push:
-    tags:
-      - 'v*' # Push events to matching v*, i.e. v1.0, v20.15.10
+on: [push, pull_request]
 
-name: Create Release
+name: Continuous Integration
 
 jobs:
   build:
-    name: Release
+    name: Build
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -15,6 +12,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+        with:
+          submodules: true # recurse submodules
       - name: Install Toolchain
         uses: actions-rs/toolchain@v1
         with:
@@ -24,11 +23,31 @@ jobs:
           components: rustfmt, clippy
       - name: Install Dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf libsodium-dev -y
-      - name: Install Dependencies (OSX)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
+      - name: Install Dependencies (MacOS)
         if: matrix.os == 'macos-latest'
-        run: brew install libsodium
-      - name: Build Release
+        run: brew install autoconf automake libtool
+      - name: Check
+        uses: actions-rs/cargo@v1
+        with:
+          command: check
+      - name: Lint
+        uses: actions-rs/cargo@v1
+        with:
+          command: fmt
+          args: --all -- --check
+      - name: Clippy
+        uses: actions-rs/cargo@v1
+        with:
+          command: clippy
+          args: -- -D warnings
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: test
+      - name: Build
         uses: actions-rs/cargo@v1
         with:
           command: build
