@@ -172,6 +172,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdb031dd78e28731d87d56cc8ffef4a8f36ca26c38fe2de700543e627f8a464a"
 
 [[package]]
+name = "autotools"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b9f0494812b4a30c521d6122ff71c4f84ed4b1edae73e79cd7f38c9ae027943"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "az"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -328,6 +337,7 @@ name = "cncli"
 version = "1.1.0"
 dependencies = [
  "async-std",
+ "autotools",
  "bigdecimal",
  "blake2b_simd",
  "byteorder",
@@ -342,7 +352,6 @@ dependencies = [
  "log",
  "net2",
  "num-bigint",
- "pkg-config",
  "pretty_env_logger",
  "regex",
  "reqwest",

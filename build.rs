@@ -1,11 +1,10 @@
-// macro_rules! ok (($expression:expr) => ($expression.unwrap()));
-// macro_rules! log {
-//     ($fmt:expr) => (println!(concat!("cncli/build.rs:{}: ", $fmt), line!()));
-//     ($fmt:expr, $($arg:tt)*) => (println!(concat!("cncli/build.rs:{}: ", $fmt),
-//     line!(), $($arg)*));
-// }
+use autotools;
 
 fn main() {
-    pkg_config::Config::new().probe("libsodium").unwrap();
+    // Build and link IOHK libsodium
+    let libsodium = autotools::Config::new("contrib/libsodium/").reconf("-v").build();
+    println!("cargo:rustc-link-search=native={}", libsodium.join("lib").display());
+    println!("cargo:rustc-link-lib=static=sodium");
+
     println!("cargo:return-if-changed=build.rs");
 }

@@ -41,4 +41,4 @@ pretty_env_logger = "0.4.0"
 gmp-mpfr-sys = { version="1.4", features=["force-cross"] }
 
 [build-dependencies]
-pkg-config = "0.3.16"
+autotools = "0.2"
