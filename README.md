@@ -25,8 +25,8 @@ $ rustup component add clippy rustfmt
 ```shell script
 $ source $HOME/.cargo/env
 $ sudo apt-get update -y
-$ sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf libsodium-dev
-$ git clone https://github.com/AndrewWestberg/cncli
+$ sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
+$ git clone --recurse-submodules https://github.com/AndrewWestberg/cncli
 $ cd cncli
 $ git checkout <latest_tag_name>
 $ cargo install --path . --force      
