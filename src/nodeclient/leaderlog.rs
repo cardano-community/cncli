@@ -18,9 +18,7 @@ use serde_aux::prelude::deserialize_number_from_string;
 
 use crate::nodeclient::leaderlog::deserialize::cbor_hex;
 use crate::nodeclient::leaderlog::ledgerstate::calculate_ledger_state_sigma_and_d;
-use crate::nodeclient::leaderlog::libsodium::{
-    sodium_crypto_vrf_proof_to_hash, sodium_crypto_vrf_prove,
-};
+use crate::nodeclient::leaderlog::libsodium::{sodium_crypto_vrf_proof_to_hash, sodium_crypto_vrf_prove};
 use crate::nodeclient::math::{ln, normalize, round, taylor_exp_cmp, TaylorCmp};
 use crate::nodeclient::{LedgerSet, PooltoolConfig};
 
@@ -129,11 +127,7 @@ fn read_vrf_skey(vrf_skey_path: &PathBuf) -> Result<VrfSkey, Error> {
 }
 
 fn get_tip_slot_number(db: &Connection) -> Result<i64, rusqlite::Error> {
-    Ok(
-        db.query_row("SELECT MAX(slot_number) FROM chain", NO_PARAMS, |row| {
-            Ok(row.get(0)?)
-        })?,
-    )
+    Ok(db.query_row("SELECT MAX(slot_number) FROM chain", NO_PARAMS, |row| Ok(row.get(0)?))?)
 }
 
 fn get_eta_v_before_slot(db: &Connection, slot_number: i64) -> Result<String, rusqlite::Error> {
@@ -152,11 +146,7 @@ fn get_prev_hash_before_slot(db: &Connection, slot_number: i64) -> Result<String
     )
 }
 
-fn get_current_slots(
-    db: &Connection,
-    epoch: i64,
-    pool_id: &String,
-) -> Result<(i64, String), rusqlite::Error> {
+fn get_current_slots(db: &Connection, epoch: i64, pool_id: &String) -> Result<(i64, String), rusqlite::Error> {
     Ok(db.query_row_named(
         "SELECT slot_qty, hash FROM slots WHERE epoch = :epoch AND pool_id = :pool_id LIMIT 1",
         named_params! {
@@ -167,11 +157,7 @@ fn get_current_slots(
     )?)
 }
 
-fn get_prev_slots(
-    db: &Connection,
-    epoch: i64,
-    pool_id: &String,
-) -> Result<Option<String>, rusqlite::Error> {
+fn get_prev_slots(db: &Connection, epoch: i64, pool_id: &String) -> Result<Option<String>, rusqlite::Error> {
     db.query_row_named(
         "SELECT slots FROM slots WHERE epoch = :epoch AND pool_id = :pool_id LIMIT 1",
         named_params! {
@@ -200,11 +186,7 @@ fn get_shelley_transition_epoch(network_magic: u32) -> i64 {
     }
 }
 
-fn get_first_slot_of_epoch(
-    byron: &ByronGenesis,
-    shelley: &ShelleyGenesis,
-    current_slot: i64,
-) -> (i64, i64) {
+fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, current_slot: i64) -> (i64, i64) {
     let shelley_transition_epoch = get_shelley_transition_epoch(shelley.network_magic);
     let byron_epoch_length = 10 * byron.protocol_consts.k;
     let byron_slots = byron_epoch_length * shelley_transition_epoch;
@@ -216,11 +198,7 @@ fn get_first_slot_of_epoch(
     (epoch, first_slot_of_epoch)
 }
 
-fn slot_to_naivedatetime(
-    byron: &ByronGenesis,
-    shelley: &ShelleyGenesis,
-    slot: i64,
-) -> NaiveDateTime {
+fn slot_to_naivedatetime(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64) -> NaiveDateTime {
     let shelley_transition_epoch = get_shelley_transition_epoch(shelley.network_magic);
     let network_start_time = NaiveDateTime::from_timestamp(byron.start_time, 0);
     let byron_epoch_length = 10 * byron.protocol_consts.k;
@@ -257,8 +235,8 @@ pub fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &Ration
 // Sometimes called seedL in the haskell code
 //
 const UC_NONCE: [u8; 32] = [
-    0x12, 0xdd, 0x0a, 0x6a, 0x7d, 0x0e, 0x22, 0x2a, 0x97, 0x92, 0x6d, 0xa0, 0x3a, 0xdb, 0x5a, 0x77,
-    0x68, 0xd3, 0x1c, 0xc7, 0xc5, 0xc2, 0xbd, 0x68, 0x28, 0xe1, 0x4a, 0x7d, 0x25, 0xfa, 0x3a, 0x60,
+    0x12, 0xdd, 0x0a, 0x6a, 0x7d, 0x0e, 0x22, 0x2a, 0x97, 0x92, 0x6d, 0xa0, 0x3a, 0xdb, 0x5a, 0x77, 0x68, 0xd3, 0x1c,
+    0xc7, 0xc5, 0xc2, 0xbd, 0x68, 0x28, 0xe1, 0x4a, 0x7d, 0x25, 0xfa, 0x3a, 0x60,
 ];
 
 fn mk_seed(slot: i64, eta0: &Vec<u8>) -> Vec<u8> {
@@ -394,8 +372,7 @@ pub(crate) fn calculate_leader_logs(
                     debug!("tip_slot_number: {}", tip_slot_number);
 
                     // Make sure we're fully sync'd
-                    let tip_time =
-                        slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
+                    let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
                     let system_time = Utc::now().timestamp();
                     if system_time - tip_time > 900 {
                         handle_error(format!(
@@ -411,18 +388,14 @@ pub(crate) fn calculate_leader_logs(
                         LedgerSet::Set => 0,
                         LedgerSet::Go => -shelley.epoch_length,
                     };
-                    let (epoch, first_slot_of_epoch) = get_first_slot_of_epoch(
-                        &byron,
-                        &shelley,
-                        tip_slot_number + additional_slots,
-                    );
+                    let (epoch, first_slot_of_epoch) =
+                        get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots);
                     debug!("epoch: {}", epoch);
                     let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
                     debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
                     debug!("first_slot_of_prev_epoch: {}", first_slot_of_prev_epoch);
-                    let stability_window: i64 = ((3 * byron.protocol_consts.k) as f64
-                        / shelley.active_slots_coeff)
-                        .ceil() as i64;
+                    let stability_window: i64 =
+                        ((3 * byron.protocol_consts.k) as f64 / shelley.active_slots_coeff).ceil() as i64;
                     let stability_window_start = first_slot_of_epoch - stability_window;
                     debug!("stability_window: {}", stability_window);
                     debug!("stability_window_start: {}", stability_window_start);
@@ -455,32 +428,19 @@ pub(crate) fn calculate_leader_logs(
                                                 handle_error("Pool VRF Skey must be of type: VrfSigningKey_PraosVRF");
                                                 return;
                                             }
-                                            match calculate_ledger_state_sigma_and_d(
-                                                ledger_state,
-                                                ledger_set,
-                                                pool_id,
-                                            ) {
-                                                Ok((
-                                                    (active_stake, total_active_stake),
-                                                    decentralization_param,
-                                                )) => {
+                                            match calculate_ledger_state_sigma_and_d(ledger_state, ledger_set, pool_id)
+                                            {
+                                                Ok(((active_stake, total_active_stake), decentralization_param)) => {
                                                     let sigma = normalize(
                                                         BigDecimal::from(active_stake)
                                                             / BigDecimal::from(total_active_stake),
                                                     );
                                                     debug!("sigma: {:?}", sigma);
-                                                    debug!(
-                                                        "decentralization_param: {:?}",
-                                                        &decentralization_param
-                                                    );
+                                                    debug!("decentralization_param: {:?}", &decentralization_param);
 
-                                                    let d: f64 = (decentralization_param.to_f64()
-                                                        * 100.0)
-                                                        .round()
-                                                        / 100.0;
-                                                    let epoch_slots_ideal = (sigma
-                                                        .to_f64()
-                                                        .unwrap()
+                                                    let d: f64 =
+                                                        (decentralization_param.to_f64() * 100.0).round() / 100.0;
+                                                    let epoch_slots_ideal = (sigma.to_f64().unwrap()
                                                         * (shelley.epoch_length.to_f64().unwrap()
                                                             * shelley.active_slots_coeff)
                                                         * (1.0 - d)
@@ -505,14 +465,10 @@ pub(crate) fn calculate_leader_logs(
 
                                                     let cert_nat_max: BigDecimal = BigDecimal::from_str("13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096").unwrap(); // 2^512
                                                     let c: BigDecimal = ln(&(BigDecimal::one()
-                                                        - BigDecimal::from_f64(
-                                                            shelley.active_slots_coeff,
-                                                        )
-                                                        .unwrap()));
+                                                        - BigDecimal::from_f64(shelley.active_slots_coeff).unwrap()));
                                                     let mut no = 0i64;
                                                     for slot_in_epoch in 0..shelley.epoch_length {
-                                                        let slot =
-                                                            first_slot_of_epoch + slot_in_epoch;
+                                                        let slot = first_slot_of_epoch + slot_in_epoch;
                                                         if is_overlay_slot(
                                                             &first_slot_of_epoch,
                                                             &slot,
@@ -536,20 +492,13 @@ pub(crate) fn calculate_leader_logs(
                                                                     let slot = Slot {
                                                                         no,
                                                                         slot,
-                                                                        slot_in_epoch: slot
-                                                                            - first_slot_of_epoch,
+                                                                        slot_in_epoch: slot - first_slot_of_epoch,
                                                                         at: slot_to_timestamp(
-                                                                            &byron, &shelley, slot,
-                                                                            &tz,
+                                                                            &byron, &shelley, slot, &tz,
                                                                         ),
                                                                     };
-                                                                    debug!(
-                                                                        "Found assigned slot: {:?}",
-                                                                        &slot
-                                                                    );
-                                                                    leader_log
-                                                                        .assigned_slots
-                                                                        .push(slot);
+                                                                    debug!("Found assigned slot: {:?}", &slot);
+                                                                    leader_log.assigned_slots.push(slot);
                                                                     leader_log.epoch_slots = no;
                                                                 }
                                                             }
@@ -557,9 +506,7 @@ pub(crate) fn calculate_leader_logs(
                                                         }
                                                     }
                                                     leader_log.max_performance =
-                                                        (leader_log.epoch_slots as f64
-                                                            / epoch_slots_ideal
-                                                            * 10000.0)
+                                                        (leader_log.epoch_slots as f64 / epoch_slots_ideal * 10000.0)
                                                             .round()
                                                             / 100.0;
 
@@ -643,8 +590,7 @@ pub(crate) fn status(db_path: &PathBuf, byron_genesis: &PathBuf, shelley_genesis
                     match get_tip_slot_number(&db) {
                         Ok(tip_slot_number) => {
                             debug!("tip_slot_number: {}", tip_slot_number);
-                            let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number)
-                                .timestamp();
+                            let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
                             let system_time = Utc::now().timestamp();
                             if system_time - tip_time < 120 {
                                 print_status_synced();
@@ -690,12 +636,10 @@ pub(crate) fn send_slots(
                     match get_tip_slot_number(&db) {
                         Ok(tip_slot_number) => {
                             debug!("tip_slot_number: {}", tip_slot_number);
-                            let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number)
-                                .timestamp();
+                            let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
                             let system_time = Utc::now().timestamp();
                             if system_time - tip_time < 120 {
-                                let (epoch, _) =
-                                    get_first_slot_of_epoch(&byron, &shelley, tip_slot_number);
+                                let (epoch, _) = get_first_slot_of_epoch(&byron, &shelley, tip_slot_number);
                                 debug!("epoch: {}", epoch);
                                 for pool in pooltool_config.pools.iter() {
                                     match get_current_slots(&db, epoch, &pool.pool_id) {
@@ -704,44 +648,34 @@ pub(crate) fn send_slots(
                                             debug!("hash: {}", &hash);
                                             match get_prev_slots(&db, epoch - 1, &pool.pool_id) {
                                                 Ok(prev_slots) => {
-                                                    let request = serde_json::ser::to_string(
-                                                        &PooltoolSendSlots {
-                                                            api_key: pooltool_config
-                                                                .api_key
-                                                                .clone(),
-                                                            pool_id: pool.pool_id.clone(),
-                                                            epoch,
-                                                            slot_qty,
-                                                            hash,
-                                                            prev_slots,
-                                                        },
-                                                    )
+                                                    let request = serde_json::ser::to_string(&PooltoolSendSlots {
+                                                        api_key: pooltool_config.api_key.clone(),
+                                                        pool_id: pool.pool_id.clone(),
+                                                        epoch,
+                                                        slot_qty,
+                                                        hash,
+                                                        prev_slots,
+                                                    })
                                                     .unwrap();
                                                     info!("Sending: {}", &request);
-                                                    match reqwest::blocking::Client::builder()
-                                                        .build()
-                                                    {
+                                                    match reqwest::blocking::Client::builder().build() {
                                                         Ok(client) => {
-                                                            let pooltool_result = client.post("https://api.pooltool.io/v0/sendslots").body(
-                                                                request
-                                                            ).send();
+                                                            let pooltool_result = client
+                                                                .post("https://api.pooltool.io/v0/sendslots")
+                                                                .body(request)
+                                                                .send();
 
                                                             match pooltool_result {
-                                                                Ok(response) => {
-                                                                    match response.text() {
-                                                                        Ok(text) => {
-                                                                            info!("Pooltool Response: {}", text);
-                                                                        }
-                                                                        Err(error) => {
-                                                                            error!("PoolTool error: {}", error);
-                                                                        }
+                                                                Ok(response) => match response.text() {
+                                                                    Ok(text) => {
+                                                                        info!("Pooltool Response: {}", text);
                                                                     }
-                                                                }
+                                                                    Err(error) => {
+                                                                        error!("PoolTool error: {}", error);
+                                                                    }
+                                                                },
                                                                 Err(error) => {
-                                                                    error!(
-                                                                        "PoolTool error: {}",
-                                                                        error
-                                                                    );
+                                                                    error!("PoolTool error: {}", error);
                                                                 }
                                                             }
                                                         }
@@ -756,10 +690,7 @@ pub(crate) fn send_slots(
                                             }
                                         }
                                         Err(error) => {
-                                            error!(
-                                                "Cannot find db record for {},{}: {}",
-                                                epoch, &pool.pool_id, error
-                                            )
+                                            error!("Cannot find db record for {},{}: {}", epoch, &pool.pool_id, error)
                                         }
                                     }
                                 }

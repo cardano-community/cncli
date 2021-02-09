@@ -162,15 +162,14 @@ pub(super) fn calculate_ledger_state_sigma_and_d(
     ledger_set: &LedgerSet,
     pool_id: &String,
 ) -> Result<((u64, u64), Rational), Error> {
-    let ledger: Ledger = match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(
-        File::open(ledger_state)?,
-    )) {
-        Ok(ledger2) => ledger2.nes_es,
-        Err(error) => {
-            debug!("Falling back to old ledger state: {:?}", error);
-            serde_json::from_reader(BufReader::new(File::open(ledger_state)?))?
-        }
-    };
+    let ledger: Ledger =
+        match serde_json::from_reader::<BufReader<File>, Ledger2>(BufReader::new(File::open(ledger_state)?)) {
+            Ok(ledger2) => ledger2.nes_es,
+            Err(error) => {
+                debug!("Falling back to old ledger state: {:?}", error);
+                serde_json::from_reader(BufReader::new(File::open(ledger_state)?))?
+            }
+        };
 
     Ok((
         match ledger_set {
@@ -189,13 +188,7 @@ pub(super) fn calculate_ledger_state_sigma_and_d(
         },
         match ledger_set {
             LedgerSet::Mark => {
-                if !ledger
-                    .es_l_state
-                    .utxo_state
-                    .ppups
-                    .proposals
-                    .proposal
-                    .is_empty()
+                if !ledger.es_l_state.utxo_state.ppups.proposals.proposal.is_empty()
                     && ledger
                         .es_l_state
                         .utxo_state

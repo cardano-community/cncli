@@ -23,17 +23,11 @@ fn test_is_overlay_slot() {
     d.mul_assign_round(100, Round::Nearest);
     let r: Rational = Rational::from((d.to_integer().unwrap(), 100));
 
-    assert_eq!(
-        is_overlay_slot(&first_slot_of_epoch, &current_slot, &r),
-        false
-    );
+    assert_eq!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &r), false);
 
     // AD test
     current_slot = 15920150_i64;
-    assert_eq!(
-        is_overlay_slot(&first_slot_of_epoch, &current_slot, &r),
-        true
-    );
+    assert_eq!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &r), true);
 }
 
 #[test]

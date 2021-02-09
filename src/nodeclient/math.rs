@@ -367,14 +367,7 @@ pub fn find_e(e: &BigDecimal, x: &BigDecimal) -> i32 {
 // bound factor x x' x'' l u
 //   | x' <= x && x <= x'' = (l, u)
 //   | otherwise = bound factor x (x' * x') (x'' * x'') (2 * l) (2 * u)
-fn bound(
-    factor: &BigDecimal,
-    x: &BigDecimal,
-    xp: &BigDecimal,
-    xpp: &BigDecimal,
-    l: i32,
-    u: i32,
-) -> (i32, i32) {
+fn bound(factor: &BigDecimal, x: &BigDecimal, xp: &BigDecimal, xpp: &BigDecimal, l: i32, u: i32) -> (i32, i32) {
     return if xp <= x && x <= xpp {
         (l, u)
     } else {

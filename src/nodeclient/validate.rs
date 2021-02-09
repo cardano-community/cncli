@@ -53,19 +53,21 @@ fn query_block(db_path: &PathBuf, like: String) -> Result<Block, Error> {
     }
 
     let db = Connection::open(db_path)?;
-    let query_result = db.query_row("SELECT block_number,slot_number,hash,prev_hash,pool_id,leader_vrf_0,orphaned FROM chain WHERE hash LIKE ?",
-                                    &[&like],
-                                    |row| Ok(
-                                        Block {
-                                            block_number: row.get(0)?,
-                                            slot_number: row.get(1)?,
-                                            hash: row.get(2)?,
-                                            prev_hash: row.get(3)?,
-                                            pool_id: row.get(4)?,
-                                            leader_vrf: row.get(5)?,
-                                            orphaned: row.get(6)?,
-                                        }
-                                    ));
+    let query_result = db.query_row(
+        "SELECT block_number,slot_number,hash,prev_hash,pool_id,leader_vrf_0,orphaned FROM chain WHERE hash LIKE ?",
+        &[&like],
+        |row| {
+            Ok(Block {
+                block_number: row.get(0)?,
+                slot_number: row.get(1)?,
+                hash: row.get(2)?,
+                prev_hash: row.get(3)?,
+                pool_id: row.get(4)?,
+                leader_vrf: row.get(5)?,
+                orphaned: row.get(6)?,
+            })
+        },
+    );
 
     match db.close() {
         Err(error) => {

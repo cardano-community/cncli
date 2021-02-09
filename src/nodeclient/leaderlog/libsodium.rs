@@ -7,10 +7,7 @@ extern "C" {
     fn crypto_vrf_proof_to_hash(hash: *mut u8, proof: *const u8) -> i32;
 }
 
-pub(crate) fn sodium_crypto_vrf_prove(
-    secret_key: &Vec<u8>,
-    seed: Vec<u8>,
-) -> Result<Vec<u8>, String> {
+pub(crate) fn sodium_crypto_vrf_prove(secret_key: &Vec<u8>, seed: Vec<u8>) -> Result<Vec<u8>, String> {
     let mut proof: Vec<u8> = Vec::with_capacity(80);
     unsafe {
         let rc = crypto_vrf_prove(

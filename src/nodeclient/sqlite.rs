@@ -68,10 +68,7 @@ impl SQLiteBlockStore {
                     "CREATE INDEX IF NOT EXISTS idx_chain_orphaned ON chain(orphaned)",
                     NO_PARAMS,
                 )?;
-                tx.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_chain_hash ON chain(hash)",
-                    NO_PARAMS,
-                )?;
+                tx.execute("CREATE INDEX IF NOT EXISTS idx_chain_hash ON chain(hash)", NO_PARAMS)?;
                 tx.execute(
                     "CREATE INDEX IF NOT EXISTS idx_chain_block_number ON chain(block_number)",
                     NO_PARAMS,
@@ -110,11 +107,9 @@ impl SQLiteBlockStore {
                     NO_PARAMS,
                 )?;
 
-                let count: i64 = tx.query_row(
-                    "SELECT COUNT(DISTINCT node_vkey) from chain",
-                    NO_PARAMS,
-                    |row| Ok(row.get(0)?),
-                )?;
+                let count: i64 = tx.query_row("SELECT COUNT(DISTINCT node_vkey) from chain", NO_PARAMS, |row| {
+                    Ok(row.get(0)?)
+                })?;
 
                 if count > 0 {
                     let mut stmt = tx.prepare("SELECT DISTINCT node_vkey FROM chain")?;
@@ -127,10 +122,7 @@ impl SQLiteBlockStore {
                         .ok()
                         .unwrap();
 
-                    info!(
-                        "{} pool id records to process. Please be patient...",
-                        &count
-                    );
+                    info!("{} pool id records to process. Please be patient...", &count);
                     for (i, node_vkey) in vkeys.into_iter().enumerate() {
                         let vkey = node_vkey.unwrap();
                         let node_vkey_bytes = hex::decode(&vkey).unwrap();
@@ -167,10 +159,7 @@ impl SQLiteBlockStore {
                     &[&SQLiteBlockStore::DB_VERSION],
                 )?;
             } else {
-                tx.execute(
-                    "UPDATE db_version SET version=?1",
-                    &[&SQLiteBlockStore::DB_VERSION],
-                )?;
+                tx.execute("UPDATE db_version SET version=?1", &[&SQLiteBlockStore::DB_VERSION])?;
             }
         }
         tx.commit()?;
@@ -188,49 +177,53 @@ impl SQLiteBlockStore {
         // get the last block eta_v (nonce) in the db
         let mut prev_eta_v = {
             hex::decode(
-                    match db.query_row("SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0", NO_PARAMS, |row| row.get(0)) {
-                        Ok(eta_v) => { eta_v }
-                        Err(_) => {
-                            match network_magic {
-                                764824073 => {
-                                    // mainnet genesis hash
-                                    info!("Start nonce calculation for mainnet.");
-                                    String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
-                                }
-                                1097911063 => {
-                                    // Testnet genesis hash
-                                    info!("Start nonce calculation for testnet.");
-                                    String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
-                                }
-                                3 => {
-                                    // Launchpad genesis hash
-                                    info!("Start nonce calculation for launchpad.");
-                                    String::from("8587fca9128b0470dcaf928f00bb2bd99dec5047e080a2da3aa419bd17023d75")
-                                }
-                                12 => {
-                                    // allegra genesis hash
-                                    info!("Start nonce calculation for allegra testnet.");
-                                    String::from("47daa6201f436c90f9c76e343e0fd6536262b7ca2455ec306aa2fcc45c97bb4d")
-                                }
-                                141 => {
-                                    // guild genesis hash
-                                    info!("Start nonce calculation for guild testnet.");
-                                    String::from("24c22740688a4bb783b3f8dbbaced2ecb661c3ffc3defbc3bed6157c055e36cf")
-                                }
-                                _ => {
-                                    panic!("Unknown genesis hash for network_magic {}", network_magic);
-                                }
+                match db.query_row(
+                    "SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0",
+                    NO_PARAMS,
+                    |row| row.get(0),
+                ) {
+                    Ok(eta_v) => eta_v,
+                    Err(_) => {
+                        match network_magic {
+                            764824073 => {
+                                // mainnet genesis hash
+                                info!("Start nonce calculation for mainnet.");
+                                String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
+                            }
+                            1097911063 => {
+                                // Testnet genesis hash
+                                info!("Start nonce calculation for testnet.");
+                                String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                            }
+                            3 => {
+                                // Launchpad genesis hash
+                                info!("Start nonce calculation for launchpad.");
+                                String::from("8587fca9128b0470dcaf928f00bb2bd99dec5047e080a2da3aa419bd17023d75")
+                            }
+                            12 => {
+                                // allegra genesis hash
+                                info!("Start nonce calculation for allegra testnet.");
+                                String::from("47daa6201f436c90f9c76e343e0fd6536262b7ca2455ec306aa2fcc45c97bb4d")
+                            }
+                            141 => {
+                                // guild genesis hash
+                                info!("Start nonce calculation for guild testnet.");
+                                String::from("24c22740688a4bb783b3f8dbbaced2ecb661c3ffc3defbc3bed6157c055e36cf")
+                            }
+                            _ => {
+                                panic!("Unknown genesis hash for network_magic {}", network_magic);
                             }
                         }
                     }
-                ).unwrap()
+                },
+            )
+            .unwrap()
         };
 
         let tx = db.transaction()?;
         {
             // scope for db transaction
-            let mut orphan_stmt =
-                tx.prepare("UPDATE chain SET orphaned = 1 WHERE block_number >= ?1")?;
+            let mut orphan_stmt = tx.prepare("UPDATE chain SET orphaned = 1 WHERE block_number >= ?1")?;
             let mut insert_stmt = tx.prepare(
                 "INSERT INTO chain (\
             block_number, \
@@ -284,26 +277,37 @@ impl SQLiteBlockStore {
                     // get the last block eta_v (nonce) in the db
                     prev_eta_v = {
                         hex::decode(
-                            match tx.query_row("SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0", NO_PARAMS, |row| row.get(0)) {
-                                Ok(eta_v) => { eta_v }
+                            match tx.query_row(
+                                "SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0",
+                                NO_PARAMS,
+                                |row| row.get(0),
+                            ) {
+                                Ok(eta_v) => eta_v,
                                 Err(_) => {
                                     match network_magic {
                                         764824073 => {
                                             // mainnet genesis hash
-                                            String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
+                                            String::from(
+                                                "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
+                                            )
                                         }
                                         141 => {
                                             // guild genesis hash
-                                            String::from("24c22740688a4bb783b3f8dbbaced2ecb661c3ffc3defbc3bed6157c055e36cf")
+                                            String::from(
+                                                "24c22740688a4bb783b3f8dbbaced2ecb661c3ffc3defbc3bed6157c055e36cf",
+                                            )
                                         }
                                         _ => {
                                             // assume testnet genesis hash
-                                            String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
+                                            String::from(
+                                                "849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4",
+                                            )
                                         }
                                     }
                                 }
-                            }
-                        ).unwrap()
+                            },
+                        )
+                        .unwrap()
                     };
                 }
                 // blake2b hash of eta_vrf_0
@@ -364,11 +368,7 @@ impl SQLiteBlockStore {
 }
 
 impl BlockStore for SQLiteBlockStore {
-    fn save_block(
-        &mut self,
-        mut pending_blocks: &mut Vec<BlockHeader>,
-        network_magic: u32,
-    ) -> io::Result<()> {
+    fn save_block(&mut self, mut pending_blocks: &mut Vec<BlockHeader>, network_magic: u32) -> io::Result<()> {
         match self.sql_save_block(&mut pending_blocks, network_magic) {
             Ok(_) => Ok(()),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Database error!")),
@@ -377,7 +377,9 @@ impl BlockStore for SQLiteBlockStore {
 
     fn load_blocks(&mut self) -> Option<Vec<(i64, Vec<u8>)>> {
         let db = &self.db;
-        let mut stmt = db.prepare("SELECT slot_number, hash FROM chain where orphaned = 0 ORDER BY slot_number DESC LIMIT 33").unwrap();
+        let mut stmt = db
+            .prepare("SELECT slot_number, hash FROM chain where orphaned = 0 ORDER BY slot_number DESC LIMIT 33")
+            .unwrap();
         let blocks = stmt
             .query_map(NO_PARAMS, |row| {
                 let slot_result: Result<i64, Error> = row.get(0);
