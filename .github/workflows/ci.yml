@@ -21,10 +21,18 @@ jobs:
           components: rustfmt, clippy
       - name: Install Dependencies (Ubuntu)
         if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf libsodium-dev -y
-      - name: Install Dependencies (OSX)
-        if: matrix.os == 'macos-latest'
-        run: brew install libsodium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
+      - name: Install IOHK Libsodium
+        run: |
+          git clone https://github.com/input-output-hk/libsodium
+          cd libsodium
+          git checkout 66f017f1
+          ./autogen.sh
+          ./configure
+          make
+          sudo make install
       - name: Check
         uses: actions-rs/cargo@v1
         with:
@@ -47,5 +55,8 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release
+          args: --debug
+        env:
+          LD_LIBRARY_PATH: /usr/local/lib:$LD_LIBRARY_PATH
+          PKG_CONFIG_PATH: /usr/local/lib/pkgconfig:$PKG_CONFIG_PATH
         
