@@ -32,6 +32,7 @@ serde_cbor = "0.11.1"
 serde_json = "1.0.62"
 structopt = "0.3.20"
 rayon = "1.5.0"
+itertools = "0.10.0"
 
 # logging
 log = "0.4.11"

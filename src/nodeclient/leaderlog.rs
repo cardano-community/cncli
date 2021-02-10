@@ -16,6 +16,7 @@ use rug::Rational;
 use rusqlite::{named_params, Connection, OptionalExtension, NO_PARAMS};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
+use itertools::sorted;
 
 use crate::nodeclient::leaderlog::deserialize::cbor_hex;
 use crate::nodeclient::leaderlog::ledgerstate::calculate_ledger_state_sigma_and_d;
@@ -486,8 +487,8 @@ pub(crate) fn calculate_leader_logs(
                                                             }
                                                     }).collect::<Vec<_>>();
                                                     
-                                                    // Update leader log with all assigned slots
-                                                    for (i, slot) in assigned_slots.iter().enumerate() {
+                                                    // Update leader log with all assigned slots (sort first)
+                                                    for (i, slot) in sorted(assigned_slots.iter()).enumerate() {
                                                         let no = (i+1) as i64;
                                                         let slot = Slot {
                                                             no,
