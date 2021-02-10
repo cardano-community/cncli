@@ -9,6 +9,7 @@ use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
 use chrono::{Duration, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
+use itertools::sorted;
 use log::{debug, error, info, trace};
 use num_bigint::{BigInt, Sign};
 use rayon::prelude::*;
@@ -16,7 +17,6 @@ use rug::Rational;
 use rusqlite::{named_params, Connection, OptionalExtension, NO_PARAMS};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
-use itertools::sorted;
 
 use crate::nodeclient::leaderlog::deserialize::cbor_hex;
 use crate::nodeclient::leaderlog::ledgerstate::calculate_ledger_state_sigma_and_d;
