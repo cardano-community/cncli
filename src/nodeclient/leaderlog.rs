@@ -11,6 +11,7 @@ use chrono::{Duration, NaiveDateTime, TimeZone, Utc};
 use chrono_tz::Tz;
 use log::{debug, error, info, trace};
 use num_bigint::{BigInt, Sign};
+use rayon::prelude::*;
 use rug::Rational;
 use rusqlite::{named_params, Connection, OptionalExtension, NO_PARAMS};
 use serde::{Deserialize, Serialize};
@@ -301,6 +302,7 @@ fn is_slot_leader(
     }
 }
 
+#[rustfmt::skip] // very deep nesting needs a refactor
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calculate_leader_logs(
     db_path: &PathBuf,
@@ -467,49 +469,40 @@ pub(crate) fn calculate_leader_logs(
                                                     let cert_nat_max: BigDecimal = BigDecimal::from_str("13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096").unwrap(); // 2^512
                                                     let c: BigDecimal = ln(&(BigDecimal::one()
                                                         - BigDecimal::from_f64(shelley.active_slots_coeff).unwrap()));
-                                                    let mut no = 0i64;
-                                                    for slot_in_epoch in 0..shelley.epoch_length {
-                                                        let slot = first_slot_of_epoch + slot_in_epoch;
-                                                        if is_overlay_slot(
-                                                            &first_slot_of_epoch,
-                                                            &slot,
-                                                            &decentralization_param,
-                                                        ) {
-                                                            // Nobody is allowed to make a block in this slot except BFT nodes.
-                                                            continue;
-                                                        }
 
-                                                        match is_slot_leader(
-                                                            slot,
-                                                            &sigma,
-                                                            &epoch_nonce,
-                                                            &pool_vrf_skey.key,
-                                                            &cert_nat_max,
-                                                            &c,
-                                                        ) {
-                                                            Ok(is_leader) => {
-                                                                if is_leader {
-                                                                    no += 1;
-                                                                    let slot = Slot {
-                                                                        no,
-                                                                        slot,
-                                                                        slot_in_epoch: slot - first_slot_of_epoch,
-                                                                        at: slot_to_timestamp(
-                                                                            &byron, &shelley, slot, &tz,
-                                                                        ),
-                                                                    };
-                                                                    debug!("Found assigned slot: {:?}", &slot);
-                                                                    leader_log.assigned_slots.push(slot);
-                                                                    leader_log.epoch_slots = no;
+                                                    // Calculate all of our assigned slots in the epoch (in parallel)
+                                                    let assigned_slots = (0..shelley.epoch_length)
+                                                        .par_bridge() // <--- use rayon parallel bridge
+                                                        .map(|slot_in_epoch| first_slot_of_epoch + slot_in_epoch)
+                                                        .filter(|epoch_slot| !is_overlay_slot(&first_slot_of_epoch, &epoch_slot, &decentralization_param))
+                                                        .filter_map(|leader_slot| {
+                                                            match is_slot_leader(leader_slot, &sigma, &epoch_nonce, &pool_vrf_skey.key, &cert_nat_max, &c) {
+                                                                Ok(true) => Some(leader_slot),
+                                                                Ok(false) => None,
+                                                                Err(msg) => {
+                                                                    handle_error(msg);
+                                                                    None
                                                                 }
                                                             }
-                                                            Err(error) => handle_error(error),
-                                                        }
-                                                    }
-                                                    leader_log.max_performance =
-                                                        (leader_log.epoch_slots as f64 / epoch_slots_ideal * 10000.0)
-                                                            .round()
-                                                            / 100.0;
+                                                    }).collect::<Vec<_>>();
+                                                    
+                                                    // Update leader log with all assigned slots
+                                                    for (i, slot) in assigned_slots.iter().enumerate() {
+                                                        let no = (i+1) as i64;
+                                                        let slot = Slot {
+                                                            no,
+                                                            slot: *slot,
+                                                            slot_in_epoch: slot - first_slot_of_epoch,
+                                                            at: slot_to_timestamp(&byron, &shelley, *slot, &tz),
+                                                        };
+
+                                                        debug!("Found assigned slot: {:?}", &slot);
+                                                        leader_log.assigned_slots.push(slot);
+                                                        leader_log.epoch_slots = no;
+                                                    };
+
+                                                    // Calculate expected performance
+                                                    leader_log.max_performance = (leader_log.epoch_slots as f64 / epoch_slots_ideal * 10000.0).round() / 100.0;
 
                                                     // Save slots to database so we can send to pooltool later
                                                     match db.prepare("INSERT INTO slots (epoch,pool_id,slot_qty,slots,hash) VALUES (:epoch,:pool_id,:slot_qty,:slots,:hash) ON CONFLICT (epoch,pool_id) DO UPDATE SET slot_qty=excluded.slot_qty, slots=excluded.slots, hash=excluded.hash") {
@@ -530,7 +523,7 @@ pub(crate) fn calculate_leader_logs(
                                                                 named_params! {
                                                                     ":epoch" : epoch,
                                                                     ":pool_id" : pool_id,
-                                                                    ":slot_qty" : no,
+                                                                    ":slot_qty" : assigned_slots.len() as i64,
                                                                     ":slots" : slots,
                                                                     ":hash" : hash
                                                                 }
