@@ -1,6 +1,8 @@
 # cncli
 A community-based cardano-node CLI tool. It's a collection of utilities to enhance and extend beyond those available with the `cardano-cli`
 
+![Build Status](https://github.com/AndrewWestberg/cncli/workflows/.github/workflows/ci.yml/badge.svg)
+
 #### Contributors
 CNCLI is provided free of charge to the Cardano Stakepool operator community. If you want to support its continued development, you can delegate or recommend the pools of our contributors.
  * Andrew Westberg - BCSH
