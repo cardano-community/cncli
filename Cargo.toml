@@ -44,3 +44,6 @@ gmp-mpfr-sys = { version="1.4", features=["force-cross"] }
 
 [build-dependencies]
 autotools = "0.2"
+
+[features]
+external-contrib-build = []
