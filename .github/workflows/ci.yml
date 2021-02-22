@@ -1,37 +1,19 @@
 on: [push, pull_request]
 
 jobs:
-  build:
-    name: Build
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [macos-latest, ubuntu-latest]
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v2
-        with:
-          submodules: true # recurse submodules
-      - name: Install Toolchain
+      - name: Install Rust Toolchain
         uses: actions-rs/toolchain@v1
         with:
-          profile: minimal
           toolchain: stable
           override: true
-          components: rustfmt, clippy
-      - name: Install Dependencies (Ubuntu)
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
-      - name: Install Dependencies (MacOS)
-        if: matrix.os == 'macos-latest'
-        run: brew install autoconf automake libtool
-      - name: Check
-        uses: actions-rs/cargo@v1
-        with:
-          command: check
-      - name: Lint
+      - name: Format
         uses: actions-rs/cargo@v1
         with:
           command: fmt
@@ -41,12 +23,71 @@ jobs:
         with:
           command: clippy
           args: -- -D warnings
+
+  windows:
+    name: Build Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          submodules: true # recurse submodules
+      - uses: msys2/setup-msys2@v2
+        with:
+          update: true
+          system: MINGW64
+          install: >-
+            git
+            base-devel
+            mingw64/mingw-w64-x86_64-rust
+      - name: Build Libsodium
+        run: autorecon -vfi && ./configure && make
+        working-directory: contrib/libsodium
+      - name: Test
+        run: cargo test --features external-contrib-build
+
+  macos:
+    name: Build MacOS
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          submodules: true # recurse submodules
+      - name: Install Dependencies (MacOS)
+        run: brew install autoconf automake libtool
+      - name: Install Rust Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          use-cross: true
+          command: test
+
+  linux:
+    name: Build Linux
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          submodules: true # recurse submodules
+      - name: Install Dependencies (Ubuntu)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
+      - name: Install Rust Toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
       - name: Test
         uses: actions-rs/cargo@v1
         with:
           command: test
-      - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-        

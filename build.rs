@@ -18,9 +18,20 @@ fn main() {
             .arg("--force")
     });
 
-    let libsodium = autotools::Config::new("contrib/libsodium/").reconf("-vfi").build();
-    println!("cargo:rustc-link-search=native={}", libsodium.join("lib").display());
-    println!("cargo:rustc-link-lib=static=sodium");
+    // Build contrib automatically (as part of rust build)
+    #[cfg(not(feature = "external-contrib-build"))]
+    {
+        let libsodium = autotools::Config::new("contrib/libsodium/").reconf("-vfi").build();
+        println!("cargo:rustc-link-search=native={}", libsodium.join("lib").display());
+        println!("cargo:rustc-link-lib=static=sodium");
+    }
+
+    // Expect contrib to be pre-built (external to rust build) - necessary when using
+    // MSYS2/MinGW64 to build.
+    #[cfg(feature = "external-contrib-build")]
+    {
+        println!("cargo:rustc-link-search=contrib/libsodium/src/libsodium/.libs");
+    }
 
     println!("cargo:return-if-changed=build.rs");
 }
