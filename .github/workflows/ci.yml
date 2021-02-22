@@ -44,7 +44,7 @@ jobs:
             base-devel
             mingw64/mingw-w64-x86_64-rust
       - name: Build Libsodium
-        run: autorecon -vfi && ./configure && make
+        run: autoreconf -vfi && ./configure && make
         working-directory: contrib/libsodium
       - name: Test
         run: cargo test --features external-contrib-build
@@ -67,7 +67,6 @@ jobs:
       - name: Test
         uses: actions-rs/cargo@v1
         with:
-          use-cross: true
           command: test
 
   linux:
