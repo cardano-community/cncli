@@ -2,91 +2,122 @@ on: [push, pull_request]
 
 jobs:
 
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
+  build:
+    name: ${{ matrix.job.os }} (${{ matrix.job.target }})
+    runs-on: ${{ matrix.job.os }}
+    defaults:
+      run:
+        shell: bash
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: windows-latest, target: x86_64-pc-windows-gnu, toolchain: stable-x86_64-pc-windows-gnu, features: [ libsodium-sys ] }
+          - { os: macos-latest, target: x86_64-apple-darwin }
     steps:
       - name: Checkout
         uses: actions/checkout@v2
+        with:
+          submodules: true # recurse submodules
+      - name: Configure Environment
+        run: |
+          case ${{ matrix.job.target }} in
+            *-pc-windows-gnu)
+             
+              case ${{ matrix.job.target }} in
+                i686*)
+                  MSYSTEM=MINGW32
+                  MSYSTEM_PATH=c:/msys64/mingw32
+                  ;;
+                x86_64*) 
+                  MSYSTEM=MINGW64
+                  MSYSTEM_PATH=c:/msys64/mingw64
+                  ;;
+              esac
+
+              echo "c:/msys64" >> $GITHUB_PATH                # enable msys2 entrypoint commands (probably not needed)
+              echo "c:/msys64/usr/bin" >> $GITHUB_PATH        # place msys2 environment on system path 
+              echo "${MSYSTEM_PATH}/bin" >> $GITHUB_PATH      # place MinGW environment on system path
+              echo "CHERE_INVOKING=yes" >> $GITHUB_ENV        # maintain directory context
+              echo "MSYSTEM=${MSYSTEM}" >> $GITHUB_ENV        # set msystem version for msys2 shell
+            ;;
+          esac
+      - name: Install Prerequisites
+        run: |
+          case ${{ matrix.job.target }} in
+            x86_64-pc-windows-gnu)
+              pacman -S --noconfirm --needed mingw-w64-x86_64-gcc base-devel autoconf
+              ;;
+            i686-pc-windows-gnu)
+              pacman -S --noconfirm --needed mingw-w64-i686-gcc base-devel autoconf
+              ;;
+            *-unknown-linux-*)
+              sudo apt-get -y update
+              sudo apt-get -y install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
+              ;;
+            *-apple-darwin)
+              brew install automake
+              ;;
+          esac
       - name: Install Rust Toolchain
         uses: actions-rs/toolchain@v1
         with:
-          toolchain: stable
+          toolchain: ${{ matrix.job.toolchain || 'stable' }}
+          target: ${{ matrix.job.target }}
           override: true
+          default: true
+          components: rustfmt, clippy
+      - name: Build Libsodium
+        if: contains(matrix.job.features, 'libsodium-sys')
+        run: autoreconf -vfi && ./configure && make && make install
+        working-directory: contrib/libsodium
       - name: Format
         uses: actions-rs/cargo@v1
         with:
           command: fmt
           args: --all -- --check
-      - name: Clippy
+      - name: Lint (Clippy)
         uses: actions-rs/cargo@v1
         with:
           command: clippy
-          args: -- -D warnings
-
-  windows:
-    name: Build Windows
-    runs-on: windows-latest
-    defaults:
-      run:
-        shell: msys2 {0}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          submodules: true # recurse submodules
-      - uses: msys2/setup-msys2@v2
-        with:
-          update: true
-          system: MINGW64
-          install: >-
-            git
-            base-devel
-            mingw64/mingw-w64-x86_64-rust
-      - name: Build Libsodium
-        run: autoreconf -vfi && ./configure && make
-        working-directory: contrib/libsodium
-      - name: Test
-        run: cargo test --features external-contrib-build
-
-  macos:
-    name: Build MacOS
-    runs-on: macos-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
-        with:
-          submodules: true # recurse submodules
-      - name: Install Dependencies (MacOS)
-        run: brew install autoconf automake libtool
-      - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
+          args: --release --features "${{ join(matrix.job.features, ',') }}" --target ${{ matrix.job.target }} -- -D warnings
       - name: Test
         uses: actions-rs/cargo@v1
         with:
+          use-cross: ${{ matrix.job.use-cross }}
           command: test
-
-  linux:
-    name: Build Linux
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v2
+          args: --release --features "${{ join(matrix.job.features, ',') }}" --target ${{ matrix.job.target }}
+      - name: Build
+        uses: actions-rs/cargo@v1
         with:
-          submodules: true # recurse submodules
-      - name: Install Dependencies (Ubuntu)
+          use-cross: ${{ matrix.job.use-cross }}
+          command: build
+          args: --release --features "${{ join(matrix.job.features, ',') }}" --target ${{ matrix.job.target }} --locked
+      - name: Package
+        id: package
         run: |
-          sudo apt-get update
-          sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
-      - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
+          PROJECT_NAME=$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.toml)
+          PROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          PKG_SUFFIX=".tar.gz" ; case ${{ matrix.job.target }} in *-pc-windows-*) PKG_SUFFIX=".zip" ;; esac;
+          PKG_NAME=${PROJECT_NAME}-${PROJECT_VERSION}-${{ matrix.job.target }}${PKG_SUFFIX}
+
+          case ${{ matrix.job.target }} in
+            *-pc-windows-*) 7z -y a "${PKG_NAME}" ./target/${{matrix.job.target}}/release/cncli.exe | tail -2 ;;
+            *) tar -C target/${{matrix.job.target}}/release -czf "${PKG_NAME}" cncli ;;
+          esac;
+
+          echo ::set-output name=PKG_NAME::${PKG_NAME}
+          echo ::set-output name=PKG_PATH::${PKG_NAME}
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v2
         with:
-          toolchain: stable
-          override: true
-      - name: Test
-        uses: actions-rs/cargo@v1
+          name: ${{ steps.package.outputs.PKG_NAME }}
+          path: ${{ steps.package.outputs.PKG_PATH }}
+      - name: Release
+        uses: softprops/action-gh-release@v1
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
-          command: test
+          files: ${{ steps.package.outputs.PKG_PATH }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

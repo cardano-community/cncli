@@ -44,6 +44,7 @@ gmp-mpfr-sys = { version="1.4", features=["force-cross"] }
 
 [build-dependencies]
 autotools = "0.2"
+pkg-config = "0.3.16"
 
 [features]
-external-contrib-build = []
+libsodium-sys = []

@@ -353,6 +353,7 @@ dependencies = [
  "log",
  "net2",
  "num-bigint",
+ "pkg-config",
  "pretty_env_logger",
  "rayon",
  "regex",
