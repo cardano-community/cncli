@@ -209,7 +209,7 @@ impl SqLiteBlockStore {
                             141 => {
                                 // guild genesis hash
                                 info!("Start nonce calculation for guild testnet.");
-                                String::from("24c22740688a4bb783b3f8dbbaced2ecb661c3ffc3defbc3bed6157c055e36cf")
+                                String::from("5fa6a5ca2a79be706742a73d5fdfa75aefc9d220f8b18230b943da49cc3254d3")
                             }
                             _ => {
                                 panic!("Unknown genesis hash for network_magic {}", network_magic);
@@ -295,7 +295,7 @@ impl SqLiteBlockStore {
                                         141 => {
                                             // guild genesis hash
                                             String::from(
-                                                "24c22740688a4bb783b3f8dbbaced2ecb661c3ffc3defbc3bed6157c055e36cf",
+                                                "5fa6a5ca2a79be706742a73d5fdfa75aefc9d220f8b18230b943da49cc3254d3",
                                             )
                                         }
                                         _ => {
