@@ -336,6 +336,14 @@ SNAPSHOT=$(/home/westbam/.local/bin/cardano-cli query stake-snapshot --stake-poo
 POOL_STAKE=$(jq .poolStakeMark <<< $SNAPSHOT)
 ACTIVE_STAKE=$(jq .activeStakeMark <<< $SNAPSHOT)
 BCSH=`/home/westbam/.cargo/bin/cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --ledger-set next`
+
+EPOCH=`jq .epoch <<< $BCSH`
+echo "\`Epoch $EPOCH\` 🧙🔮:"
+
+SLOTS=`jq .epochSlots <<< $BCSH`
+IDEAL=`jq .epochSlotsIdeal <<< $BCSH`
+PERFORMANCE=`jq .maxPerformance <<< $BCSH`
+echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
 ```
 
 **Note**: to automate calculating your assigned slots and sending them to [PoolTool](https://pooltool.io/), please refer to the [installation guide](INSTALL.md).
