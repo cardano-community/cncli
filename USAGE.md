@@ -325,17 +325,18 @@ cncli nonce --byron-genesis ~/haskell/test/byron-genesis.json --shelley-genesis 
 
 ### Leaderlog Command
 
-This command calculates a stake pool's expected slot list. ```prev``` and ```current``` logs are available as long as you have a synchronized database. ```next``` logs are only available 1.5 days before the end of the epoch.
+This command calculates a stake pool's expected slot list. ```prev``` and ```current``` logs are available as long as you have a synchronized database. ```next``` logs are only available 1.5 days before the end of the epoch. You need to use ```.poolStakeMark``` and ```.activeStakeMark``` for ```next```, ```.poolStakeSet``` and ```.activeStakeSet``` for ```current```, ```.poolStakeGo``` and ```.activeStakeGo``` for ```prev```.
 
-This command requires that you:
-
-1 - use ```cardano-cli``` to dump a fresh ```ledger-state.json``` file. This is optional if you're using the [Crypto2099 API](https://api.crypto2099.io/v1/sigma)  or the ```--pool-stake``` and ```--active-stake``` instead of a ```ledger-state.json``` file.
+Example usage with the ```stake-snapshot``` approach:
 
 ```bash
-cardano-cli query ledger-state --mainnet > /tmp/ledger-state-227.json
+/home/westbam/.cargo/bin/cncli sync --host 127.0.0.1 --port 6000 --no-service
+echo "BCSH"
+SNAPSHOT=$(/home/westbam/.local/bin/cardano-cli query stake-snapshot --stake-pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --mainnet)
+POOL_STAKE=$(jq .poolStakeMark <<< $SNAPSHOT)
+ACTIVE_STAKE=$(jq .activeStakeMark <<< $SNAPSHOT)
+BCSH=`/home/westbam/.cargo/bin/cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --ledger-set next`
 ```
-
-2 - Use the ```sync``` command above to build a 100% synchronized ```cncli.db``` database file.
 
 **Note**: to automate calculating your assigned slots and sending them to [PoolTool](https://pooltool.io/), please refer to the [installation guide](INSTALL.md).
 
