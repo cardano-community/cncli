@@ -159,6 +159,8 @@ pub mod nodeclient {
             byron_genesis: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
             shelley_genesis: std::path::PathBuf,
+            #[structopt(long = "override_time", env = "OVERRIDE_TIME", hide_env_values = true)]
+            override_time: Option<String>,
         },
         Status {
             #[structopt(
@@ -332,13 +334,14 @@ pub mod nodeclient {
                 ref db,
                 ref byron_genesis,
                 ref shelley_genesis,
+                ref override_time,
             } => {
                 if !config.exists() {
                     handle_error("config not found!");
                     return;
                 }
                 let pooltool_config: PooltoolConfig = get_pooltool_config(config);
-                leaderlog::send_slots(db, byron_genesis, shelley_genesis, pooltool_config);
+                leaderlog::send_slots(db, byron_genesis, shelley_genesis, pooltool_config, override_time);
             }
             Command::Status {
                 ref db,
