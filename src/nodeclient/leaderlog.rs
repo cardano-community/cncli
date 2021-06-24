@@ -111,6 +111,8 @@ struct PooltoolSendSlots {
     slot_qty: i64,
     hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    override_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     prev_slots: Option<String>,
 }
 
@@ -632,6 +634,7 @@ pub(crate) fn send_slots(
     byron_genesis: &Path,
     shelley_genesis: &Path,
     pooltool_config: PooltoolConfig,
+    override_time: &Option<String>,
 ) {
     if !db_path.exists() {
         handle_error("database not found!");
@@ -666,6 +669,7 @@ pub(crate) fn send_slots(
                                                         epoch,
                                                         slot_qty,
                                                         hash,
+                                                        override_time: override_time.clone(),
                                                         prev_slots,
                                                     })
                                                     .unwrap();
