@@ -159,7 +159,7 @@ pub mod nodeclient {
             byron_genesis: std::path::PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
             shelley_genesis: std::path::PathBuf,
-            #[structopt(long, env = "OVERRIDE_TIME", hide_env_values = true, hidden=true)]
+            #[structopt(long, env = "OVERRIDE_TIME", hide_env_values = true, hidden = true)]
             override_time: Option<String>,
         },
         Status {
@@ -204,17 +204,21 @@ pub mod nodeclient {
             )]
             ledger_set: LedgerSet,
         },
+        Challenge {
+            #[structopt(long, help = "validating domain e.g. pooltool.io")]
+            domain: String,
+        },
         Sign {
             #[structopt(parse(from_os_str), long, help = "pool's vrf.skey file")]
             pool_vrf_skey: std::path::PathBuf,
-            #[structopt(long, help = "text message to sign")]
-            message: String,
+            #[structopt(long, help = "challenge to sign in lower-case hex")]
+            challenge: String,
         },
         Verify {
             #[structopt(parse(from_os_str), long, help = "pool's vrf.vkey file")]
             pool_vrf_vkey: std::path::PathBuf,
-            #[structopt(long, help = "text message to verify")]
-            message: String,
+            #[structopt(long, help = "challenge to verify")]
+            challenge: String,
             #[structopt(
                 long,
                 help = "pool's vrf hash in hex retrieved from 'cardano-cli query pool-params...'"
@@ -350,23 +354,26 @@ pub mod nodeclient {
             } => {
                 leaderlog::status(db, byron_genesis, shelley_genesis);
             }
+            Command::Challenge { ref domain } => {
+                signing::create_challenge(domain);
+            }
             Command::Sign {
                 ref pool_vrf_skey,
-                ref message,
+                ref challenge,
             } => {
                 if !pool_vrf_skey.exists() {
                     handle_error("vrf.skey not found!");
                     return;
                 }
-                signing::sign_message(pool_vrf_skey, message);
+                signing::sign_challenge(pool_vrf_skey, challenge);
             }
             Command::Verify {
                 ref pool_vrf_vkey,
-                ref message,
+                ref challenge,
                 ref pool_vrf_vkey_hash,
                 ref signature,
             } => {
-                signing::verify_message(pool_vrf_vkey, message, pool_vrf_vkey_hash, signature);
+                signing::verify_challenge(pool_vrf_vkey, challenge, pool_vrf_vkey_hash, signature);
             }
         }
     }
