@@ -4,11 +4,11 @@ use std::path::Path;
 
 use blake2b_simd::Params;
 use log::debug;
+use rand::{Rng, thread_rng};
 use serde::Serialize;
 
 use crate::nodeclient::leaderlog::libsodium::{sodium_crypto_vrf_proof_to_hash, sodium_crypto_vrf_prove, sodium_crypto_vrf_verify};
 use crate::nodeclient::leaderlog::read_vrf_key;
-use rand::Rng;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,7 +21,8 @@ struct SignVerifyError {
 #[serde(rename_all = "camelCase")]
 struct ChallengeSuccess {
     status: String,
-    challenge: String,
+    domain: String,
+    nonce: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -38,7 +39,9 @@ struct VerifySuccess {
 }
 
 pub(crate) fn create_challenge(domain: &str) {
-    let nonce = hex::encode(rand::thread_rng().gen::<[u8; 32]>()) + &*hex::encode(rand::thread_rng().gen::<[u8; 32]>());
+    let mut nonce_seed = [0u8; 64];
+    thread_rng().fill(&mut nonce_seed);
+    let nonce = hex::encode(nonce_seed);
     match hex::decode(hex::encode("cip-0022".as_bytes()) + &*hex::encode(domain.as_bytes()) + &*nonce) {
         Ok(challenge_seed) => {
             let challenge = Params::new()
@@ -53,7 +56,8 @@ pub(crate) fn create_challenge(domain: &str) {
                 &mut stdout(),
                 &ChallengeSuccess {
                     status: "ok".to_string(),
-                    challenge: hex::encode(&challenge),
+                    domain: domain.to_string(),
+                    nonce,
                 },
             ).unwrap();
         }
@@ -61,9 +65,18 @@ pub(crate) fn create_challenge(domain: &str) {
     }
 }
 
-pub(crate) fn sign_challenge(pool_vrf_skey: &Path, challenge: &str) {
-    match hex::decode(challenge) {
-        Ok(challenge_bytes) => {
+pub(crate) fn sign_challenge(pool_vrf_skey: &Path, domain: &str, nonce: &str) {
+    let challenge_seed = hex::encode("cip-0022".as_bytes()) + &*hex::encode(domain.as_bytes()) + nonce;
+    match hex::decode(challenge_seed) {
+        Ok(challenge_seed_bytes) => {
+            let challenge_bytes = Params::new()
+                .hash_length(32)
+                .to_state()
+                .update(&*challenge_seed_bytes)
+                .finalize()
+                .as_bytes()
+                .to_owned();
+            debug!("challenge: {}", hex::encode(&challenge_bytes));
             match read_vrf_key(pool_vrf_skey) {
                 Ok(vrf_skey) => {
                     if vrf_skey.key_type != "VrfSigningKey_PraosVRF" {
@@ -91,9 +104,18 @@ pub(crate) fn sign_challenge(pool_vrf_skey: &Path, challenge: &str) {
     }
 }
 
-pub(crate) fn verify_challenge(pool_vrf_vkey: &Path, challenge: &str, pool_vrf_vkey_hash: &str, signature: &str) {
-    match hex::decode(challenge) {
-        Ok(challenge_bytes) => {
+pub(crate) fn verify_challenge(pool_vrf_vkey: &Path, pool_vrf_vkey_hash: &str, domain: &str, nonce: &str, signature: &str) {
+    let challenge_seed = hex::encode("cip-0022".as_bytes()) + &*hex::encode(domain.as_bytes()) + nonce;
+    match hex::decode(challenge_seed) {
+        Ok(challenge_seed_bytes) => {
+            let challenge_bytes = Params::new()
+                .hash_length(32)
+                .to_state()
+                .update(&*challenge_seed_bytes)
+                .finalize()
+                .as_bytes()
+                .to_owned();
+            debug!("challenge: {}", hex::encode(&challenge_bytes));
             match read_vrf_key(pool_vrf_vkey) {
                 Ok(vrf_vkey) => {
                     if vrf_vkey.key_type != "VrfVerificationKey_PraosVRF" {

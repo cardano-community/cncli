@@ -211,19 +211,23 @@ pub mod nodeclient {
         Sign {
             #[structopt(parse(from_os_str), long, help = "pool's vrf.skey file")]
             pool_vrf_skey: std::path::PathBuf,
-            #[structopt(long, help = "challenge to sign in lower-case hex")]
-            challenge: String,
+            #[structopt(long, help = "validating domain e.g. pooltool.io")]
+            domain: String,
+            #[structopt(long, help = "nonce value in lower-case hex")]
+            nonce: String,
         },
         Verify {
             #[structopt(parse(from_os_str), long, help = "pool's vrf.vkey file")]
             pool_vrf_vkey: std::path::PathBuf,
-            #[structopt(long, help = "challenge to verify")]
-            challenge: String,
             #[structopt(
                 long,
                 help = "pool's vrf hash in hex retrieved from 'cardano-cli query pool-params...'"
             )]
             pool_vrf_vkey_hash: String,
+            #[structopt(long, help = "validating domain e.g. pooltool.io")]
+            domain: String,
+            #[structopt(long, help = "nonce value in lower-case hex")]
+            nonce: String,
             #[structopt(long, help = "signature to verify in hex")]
             signature: String,
         },
@@ -359,21 +363,23 @@ pub mod nodeclient {
             }
             Command::Sign {
                 ref pool_vrf_skey,
-                ref challenge,
+                ref domain,
+                ref nonce,
             } => {
                 if !pool_vrf_skey.exists() {
                     handle_error("vrf.skey not found!");
                     return;
                 }
-                signing::sign_challenge(pool_vrf_skey, challenge);
+                signing::sign_challenge(pool_vrf_skey, domain, nonce);
             }
             Command::Verify {
                 ref pool_vrf_vkey,
-                ref challenge,
                 ref pool_vrf_vkey_hash,
+                ref domain,
+                ref nonce,
                 ref signature,
             } => {
-                signing::verify_challenge(pool_vrf_vkey, challenge, pool_vrf_vkey_hash, signature);
+                signing::verify_challenge(pool_vrf_vkey, pool_vrf_vkey_hash, domain, nonce, signature);
             }
         }
     }
