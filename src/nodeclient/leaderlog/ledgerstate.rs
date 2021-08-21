@@ -341,10 +341,9 @@ pub(super) fn calculate_ledger_state_sigma_d_and_extra_entropy(
                                         ProposalsNew::ProposalId(_) => {}
                                         ProposalsNew::ProposalParams(proposal) => {
                                             if proposal.decentralisation_param.is_some() {
-                                                decentralisation_param = Rational::from_f64(
-                                                    proposal.decentralisation_param.unwrap(),
-                                                )
-                                                .unwrap();
+                                                decentralisation_param =
+                                                    Rational::from_f64(proposal.decentralisation_param.unwrap())
+                                                        .unwrap();
                                                 break;
                                             }
                                         }

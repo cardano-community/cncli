@@ -58,7 +58,10 @@ pub(crate) fn sodium_crypto_vrf_verify(public_key: &[u8], signature: &[u8], seed
             seed.len() as u64,
         );
         if rc != 0 {
-            Err(format!("libsodium crypto_vrf_verify() failed, returned {}, expected 0", rc))
+            Err(format!(
+                "libsodium crypto_vrf_verify() failed, returned {}, expected 0",
+                rc
+            ))
         } else {
             verification.set_len(64);
             Ok(verification)

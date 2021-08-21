@@ -500,7 +500,7 @@ pub(crate) fn calculate_leader_logs(
                                                     let assigned_slots = (0..shelley.epoch_length)
                                                         .par_bridge() // <--- use rayon parallel bridge
                                                         .map(|slot_in_epoch| first_slot_of_epoch + slot_in_epoch)
-                                                        .filter(|epoch_slot| !is_overlay_slot(&first_slot_of_epoch, &epoch_slot, &ledger_info.decentralization))
+                                                        .filter(|epoch_slot| !is_overlay_slot(&first_slot_of_epoch, epoch_slot, &ledger_info.decentralization))
                                                         .filter_map(|leader_slot| {
                                                             match is_slot_leader(leader_slot, &sigma, &epoch_nonce, &pool_vrf_skey.key, &cert_nat_max, &c) {
                                                                 Ok(true) => Some(leader_slot),
