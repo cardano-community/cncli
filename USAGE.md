@@ -290,8 +290,8 @@ This command calculates the epoch nonce value. This command requires that you us
 #### Show Nonce Help
 
 ```bash
-$ cncli nonce --help            
-cncli-nonce 2.1.0
+$ cncli nonce --help
+cncli-nonce 4.0.0
 
 USAGE:
     cncli nonce [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -306,8 +306,6 @@ OPTIONS:
         --extra-entropy <extra-entropy>        hex string of the extra entropy value
         --ledger-set <ledger-set>              Which ledger data to use. prev - previous epoch, current - current epoch,
                                                next - future epoch [default: current]
-        --ledger-state <ledger-state>          ledger state json file or API url [default:
-                                               https://api.crypto2099.io/v1/entropy]
         --shelley-genesis <shelley-genesis>    shelley genesis json file
 ```
 
@@ -327,7 +325,7 @@ cncli nonce --byron-genesis ~/haskell/test/byron-genesis.json --shelley-genesis 
 
 This command calculates a stake pool's expected slot list. ```prev``` and ```current``` logs are available as long as you have a synchronized database. ```next``` logs are only available 1.5 days before the end of the epoch. You need to use ```.poolStakeMark``` and ```.activeStakeMark``` for ```next```, ```.poolStakeSet``` and ```.activeStakeSet``` for ```current```, ```.poolStakeGo``` and ```.activeStakeGo``` for ```prev```.
 
-Example usage with the ```stake-snapshot``` approach:
+Example usage with the ```stake-snapshot```:
 
 ```bash
 /home/westbam/.cargo/bin/cncli sync --host 127.0.0.1 --port 6000 --no-service
@@ -351,10 +349,11 @@ echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
 #### Show Leaderlog Help
 
 ```bash
-cncli-leaderlog 2.1.0
+$ cncli leaderlog --help
+cncli-leaderlog 4.0.0
 
 USAGE:
-    cncli leaderlog [OPTIONS] --byron-genesis <byron-genesis> --pool-id <pool-id> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
+    cncli leaderlog [OPTIONS] --active-stake <active-stake> --byron-genesis <byron-genesis> --pool-id <pool-id> --pool-stake <pool-stake> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
 
 FLAGS:
     -h, --help       Prints help information
@@ -367,8 +366,6 @@ OPTIONS:
         --extra-entropy <extra-entropy>        hex string of the extra entropy value
         --ledger-set <ledger-set>              Which ledger data to use. prev - previous epoch, current - current epoch,
                                                next - future epoch [default: current]
-        --ledger-state <ledger-state>          ledger state json file or API url [default:
-                                               https://api.crypto2099.io/v1/sigma]
         --pool-id <pool-id>                    lower-case hex pool id
         --pool-stake <pool-stake>              pool active stake snapshot value in lovelace
         --pool-vrf-skey <pool-vrf-skey>        pool's vrf.skey file
@@ -381,7 +378,7 @@ OPTIONS:
 #### Calculate leaderlog
 
 ```bash
-cncli leaderlog --pool-id 00beef284975ef87856c1343f6bf50172253177fdebc756524d43fc1 --pool-vrf-skey ./bcsh2.vrf.skey --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json --ledger-state /tmp/ledger-state-227.json --ledger-set current
+cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --ledger-set current
 ```
 
 ##### Leaderlog Success Result
@@ -393,7 +390,7 @@ cncli leaderlog --pool-id 00beef284975ef87856c1343f6bf50172253177fdebc756524d43f
   "epochNonce": "0e534dd41bb80bfff4a16d038eb52280e9beac7545cc32c9bfc253a6d92010d1",
   "poolId": "00beef284975ef87856c1343f6bf50172253177fdebc756524d43fc1",
   "sigma": 0.0028306163817569175,
-  "d": 0.5,
+  "d": 0,
   "assignedSlots": [
     ...
     {
@@ -414,7 +411,7 @@ cncli leaderlog --pool-id 00beef284975ef87856c1343f6bf50172253177fdebc756524d43f
 #### Calculate leaderlog failure (too soon for "next" logs, or un-synchronized database)
 
 ```bash
-cncli leaderlog --pool-id 00beef284975ef87856c1343f6bf50172253177fdebc756524d43fc1 --pool-vrf-skey ./bcsh2.vrf.skey --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json --ledger-state /tmp/ledger-state-227.json --ledger-set next
+cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --ledger-set next
 ```
 
 ##### Leaderlog Too Soon Result

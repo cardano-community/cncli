@@ -96,17 +96,11 @@ pub mod nodeclient {
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
             shelley_genesis: std::path::PathBuf,
             #[structopt(long, help = "pool active stake snapshot value in lovelace")]
-            pool_stake: Option<u64>,
+            pool_stake: u64,
             #[structopt(long, help = "total active stake snapshot value in lovelace")]
-            active_stake: Option<u64>,
+            active_stake: u64,
             #[structopt(long, help = "hex string of the extra entropy value")]
             extra_entropy: Option<String>,
-            #[structopt(
-                long,
-                help = "ledger state json file or API url",
-                default_value = "https://api.crypto2099.io/v1/sigma"
-            )]
-            ledger_state: String,
             #[structopt(
                 long,
                 default_value = "current",
@@ -193,12 +187,6 @@ pub mod nodeclient {
             extra_entropy: Option<String>,
             #[structopt(
                 long,
-                help = "ledger state json file or API url",
-                default_value = "https://api.crypto2099.io/v1/entropy"
-            )]
-            ledger_state: String,
-            #[structopt(
-                long,
                 default_value = "current",
                 help = "Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch"
             )]
@@ -261,7 +249,6 @@ pub mod nodeclient {
                 ref pool_stake,
                 ref active_stake,
                 ref extra_entropy,
-                ref ledger_state,
                 ref ledger_set,
                 ref pool_id,
                 ref pool_vrf_skey,
@@ -274,7 +261,6 @@ pub mod nodeclient {
                     pool_stake,
                     active_stake,
                     extra_entropy,
-                    ledger_state,
                     ledger_set,
                     pool_id,
                     pool_vrf_skey,
@@ -287,16 +273,14 @@ pub mod nodeclient {
                 ref byron_genesis,
                 ref shelley_genesis,
                 ref extra_entropy,
-                ref ledger_state,
                 ref ledger_set,
             } => leaderlog::calculate_leader_logs(
                 db,
                 byron_genesis,
                 shelley_genesis,
-                &None,
-                &None,
+                &0u64,
+                &0u64,
                 extra_entropy,
-                ledger_state,
                 ledger_set,
                 &String::from("nonce"),
                 &PathBuf::new(),

@@ -1,8 +1,7 @@
-use std::ffi::OsString;
 use std::fmt::Display;
 use std::fs::File;
 use std::io::{stdout, BufReader, Error};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::str::FromStr;
 
 use bigdecimal::{BigDecimal, FromPrimitive, One, ToPrimitive};
@@ -308,10 +307,9 @@ pub(crate) fn calculate_leader_logs(
     db_path: &Path,
     byron_genesis: &Path,
     shelley_genesis: &Path,
-    pool_stake: &Option<u64>,
-    active_stake: &Option<u64>,
+    pool_stake: &u64,
+    active_stake: &u64,
     extra_entropy: &Option<String>,
-    ledger_state: &str,
     ledger_set: &LedgerSet,
     pool_id: &str,
     pool_vrf_skey_path: &Path,
@@ -347,25 +345,10 @@ pub(crate) fn calculate_leader_logs(
         return;
     }
 
-    let mut is_ledger_api = false;
     if !is_just_nonce && !pool_vrf_skey_path.exists() {
         handle_error(format!(
             "Invalid Path: --pool_vrf_skey {}",
             pool_vrf_skey_path.to_string_lossy()
-        ));
-        return;
-    }
-
-    if ledger_state.starts_with("http://") || ledger_state.starts_with("https://") {
-        is_ledger_api = true;
-        if pool_stake.is_some() ^ active_stake.is_some() {
-            handle_error("Both --pool-stake and --active-stake must be defined");
-            return;
-        }
-    } else if !PathBuf::from(OsString::from_str(ledger_state).unwrap()).exists() {
-        handle_error(format!(
-            "Invalid Path: --ledger-state {}",
-            ledger_state
         ));
         return;
     }
@@ -414,7 +397,7 @@ pub(crate) fn calculate_leader_logs(
                     match get_eta_v_before_slot(&db, stability_window_start) {
                         Ok(nc) => {
                             debug!("nc: {}", nc);
-                            match calculate_ledger_state_sigma_d_and_extra_entropy(pool_stake, active_stake, extra_entropy, ledger_state, ledger_set, pool_id, epoch, is_ledger_api, is_just_nonce) {
+                            match calculate_ledger_state_sigma_d_and_extra_entropy(pool_stake, active_stake, extra_entropy) {
                                 Ok(ledger_info) => {
                                     match get_prev_hash_before_slot(&db, first_slot_of_prev_epoch) {
                                         Ok(nh) => {
