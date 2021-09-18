@@ -99,6 +99,8 @@ pub mod nodeclient {
             pool_stake: u64,
             #[structopt(long, help = "total active stake snapshot value in lovelace")]
             active_stake: u64,
+            #[structopt(long = "d", default_value = "0", help = "decentralization parameter")]
+            d: f64,
             #[structopt(long, help = "hex string of the extra entropy value")]
             extra_entropy: Option<String>,
             #[structopt(
@@ -248,6 +250,7 @@ pub mod nodeclient {
                 ref shelley_genesis,
                 ref pool_stake,
                 ref active_stake,
+                ref d,
                 ref extra_entropy,
                 ref ledger_set,
                 ref pool_id,
@@ -260,6 +263,7 @@ pub mod nodeclient {
                     shelley_genesis,
                     pool_stake,
                     active_stake,
+                    d,
                     extra_entropy,
                     ledger_set,
                     pool_id,
@@ -280,6 +284,7 @@ pub mod nodeclient {
                 shelley_genesis,
                 &0u64,
                 &0u64,
+                &0f64,
                 extra_entropy,
                 ledger_set,
                 &String::from("nonce"),

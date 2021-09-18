@@ -309,6 +309,7 @@ pub(crate) fn calculate_leader_logs(
     shelley_genesis: &Path,
     pool_stake: &u64,
     active_stake: &u64,
+    d: &f64,
     extra_entropy: &Option<String>,
     ledger_set: &LedgerSet,
     pool_id: &str,
@@ -397,7 +398,7 @@ pub(crate) fn calculate_leader_logs(
                     match get_eta_v_before_slot(&db, stability_window_start) {
                         Ok(nc) => {
                             debug!("nc: {}", nc);
-                            match calculate_ledger_state_sigma_d_and_extra_entropy(pool_stake, active_stake, extra_entropy) {
+                            match calculate_ledger_state_sigma_d_and_extra_entropy(pool_stake, active_stake, d, extra_entropy) {
                                 Ok(ledger_info) => {
                                     match get_prev_hash_before_slot(&db, first_slot_of_prev_epoch) {
                                         Ok(nh) => {

@@ -349,8 +349,7 @@ echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
 #### Show Leaderlog Help
 
 ```bash
-$ cncli leaderlog --help
-cncli-leaderlog 4.0.0
+cncli-leaderlog 4.0.1
 
 USAGE:
     cncli leaderlog [OPTIONS] --active-stake <active-stake> --byron-genesis <byron-genesis> --pool-id <pool-id> --pool-stake <pool-stake> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
@@ -362,6 +361,7 @@ FLAGS:
 OPTIONS:
         --active-stake <active-stake>          total active stake snapshot value in lovelace
         --byron-genesis <byron-genesis>        byron genesis json file
+        --d <d>                                decentralization parameter [default: 0]
     -d, --db <db>                              sqlite database file [default: ./cncli.db]
         --extra-entropy <extra-entropy>        hex string of the extra entropy value
         --ledger-set <ledger-set>              Which ledger data to use. prev - previous epoch, current - current epoch,
