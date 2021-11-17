@@ -2,7 +2,7 @@ use std::io;
 
 use blake2b_simd::Params;
 use cardano_ouroboros_network::{BlockHeader, BlockStore};
-use log::{debug, info};
+use log::{debug, error, info};
 use rusqlite::{named_params, Connection, Error, NO_PARAMS};
 use std::path::Path;
 
@@ -179,8 +179,8 @@ impl SqLiteBlockStore {
         let mut prev_eta_v = {
             hex::decode(
                 match db.query_row(
-                    "SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0",
-                    NO_PARAMS,
+                    "SELECT eta_v, block_number FROM chain WHERE block_number = ?1 and orphaned = 0",
+                    &[&(pending_blocks.first().unwrap().block_number - 1)],
                     |row| row.get(0),
                 ) {
                     Ok(eta_v) => eta_v,
@@ -294,12 +294,13 @@ impl SqLiteBlockStore {
                     prev_eta_v = {
                         hex::decode(
                             match tx.query_row(
-                                "SELECT eta_v, max(slot_number) FROM chain WHERE orphaned = 0",
-                                NO_PARAMS,
+                                "SELECT eta_v, block_number FROM chain WHERE block_number = ?1 and orphaned = 0",
+                                &[&(block.block_number - 1)],
                                 |row| row.get(0),
                             ) {
                                 Ok(eta_v) => eta_v,
                                 Err(_) => {
+                                    error!("Missing eta_v for block {:?}", block.block_number - 1);
                                     match network_magic {
                                         764824073 => {
                                             // mainnet genesis hash
