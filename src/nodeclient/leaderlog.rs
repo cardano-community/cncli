@@ -395,6 +395,15 @@ pub(crate) fn calculate_leader_logs(
                     debug!("stability_window: {}", stability_window);
                     debug!("stability_window_start: {}", stability_window_start);
 
+                    let tip_slot_number = get_tip_slot_number(&db).unwrap();
+                    if tip_slot_number < stability_window_start {
+                        handle_error(format!(
+                            "Not enough blocks sync'd to calculate! Try again later after slot {} is sync'd.",
+                            stability_window_start
+                        ));
+                        return;
+                    }
+
                     match get_eta_v_before_slot(&db, stability_window_start) {
                         Ok(nc) => {
                             debug!("nc: {}", nc);
