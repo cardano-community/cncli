@@ -179,8 +179,12 @@ fn get_shelley_transition_epoch(network_magic: u32) -> i64 {
             //testnet
             74
         }
+        141 => {
+            //guild
+            2
+        }
         _ => {
-            // guild, alonzo, fallback
+            // alonzo, fallback
             1
         }
     }
@@ -226,6 +230,7 @@ pub fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &Ration
     trace!("left: {:?}", &left);
     let right = (d * diff_slot_inc).ceil();
     trace!("right: {:?}", &right);
+    trace!("is_overlay_slot: {:?} - {:?}", current_slot, left < right);
     left < right
 }
 
@@ -462,6 +467,7 @@ pub(crate) fn calculate_leader_logs(
 
                                                     let d: f64 =
                                                         (ledger_info.decentralization.to_f64() * 100.0).round() / 100.0;
+                                                    debug!("d: {:?}", &d);
                                                     let epoch_slots_ideal = (sigma.to_f64().unwrap()
                                                         * (shelley.epoch_length.to_f64().unwrap()
                                                         * shelley.active_slots_coeff)

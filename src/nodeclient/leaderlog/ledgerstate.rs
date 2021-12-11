@@ -19,7 +19,7 @@ pub(super) fn calculate_ledger_state_sigma_d_and_extra_entropy(
     // We're assuming d=0 at this point if we're using this new cardano-cli stake-snapshot API
     Ok(LedgerInfo {
         sigma: (*pool_stake, *active_stake),
-        decentralization: Rational::from_f64(*d).unwrap(),
+        decentralization: Rational::from(((d * 100.0).round() as u64, 100u64)),
         extra_entropy: extra_entropy.clone(),
     })
 }

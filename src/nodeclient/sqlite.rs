@@ -209,7 +209,7 @@ impl SqLiteBlockStore {
                             141 => {
                                 // guild genesis hash
                                 info!("Start nonce calculation for guild testnet.");
-                                String::from("5fa6a5ca2a79be706742a73d5fdfa75aefc9d220f8b18230b943da49cc3254d3")
+                                String::from("6e32e475f05087edc92945a9fbebe8aa15fdb4333cbd3842737152967065fbf0")
                             }
                             5 => {
                                 // alonzo-blue genesis hash
@@ -311,7 +311,7 @@ impl SqLiteBlockStore {
                                         141 => {
                                             // guild genesis hash
                                             String::from(
-                                                "5fa6a5ca2a79be706742a73d5fdfa75aefc9d220f8b18230b943da49cc3254d3",
+                                                "6e32e475f05087edc92945a9fbebe8aa15fdb4333cbd3842737152967065fbf0",
                                             )
                                         }
                                         _ => {
@@ -385,8 +385,8 @@ impl SqLiteBlockStore {
 }
 
 impl BlockStore for SqLiteBlockStore {
-    fn save_block(&mut self, mut pending_blocks: &mut Vec<BlockHeader>, network_magic: u32) -> io::Result<()> {
-        match self.sql_save_block(&mut pending_blocks, network_magic) {
+    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, network_magic: u32) -> io::Result<()> {
+        match self.sql_save_block(pending_blocks, network_magic) {
             Ok(_) => Ok(()),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Database error!")),
         }

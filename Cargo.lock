@@ -39,6 +39,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "23b62fc65de8e4e7f52534fb52b0f3ed04746ae267519eef2a83941e8085068b"
 
 [[package]]
+name = "arrayvec"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8da52d66c7071e2e3fa2a1e5c6d088fec47b593032b254f5e980de8ea54454d6"
+
+[[package]]
 name = "async-channel"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -217,7 +223,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "afa748e348ad3be8263be728124b24a24f268266f6f5d58af9d75f6a40b5c587"
 dependencies = [
  "arrayref",
- "arrayvec",
+ "arrayvec 0.5.2",
+ "constant_time_eq",
+]
+
+[[package]]
+name = "blake2b_simd"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "72936ee4afc7f8f736d1c38383b56480b5497b4617b4a77bdbf1d2ababc76127"
+dependencies = [
+ "arrayref",
+ "arrayvec 0.7.2",
  "constant_time_eq",
 ]
 
@@ -261,11 +278,11 @@ checksum = "631ae5198c9be5e753e5cc215e1bd73c2b466a3565173db433f52bb9d3e66dba"
 
 [[package]]
 name = "cardano_ouroboros_network"
-version = "0.2.7"
+version = "0.2.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "200b4634a6f43fcca3d80dc01fb414729d14df51ffbbeda6ee3674f1fdceaf56"
+checksum = "2532d7c778c6f68f897c8ab24691b0f77124a33fa3cb97eabd78499355d7d435"
 dependencies = [
- "blake2b_simd",
+ "blake2b_simd 1.0.0",
  "byteorder",
  "chrono",
  "hex",
@@ -336,12 +353,12 @@ dependencies = [
 
 [[package]]
 name = "cncli"
-version = "4.0.3"
+version = "4.0.4"
 dependencies = [
  "async-std",
  "autotools",
  "bigdecimal",
- "blake2b_simd",
+ "blake2b_simd 0.5.11",
  "byteorder",
  "cardano_ouroboros_network",
  "chrono",
