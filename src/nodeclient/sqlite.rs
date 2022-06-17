@@ -1,17 +1,22 @@
 use std::io;
 
+use crate::nodeclient::sync::BlockHeader;
 use blake2b_simd::Params;
-use cardano_ouroboros_network::{BlockHeader, BlockStore};
 use log::{debug, error, info};
 use rusqlite::{named_params, Connection, Error, NO_PARAMS};
 use std::path::Path;
+
+pub trait BlockStore {
+    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, network_magic: u32) -> io::Result<()>;
+    fn load_blocks(&mut self) -> Option<Vec<(i64, Vec<u8>)>>;
+}
 
 pub struct SqLiteBlockStore {
     pub db: Connection,
 }
 
 impl SqLiteBlockStore {
-    const DB_VERSION: i64 = 3;
+    const DB_VERSION: i64 = 4;
 
     pub fn new(db_path: &Path) -> Result<SqLiteBlockStore, Error> {
         debug!("Opening database");
@@ -133,8 +138,7 @@ impl SqLiteBlockStore {
                                 .to_state()
                                 .update(&*node_vkey_bytes)
                                 .finalize()
-                                .as_bytes()
-                                .to_vec(),
+                                .as_bytes(),
                         );
 
                         tx.execute_named(
@@ -151,6 +155,18 @@ impl SqLiteBlockStore {
                     }
                     info!("Updated record {} of {}...done!", count, count);
                 }
+            }
+
+            if version < 4 {
+                info!("Upgrade database to version 4...");
+                tx.execute(
+                    "ALTER TABLE chain ADD COLUMN block_vrf_0 TEXT NOT NULL DEFAULT ''",
+                    NO_PARAMS,
+                )?;
+                tx.execute(
+                    "ALTER TABLE chain ADD COLUMN block_vrf_1 TEXT NOT NULL DEFAULT ''",
+                    NO_PARAMS,
+                )?;
             }
 
             // Update the db version now that we've upgraded the user's database fully
@@ -226,6 +242,11 @@ impl SqLiteBlockStore {
                                 info!("Start nonce calculation for alonzo-purple testnet.");
                                 String::from("b143c75727f4b2fb372db713e719f9b958bb428e305a668bda6190443db4c191")
                             }
+                            9 => {
+                                // vasil-dev genesis hash
+                                info!("Start nonce calculation for vasil-dev testnet.");
+                                String::from("3c824cd1fa5dda79e3331765960deb3393ab89f97af011b5d3d2ea8b501aaf63")
+                            }
                             _ => {
                                 panic!("Unknown genesis hash for network_magic {}", network_magic);
                             }
@@ -250,6 +271,8 @@ impl SqLiteBlockStore {
             eta_v, \
             node_vkey, \
             node_vrf_vkey, \
+            block_vrf_0, \
+            block_vrf_1, \
             eta_vrf_0, \
             eta_vrf_1, \
             leader_vrf_0, \
@@ -271,6 +294,8 @@ impl SqLiteBlockStore {
             :eta_v, \
             :node_vkey, \
             :node_vrf_vkey, \
+            :block_vrf_0, \
+            :block_vrf_1, \
             :eta_vrf_0, \
             :eta_vrf_1, \
             :leader_vrf_0, \
@@ -363,6 +388,8 @@ impl SqLiteBlockStore {
                     ":eta_v" : hex::encode(&prev_eta_v),
                     ":node_vkey" : hex::encode(block.node_vkey),
                     ":node_vrf_vkey" : hex::encode(block.node_vrf_vkey),
+                    ":block_vrf_0": hex::encode(block.block_vrf_0),
+                    ":block_vrf_1": hex::encode(block.block_vrf_1),
                     ":eta_vrf_0" : hex::encode(block.eta_vrf_0),
                     ":eta_vrf_1" : hex::encode(block.eta_vrf_1),
                     ":leader_vrf_0" : hex::encode(block.leader_vrf_0),

@@ -2,7 +2,7 @@
 
 A community-based ```cardano-node``` CLI tool. It's a collection of utilities to enhance and extend beyond those available with the ```cardano-cli```.
 
-![Build Status](https://github.com/AndrewWestberg/cncli/workflows/.github/workflows/ci.yml/badge.svg)
+![Build Status](https://github.com/cardano-community/cncli/workflows/.github/workflows/ci.yml/badge.svg)
 
 ## Installation
 

@@ -6,10 +6,10 @@ You can install CNCLI using either the release binaries or compiling the Rust co
 
 ### Install the binary release
 
-To install CNCLI from a binary release, download the [latest release](https://github.com/AndrewWestberg/cncli/releases) and extract it in the ```/usr/local/bin/``` directory of the ```block producing node``` server of your stake pool. Adjust the ```<latest_release_version>``` variable in the command to the latest release available:
+To install CNCLI from a binary release, download the [latest release](https://github.com/cardano-community/cncli/releases) and extract it in the ```/usr/local/bin/``` directory of the ```block producing node``` server of your stake pool. Adjust the ```<latest_release_version>``` variable in the command to the latest release available:
 
 ```bash
-curl -sLJ https://github.com/AndrewWestberg/cncli/releases/download/v<latest_release_version>/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz -o /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz
+curl -sLJ https://github.com/cardano-community/cncli/releases/download/v<latest_release_version>/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz -o /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 ```bash
@@ -75,7 +75,7 @@ sudo apt-get update -y && sudo apt-get install -y automake build-essential pkg-c
 ```
 
 ```bash
-git clone --recurse-submodules https://github.com/AndrewWestberg/cncli
+git clone --recurse-submodules https://github.com/cardano-community/cncli
 ```
 
 ```bash
@@ -348,11 +348,4 @@ CRON_TZ="UTC"
 15 21 * * * /root/scripts/cncli-fivedays.sh && /root/scripts/cncli-leaderlog.sh
 # send previous and current epochs slots to pooltool
 15 22 * * * /root/scripts/cncli-fivedays.sh && /root/scripts/cncli-sendslots.sh
-```
-
-Optionally set up a cronjob to dump the ledger-state, every day at 3:15 PM.
-
-```text
-# query ledger-state and dump to /root/scripts/ledger-state.json
-15 15 * * * /root/scripts/ledger-dump.sh
 ```

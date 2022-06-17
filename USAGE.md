@@ -10,7 +10,7 @@ This command validates that the remote server is on the given network and return
 
 ```bash
 cncli ping --help
-cncli-ping 0.1.0
+cncli-ping 5.0.0
 
 USAGE:
     cncli ping [OPTIONS] --host <host>
@@ -20,9 +20,10 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-    -h, --host <host>                      cardano-node hostname to connect to
-        --network-magic <network-magic>    network magic. [default: 764824073]
-    -p, --port <port>                      cardano-node port [default: 3001]
+    -h, --host <host>                          cardano-node hostname to connect to
+        --network-magic <network-magic>        network magic. [default: 764824073]
+    -p, --port <port>                          cardano-node port [default: 3001]
+    -t, --timeout-seconds <timeout-seconds>    connect timeout in seconds [default: 2]
 ```
 
 #### Example Mainnet ping using defaults
@@ -35,11 +36,12 @@ cncli ping --host north-america.relays-new.cardano-mainnet.iohk.io
 
 ```bash
 {
- "status": "ok",
- "host": "north-america.relays-new.cardano-mainnet.iohk.io",
- "port": 3001,
- "connectDurationMs": 98,
- "durationMs": 118
+  "status": "ok",
+  "host": "north-america.relays-new.cardano-mainnet.iohk.io",
+  "port": 3001,
+  "remoteProtocolVersion": 7,
+  "connectDurationMs": 154,
+  "durationMs": 237
 }
 ```
 
@@ -53,10 +55,10 @@ cncli ping --host north-america.relays-new.cardano-mainnet.iohk.io --port 9999
 
 ```bash
 {
- "status": "error",
- "host": "north-america.relays-new.cardano-mainnet.iohk.io",
- "port": 9999,
- "errorMessage": "Failed to connect: connection timed out"
+  "status": "error",
+  "host": "north-america.relays-new.cardano-mainnet.iohk.io",
+  "port": 9999,
+  "errorMessage": "connection timed out"
 }
 ```
 
@@ -70,10 +72,10 @@ cncli ping --host north-america.relays-new.cardano-testnet.iohkdev.io
 
 ```bash
 {
- "status": "error",
- "host": "north-america.relays-new.cardano-testnet.iohkdev.io",
- "port": 3001,
- "errorMessage": "version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1097911063}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 764824073}, diffusionMode = InitiatorAndResponderDiffusionMode}"
+  "status": "error",
+  "host": "north-america.relays-new.cardano-testnet.iohkdev.io",
+  "port": 3001,
+  "errorMessage": "Refused(7, \"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1097911063}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 764824073}, diffusionMode = InitiatorAndResponderDiffusionMode}\")"
 }
 ```
 
@@ -87,11 +89,12 @@ cncli ping --host north-america.relays-new.cardano-testnet.iohkdev.io --port 300
 
 ```bash
 {
- "status": "ok",
- "host": "north-america.relays-new.cardano-testnet.iohkdev.io",
- "port": 3001,
- "connectDurationMs": 18,
- "durationMs": 38
+  "status": "ok",
+  "host": "north-america.relays-new.cardano-testnet.iohkdev.io",
+  "port": 3001,
+  "remoteProtocolVersion": 7,
+  "connectDurationMs": 48,
+  "durationMs": 97
 }
 ```
 
@@ -105,14 +108,14 @@ This command connects to a remote node and synchronizes blocks to a local sqlite
 
 ```bash
 cncli sync --help
-cncli-sync 0.5.10
+cncli-sync 5.0.0
 
 USAGE:
     cncli sync [FLAGS] [OPTIONS] --host <host>
 
 FLAGS:
         --help          Prints help information
-        --no-service    Exit at 100% synced.
+        --no-service    Exit at 100% sync'd.
     -V, --version       Prints version information
 
 OPTIONS:
@@ -131,29 +134,10 @@ cncli sync --host 127.0.0.1 --port 3000
 ##### Sync Result
 
 ```bash
-2020-10-31T16:55:35.025Z INFO  cncli::nodeclient > Starting NodeClient...
-2020-10-31T16:55:35.025Z INFO  cncli::nodeclient::protocols::mux_protocol > Connecting to 127.0.0.1:3000 ...
-2020-10-31T16:55:35.030Z WARN  cncli::nodeclient::protocols::handshake_protocol > HandshakeProtocol::State::Done
-2020-10-31T16:55:35.110Z WARN  cncli::nodeclient::protocols::transaction_protocol > TxSubmissionProtocol::State::Done
-2020-10-31T16:55:35.110Z WARN  cncli::nodeclient::protocols::chainsync_protocol   > rollback to slot: 4492799
-2020-10-31T16:55:35.114Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4490511 of 4891060, 91.81% synced
-2020-10-31T16:55:40.646Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4519089 of 4891061, 92.39% synced
-2020-10-31T16:55:46.341Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4544646 of 4891061, 92.92% synced
-2020-10-31T16:55:52.012Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4567647 of 4891061, 93.39% synced
-2020-10-31T16:55:57.815Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4594692 of 4891062, 93.94% synced
-2020-10-31T16:56:03.793Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4624024 of 4891063, 94.54% synced
-2020-10-31T16:56:09.814Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4653024 of 4891063, 95.13% synced
-2020-10-31T16:56:15.808Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4678390 of 4891063, 95.65% synced
-2020-10-31T16:56:21.856Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4704799 of 4891063, 96.19% synced
-2020-10-31T16:56:27.887Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4730288 of 4891063, 96.71% synced
-2020-10-31T16:56:34.167Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4756308 of 4891063, 97.24% synced
-2020-10-31T16:56:40.340Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4782723 of 4891064, 97.78% synced
-2020-10-31T16:56:46.448Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4806428 of 4891064, 98.27% synced
-2020-10-31T16:56:52.675Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4831364 of 4891064, 98.78% synced
-2020-10-31T16:56:59.101Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4863279 of 4891065, 99.43% synced
-2020-10-31T16:57:05.576Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4889661 of 4891065, 99.97% synced
-2020-10-31T16:57:17.958Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4891066 of 4891066, 100.00% synced
-2020-10-31T16:57:30.927Z INFO  cncli::nodeclient::protocols::chainsync_protocol   > block 4891067 of 4891067, 100.00% synced
+ 2022-06-21T12:51:13.839Z INFO  cncli::nodeclient::sync   > block 7391393 of 7403845: 99.83% sync'd
+ 2022-06-21T12:51:18.236Z INFO  cncli::nodeclient::sync   > block 7403845 of 7403845: 100.00% sync'd
+ 2022-06-21T12:51:30.096Z INFO  cncli::nodeclient::sync   > block 7403846 of 7403846: 100.00% sync'd
+ 2022-06-21T12:51:33.937Z INFO  cncli::nodeclient::sync   > block 7403847 of 7403847: 100.00% sync'd
 ```
 
 ### Status Command
@@ -164,7 +148,7 @@ This simple command gives you an ok if the database is fully synced. It will ret
 
 ```bash
 cncli status --help
-cncli-status 0.2.5
+cncli-status 5.0.0
 
 USAGE:
     cncli status [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -216,7 +200,7 @@ This command validates that a block hash or partial block hash is on-chain. You 
 
 ```bash
 cncli validate --help
-cncli-validate 0.1.0
+cncli-validate 5.0.0
 
 USAGE:
     cncli validate [OPTIONS] --hash <hash>
@@ -291,7 +275,7 @@ This command calculates the epoch nonce value. This command requires that you us
 
 ```bash
 $ cncli nonce --help
-cncli-nonce 4.0.0
+cncli-nonce 5.0.0
 
 USAGE:
     cncli nonce [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -328,12 +312,12 @@ This command calculates a stake pool's expected slot list. ```prev``` and ```cur
 Example usage with the ```stake-snapshot```:
 
 ```bash
-/home/westbam/.cargo/bin/cncli sync --host 127.0.0.1 --port 6000 --no-service
 echo "BCSH"
 SNAPSHOT=$(/home/westbam/.local/bin/cardano-cli query stake-snapshot --stake-pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --mainnet)
+/home/westbam/.cargo/bin/cncli sync --host 127.0.0.1 --port 6000 --no-service
 POOL_STAKE=$(echo "$SNAPSHOT" | grep -oP '(?<=    "poolStakeMark": )\d+(?=,?)')
 ACTIVE_STAKE=$(echo "$SNAPSHOT" | grep -oP '(?<=    "activeStakeMark": )\d+(?=,?)')
-BCSH=`/home/westbam/.cargo/bin/cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --ledger-set next`
+BCSH=`/home/westbam/.cargo/bin/cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --consensus tpraos --ledger-set next`
 
 EPOCH=`jq .epoch <<< $BCSH`
 echo "\`Epoch $EPOCH\` 🧙🔮:"
@@ -349,7 +333,8 @@ echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
 #### Show Leaderlog Help
 
 ```bash
-cncli-leaderlog 4.0.1
+cncli leaderlog --help
+cncli-leaderlog 5.0.0
 
 USAGE:
     cncli leaderlog [OPTIONS] --active-stake <active-stake> --byron-genesis <byron-genesis> --pool-id <pool-id> --pool-stake <pool-stake> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
@@ -361,6 +346,8 @@ FLAGS:
 OPTIONS:
         --active-stake <active-stake>          total active stake snapshot value in lovelace
         --byron-genesis <byron-genesis>        byron genesis json file
+    -c, --consensus <consensus>                Consensus algorithm - Alonzo and earlier uses tpraos, Babbage and later
+                                               uses praos [default: praos]
         --d <d>                                decentralization parameter [default: 0]
     -d, --db <db>                              sqlite database file [default: ./cncli.db]
         --extra-entropy <extra-entropy>        hex string of the extra entropy value
@@ -378,7 +365,7 @@ OPTIONS:
 #### Calculate leaderlog
 
 ```bash
-cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --ledger-set current
+cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --consensus tpraos --ledger-set current
 ```
 
 ##### Leaderlog Success Result
@@ -438,7 +425,7 @@ It is important to point this command at your core nodes. This will help pooltoo
 
 ```bash
 cncli sendtip --help
-cncli-sendtip 0.2.2
+cncli-sendtip 5.0.0
 
 USAGE:
     cncli sendtip [OPTIONS] --cardano-node <cardano-node>
@@ -508,7 +495,7 @@ The sendslots command securely sends pooltool the number of slots you have assig
 
 ```bash
 cncli sendslots --help
-cncli-sendslots 0.3.1
+cncli-sendslots 5.0.0
 
 USAGE:
     cncli sendslots [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -551,7 +538,7 @@ This command signs an arbitrary message string with the pool's vrf.skey. The out
 
 ```bash
 $ cncli sign --help
-cncli-sign 3.1.0
+cncli-sign 5.0.0
 
 USAGE:
     cncli sign --message <message> --pool-vrf-skey <pool-vrf-skey>
@@ -588,7 +575,7 @@ This command verifies the signature that was used to sign an arbitrary message s
 
 ```bash
 $ cncli verify --help
-cncli-verify 3.1.0
+cncli-verify 5.0.0
 
 USAGE:
     cncli verify --message <message> --pool-vrf-vkey <pool-vrf-vkey> --pool-vrf-vkey-hash <pool-vrf-vkey-hash> --signature <signature>

@@ -3,13 +3,14 @@ use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use crate::nodeclient::APP_USER_AGENT;
-use cardano_ouroboros_network::protocols::chainsync::Listener;
-use cardano_ouroboros_network::BlockHeader;
 use chrono::{SecondsFormat, Utc};
 use log::{error, info};
 use regex::Regex;
 use serde::Serialize;
+
+use crate::nodeclient::sqlite::BlockStore;
+use crate::nodeclient::sync::BlockHeader;
+use crate::nodeclient::APP_USER_AGENT;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -30,7 +31,8 @@ struct PooltoolData {
     block_hash: String,
     parent_hash: String,
     leader_vrf: String,
-    leader_vrf_proof: String,
+    block_vrf: String,
+    block_vrf_proof: String,
     node_v_key: String,
     platform: String,
 }
@@ -69,7 +71,7 @@ impl PoolToolNotifier {
             {
                 Ok(output) => {
                     let version_string = String::from_utf8_lossy(&output.stdout);
-                    let cap = Regex::new("cardano-node (\\d+\\.\\d+\\.\\d+) .*\ngit rev ([a-f0-9]{5}).*")
+                    let cap = Regex::new("cardano-node (\\d+\\.\\d+\\.\\d+) .*\ngit rev ([a-f\\d]{5}).*")
                         .unwrap()
                         .captures(&*version_string)
                         .unwrap();
@@ -86,10 +88,11 @@ impl PoolToolNotifier {
                 }
             }
         }
+
         match reqwest::blocking::Client::builder().user_agent(APP_USER_AGENT).build() {
             Ok(client) => {
                 let pooltool_result = client
-                    .post("https://api.pooltool.io/v0/sendstats")
+                    .post("https://api.pooltool.io/v1/sendstats")
                     .body(
                         serde_json::ser::to_string(&PooltoolStats {
                             api_key: self.api_key.clone(),
@@ -103,7 +106,8 @@ impl PoolToolNotifier {
                                 block_hash: hex::encode(&header.hash),
                                 parent_hash: hex::encode(&header.prev_hash),
                                 leader_vrf: hex::encode(&header.leader_vrf_0),
-                                leader_vrf_proof: hex::encode(&header.leader_vrf_1),
+                                block_vrf: hex::encode(&header.block_vrf_0),
+                                block_vrf_proof: hex::encode(&header.block_vrf_1),
                                 node_v_key: hex::encode(&header.node_vkey),
                                 platform: "cncli".to_string(),
                             },
@@ -140,8 +144,13 @@ impl PoolToolNotifier {
     }
 }
 
-impl Listener for PoolToolNotifier {
-    fn handle_tip(&mut self, block_header: &BlockHeader) {
-        self.send_to_pooltool(block_header);
+impl BlockStore for PoolToolNotifier {
+    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, _network_magic: u32) -> std::io::Result<()> {
+        self.send_to_pooltool(pending_blocks.last().unwrap());
+        Ok(())
+    }
+
+    fn load_blocks(&mut self) -> Option<Vec<(i64, Vec<u8>)>> {
+        None
     }
 }
