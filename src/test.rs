@@ -23,11 +23,11 @@ fn test_is_overlay_slot() {
     d.mul_assign_round(100, Round::Nearest);
     let r: Rational = Rational::from((d.to_integer().unwrap(), 100));
 
-    assert_eq!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &r), false);
+    assert!(!is_overlay_slot(&first_slot_of_epoch, &current_slot, &r));
 
     // AD test
     current_slot = 15920150_i64;
-    assert_eq!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &r), true);
+    assert!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &r));
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn test_ping() {
     let network_magic = 1097911063;
     let mut stdout: Vec<u8> = Vec::new();
 
-    ping::ping(&mut stdout, &host, port, network_magic);
+    ping::ping(&mut stdout, &host, port, network_magic, 2);
 
     assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..102], "{\n  \"status\": \"ok\",\n  \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n ");
 }
@@ -49,13 +49,13 @@ fn test_ping_failure_address() {
     let network_magic = 1097911063;
     let mut stdout: Vec<u8> = Vec::new();
 
-    ping::ping(&mut stdout, &host, port, network_magic);
+    ping::ping(&mut stdout, &host, port, network_magic, 2);
 
     #[cfg(target_os = "macos")]
     assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"failed to lookup address information: nodename nor servname provided, or not known\"\n}");
 
     #[cfg(target_os = "linux")]
-    assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"failed to lookup address information: Name or service not known\"\n}");
+    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"failed to lookup address information: Name or service not known\"\n}");
 }
 
 #[test]
@@ -65,9 +65,9 @@ fn test_ping_failure_bad_port() {
     let network_magic = 1097911063;
     let mut stdout: Vec<u8> = Vec::new();
 
-    ping::ping(&mut stdout, &host, port, network_magic);
+    ping::ping(&mut stdout, &host, port, network_magic, 2);
 
-    assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3992,\n  \"errorMessage\": \"connection timed out\"\n}");
+    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3992,\n  \"errorMessage\": \"connection timed out\"\n}");
 }
 
 #[test]
@@ -77,9 +77,9 @@ fn test_ping_failure_bad_magic() {
     let network_magic = 111111;
     let mut stdout: Vec<u8> = Vec::new();
 
-    ping::ping(&mut stdout, &host, port, network_magic);
+    ping::ping(&mut stdout, &host, port, network_magic, 2);
 
-    assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1097911063}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 111111}, diffusionMode = InitiatorAndResponderDiffusionMode}\"\n}");
+    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"Refused(7, \\\"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1097911063}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 111111}, diffusionMode = InitiatorAndResponderDiffusionMode}\\\")\"\n}");
 }
 
 #[test]

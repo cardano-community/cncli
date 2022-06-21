@@ -50,7 +50,9 @@ pub mod nodeclient {
             #[structopt(short, long, default_value = "3001", help = "cardano-node port")]
             port: u16,
             #[structopt(long, default_value = "764824073", help = "network magic.")]
-            network_magic: u32,
+            network_magic: u64,
+            #[structopt(short, long, default_value = "2", help = "connect timeout in seconds")]
+            timeout_seconds: u64,
         },
         Validate {
             #[structopt(long, help = "full or partial block hash to validate")]
@@ -62,7 +64,7 @@ pub mod nodeclient {
                 default_value = "./cncli.db",
                 help = "sqlite database file"
             )]
-            db: std::path::PathBuf,
+            db: PathBuf,
         },
         Sync {
             #[structopt(
@@ -72,13 +74,13 @@ pub mod nodeclient {
                 default_value = "./cncli.db",
                 help = "sqlite database file"
             )]
-            db: std::path::PathBuf,
+            db: PathBuf,
             #[structopt(short, long, help = "cardano-node hostname to connect to")]
             host: String,
             #[structopt(short, long, default_value = "3001", help = "cardano-node port")]
             port: u16,
             #[structopt(long, default_value = "764824073", help = "network magic.")]
-            network_magic: u32,
+            network_magic: u64,
             #[structopt(long, help = "Exit at 100% sync'd.")]
             no_service: bool,
         },
@@ -90,11 +92,11 @@ pub mod nodeclient {
                 default_value = "./cncli.db",
                 help = "sqlite database file"
             )]
-            db: std::path::PathBuf,
+            db: PathBuf,
             #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
-            byron_genesis: std::path::PathBuf,
+            byron_genesis: PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
-            shelley_genesis: std::path::PathBuf,
+            shelley_genesis: PathBuf,
             #[structopt(long, help = "pool active stake snapshot value in lovelace")]
             pool_stake: u64,
             #[structopt(long, help = "total active stake snapshot value in lovelace")]
@@ -112,13 +114,20 @@ pub mod nodeclient {
             #[structopt(long, help = "lower-case hex pool id")]
             pool_id: String,
             #[structopt(parse(from_os_str), long, help = "pool's vrf.skey file")]
-            pool_vrf_skey: std::path::PathBuf,
+            pool_vrf_skey: PathBuf,
             #[structopt(
                 long = "tz",
                 default_value = "America/Los_Angeles",
                 help = "TimeZone string from the IANA database - https://en.wikipedia.org/wiki/List_of_tz_database_time_zones"
             )]
             timezone: String,
+            #[structopt(
+                short,
+                long,
+                default_value = "praos",
+                help = "Consensus algorithm - Alonzo and earlier uses tpraos, Babbage and later uses praos"
+            )]
+            consensus: String,
         },
         Sendtip {
             #[structopt(
@@ -127,13 +136,13 @@ pub mod nodeclient {
                 default_value = "./pooltool.json",
                 help = "pooltool config file for sending tips"
             )]
-            config: std::path::PathBuf,
+            config: PathBuf,
             #[structopt(
                 parse(from_os_str),
                 long,
                 help = "path to cardano-node executable for gathering version info"
             )]
-            cardano_node: std::path::PathBuf,
+            cardano_node: PathBuf,
         },
         Sendslots {
             #[structopt(
@@ -142,7 +151,7 @@ pub mod nodeclient {
                 default_value = "./pooltool.json",
                 help = "pooltool config file for sending slots"
             )]
-            config: std::path::PathBuf,
+            config: PathBuf,
             #[structopt(
                 parse(from_os_str),
                 short,
@@ -150,11 +159,11 @@ pub mod nodeclient {
                 default_value = "./cncli.db",
                 help = "sqlite database file"
             )]
-            db: std::path::PathBuf,
+            db: PathBuf,
             #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
-            byron_genesis: std::path::PathBuf,
+            byron_genesis: PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
-            shelley_genesis: std::path::PathBuf,
+            shelley_genesis: PathBuf,
             #[structopt(long, env = "OVERRIDE_TIME", hide_env_values = true, hidden = true)]
             override_time: Option<String>,
         },
@@ -166,11 +175,11 @@ pub mod nodeclient {
                 default_value = "./cncli.db",
                 help = "sqlite database file"
             )]
-            db: std::path::PathBuf,
+            db: PathBuf,
             #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
-            byron_genesis: std::path::PathBuf,
+            byron_genesis: PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
-            shelley_genesis: std::path::PathBuf,
+            shelley_genesis: PathBuf,
         },
         Nonce {
             #[structopt(
@@ -180,11 +189,11 @@ pub mod nodeclient {
                 default_value = "./cncli.db",
                 help = "sqlite database file"
             )]
-            db: std::path::PathBuf,
+            db: PathBuf,
             #[structopt(parse(from_os_str), long, help = "byron genesis json file")]
-            byron_genesis: std::path::PathBuf,
+            byron_genesis: PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
-            shelley_genesis: std::path::PathBuf,
+            shelley_genesis: PathBuf,
             #[structopt(long, help = "hex string of the extra entropy value")]
             extra_entropy: Option<String>,
             #[structopt(
@@ -200,7 +209,7 @@ pub mod nodeclient {
         },
         Sign {
             #[structopt(parse(from_os_str), long, help = "pool's vrf.skey file")]
-            pool_vrf_skey: std::path::PathBuf,
+            pool_vrf_skey: PathBuf,
             #[structopt(long, help = "validating domain e.g. pooltool.io")]
             domain: String,
             #[structopt(long, help = "nonce value in lower-case hex")]
@@ -208,7 +217,7 @@ pub mod nodeclient {
         },
         Verify {
             #[structopt(parse(from_os_str), long, help = "pool's vrf.vkey file")]
-            pool_vrf_vkey: std::path::PathBuf,
+            pool_vrf_vkey: PathBuf,
             #[structopt(
                 long,
                 help = "pool's vrf hash in hex retrieved from 'cardano-cli query pool-params...'"
@@ -229,8 +238,9 @@ pub mod nodeclient {
                 ref host,
                 ref port,
                 ref network_magic,
+                ref timeout_seconds,
             } => {
-                ping::ping(&mut stdout(), host.as_str(), *port, *network_magic);
+                ping::ping(&mut stdout(), host.as_str(), *port, *network_magic, *timeout_seconds);
             }
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash.as_str());
@@ -256,6 +266,7 @@ pub mod nodeclient {
                 ref pool_id,
                 ref pool_vrf_skey,
                 ref timezone,
+                ref consensus,
             } => {
                 leaderlog::calculate_leader_logs(
                     db,
@@ -270,6 +281,7 @@ pub mod nodeclient {
                     pool_vrf_skey,
                     timezone,
                     false,
+                    consensus,
                 );
             }
             Command::Nonce {
@@ -287,10 +299,11 @@ pub mod nodeclient {
                 &0f64,
                 extra_entropy,
                 ledger_set,
-                &String::from("nonce"),
+                "nonce",
                 &PathBuf::new(),
-                &"America/Los_Angeles".to_string(),
+                "America/Los_Angeles",
                 true,
+                "praos",
             ),
             Command::Sendtip {
                 ref config,

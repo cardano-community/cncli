@@ -80,6 +80,7 @@ struct LeaderLog {
     status: String,
     epoch: i64,
     epoch_nonce: String,
+    consensus: String,
     epoch_slots: i64,
     epoch_slots_ideal: f64,
     max_performance: f64,
@@ -266,10 +267,44 @@ fn mk_seed(slot: i64, eta0: &[u8]) -> Vec<u8> {
         .collect()
 }
 
+fn mk_input_vrf(slot: i64, eta0: &[u8]) -> Vec<u8> {
+    trace!("mk_seed() start slot {}", slot);
+    let mut concat = [0u8; 8 + 32];
+    NetworkEndian::write_i64(&mut concat, slot);
+    concat[8..].copy_from_slice(eta0);
+    trace!("concat: {}", hex::encode(&concat));
+
+    Params::new()
+        .hash_length(32)
+        .to_state()
+        .update(&concat)
+        .finalize()
+        .as_bytes()
+        .to_owned()
+}
+
 fn vrf_eval_certified(seed: &[u8], pool_vrf_skey: &[u8]) -> Result<BigInt, String> {
     let certified_proof: Vec<u8> = sodium_crypto_vrf_prove(pool_vrf_skey, seed)?;
     let certified_proof_hash: Vec<u8> = sodium_crypto_vrf_proof_to_hash(&*certified_proof)?;
     Ok(BigInt::from_bytes_be(Sign::Plus, &*certified_proof_hash))
+}
+
+fn vrf_leader_value(raw_vrf: BigInt) -> Result<BigInt, String> {
+    let mut concat = vec![0x4C_u8]; // "L"
+    let mut raw_vrf_bytes = raw_vrf.to_biguint().unwrap().to_bytes_be();
+    concat.append(&mut raw_vrf_bytes);
+    trace!("concat: {}", hex::encode(&concat));
+
+    Ok(BigInt::from_bytes_be(
+        Sign::Plus,
+        &*Params::new()
+            .hash_length(32)
+            .to_state()
+            .update(&concat)
+            .finalize()
+            .as_bytes()
+            .to_owned(),
+    ))
 }
 
 // Determine if our pool is a slot leader for this given slot
@@ -279,7 +314,43 @@ fn vrf_eval_certified(seed: &[u8], pool_vrf_skey: &[u8]) -> Result<BigInt, Strin
 // @param pool_vrf_skey The vrf signing key for the pool
 // @param cert_nat_max The value 2^512
 // @param c 1-activeSlotsCoeff - usually 0.95
-fn is_slot_leader(
+fn is_slot_leader_praos(
+    slot: i64,
+    sigma: &BigDecimal,
+    eta0: &[u8],
+    pool_vrf_skey: &[u8],
+    cert_nat_max: &BigDecimal,
+    c: &BigDecimal,
+) -> Result<bool, String> {
+    trace!("is_slot_leader: {}", slot);
+    let seed: Vec<u8> = mk_input_vrf(slot, eta0);
+    trace!("seed: {}", hex::encode(&seed));
+    let cert_nat: BigInt = vrf_eval_certified(&*seed, pool_vrf_skey)?;
+    trace!("cert_nat: {}", &cert_nat);
+    let cert_leader_vrf: BigInt = vrf_leader_value(cert_nat)?;
+    trace!("cert_leader_vrf: {}", cert_leader_vrf);
+    let denominator = cert_nat_max - BigDecimal::from(cert_leader_vrf);
+    let recip_q: BigDecimal = normalize(cert_nat_max / denominator);
+    trace!("recip_q: {}", &recip_q);
+    trace!("c: {}", c);
+    let x: BigDecimal = round(-c * sigma);
+    trace!("x: {}", &x);
+
+    match taylor_exp_cmp(3, &recip_q, &x) {
+        TaylorCmp::Above => Ok(false),
+        TaylorCmp::Below => Ok(true),
+        TaylorCmp::MaxReached => Ok(false),
+    }
+}
+
+// Determine if our pool is a slot leader for this given slot
+// @param slot The slot to check
+// @param sigma The controlled stake proportion for the pool
+// @param eta0 The epoch nonce value
+// @param pool_vrf_skey The vrf signing key for the pool
+// @param cert_nat_max The value 2^512
+// @param c 1-activeSlotsCoeff - usually 0.95
+fn is_slot_leader_tpraos(
     slot: i64,
     sigma: &BigDecimal,
     eta0: &[u8],
@@ -321,6 +392,7 @@ pub(crate) fn calculate_leader_logs(
     pool_vrf_skey_path: &Path,
     timezone: &str,
     is_just_nonce: bool,
+    consensus: &str,
 ) {
     let tz: Tz = match timezone.parse::<Tz>() {
         Err(_) => {
@@ -355,6 +427,13 @@ pub(crate) fn calculate_leader_logs(
         handle_error(format!(
             "Invalid Path: --pool_vrf_skey {}",
             pool_vrf_skey_path.to_string_lossy()
+        ));
+        return;
+    }
+
+    if consensus != "praos" && consensus != "tpraos" {
+        handle_error(format!(
+            "Invalid Consensus: --consensus {}", consensus
         ));
         return;
     }
@@ -479,6 +558,7 @@ pub(crate) fn calculate_leader_logs(
                                                         status: "ok".to_string(),
                                                         epoch,
                                                         epoch_nonce: hex::encode(&epoch_nonce),
+                                                        consensus: consensus.to_string(),
                                                         epoch_slots: 0,
                                                         epoch_slots_ideal,
                                                         max_performance: 0.0,
@@ -491,7 +571,12 @@ pub(crate) fn calculate_leader_logs(
                                                         assigned_slots: vec![],
                                                     };
 
-                                                    let cert_nat_max: BigDecimal = BigDecimal::from_str("13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096").unwrap(); // 2^512
+                                                    let cert_nat_max: BigDecimal = match consensus {
+                                                        "tpraos" => BigDecimal::from_str("13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096").unwrap(), // 2^512
+                                                        "praos" => BigDecimal::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639936").unwrap(), // 2^256
+                                                        _ => panic!()
+                                                    };
+
                                                     let c: BigDecimal = ln(&(BigDecimal::one()
                                                         - BigDecimal::from_f64(shelley.active_slots_coeff).unwrap()));
 
@@ -501,13 +586,28 @@ pub(crate) fn calculate_leader_logs(
                                                         .map(|slot_in_epoch| first_slot_of_epoch + slot_in_epoch)
                                                         .filter(|epoch_slot| !is_overlay_slot(&first_slot_of_epoch, epoch_slot, &ledger_info.decentralization))
                                                         .filter_map(|leader_slot| {
-                                                            match is_slot_leader(leader_slot, &sigma, &epoch_nonce, &pool_vrf_skey.key, &cert_nat_max, &c) {
-                                                                Ok(true) => Some(leader_slot),
-                                                                Ok(false) => None,
-                                                                Err(msg) => {
-                                                                    handle_error(msg);
-                                                                    None
+                                                            match consensus {
+                                                                "tpraos" => {
+                                                                    match is_slot_leader_tpraos(leader_slot, &sigma, &epoch_nonce, &pool_vrf_skey.key, &cert_nat_max, &c) {
+                                                                        Ok(true) => Some(leader_slot),
+                                                                        Ok(false) => None,
+                                                                        Err(msg) => {
+                                                                            handle_error(msg);
+                                                                            None
+                                                                        }
+                                                                    }
                                                                 }
+                                                                "praos" => {
+                                                                    match is_slot_leader_praos(leader_slot, &sigma, &epoch_nonce, &pool_vrf_skey.key, &cert_nat_max, &c) {
+                                                                        Ok(true) => Some(leader_slot),
+                                                                        Ok(false) => None,
+                                                                        Err(msg) => {
+                                                                            handle_error(msg);
+                                                                            None
+                                                                        }
+                                                                    }
+                                                                }
+                                                                _ => panic!()
                                                             }
                                                         }).collect::<Vec<_>>();
 
@@ -542,7 +642,7 @@ pub(crate) fn calculate_leader_logs(
                                                             }
                                                             slots.push(']');
 
-                                                            let hash = hex::encode(Params::new().hash_length(32).to_state().update(slots.as_ref()).finalize().as_bytes().to_vec());
+                                                            let hash = hex::encode(Params::new().hash_length(32).to_state().update(slots.as_ref()).finalize().as_bytes());
 
                                                             match insert_slots_statement.execute_named(
                                                                 named_params! {

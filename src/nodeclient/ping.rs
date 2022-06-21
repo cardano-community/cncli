@@ -1,9 +1,14 @@
 use std::io::Write;
+use std::net::ToSocketAddrs;
 use std::time::{Duration, Instant};
 
-use cardano_ouroboros_network::mux;
 use futures::executor::block_on;
 use log::debug;
+use net2::TcpStreamExt;
+use pallas_miniprotocols::handshake::Output;
+use pallas_miniprotocols::{handshake, run_agent};
+use pallas_multiplexer::bearers::Bearer;
+use pallas_multiplexer::StdPlexer;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -12,6 +17,7 @@ struct PingSuccess {
     status: String,
     host: String,
     port: u16,
+    remote_protocol_version: u64,
     connect_duration_ms: u128,
     duration_ms: u128,
 }
@@ -25,25 +31,53 @@ struct PingError {
     error_message: String,
 }
 
-pub fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u32) {
+pub fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u64, timeout_seconds: u64) {
     block_on(async {
         let start = Instant::now();
-        match mux::connection::connect(host, port).await {
-            Ok(channel) => {
-                let connect_duration = start.elapsed();
-                match channel.handshake(network_magic).await {
-                    Ok(data) => {
-                        let total_duration = start.elapsed();
-                        debug!("{}", data);
-                        ping_json_success(out, connect_duration, total_duration, host, port);
+        let socket_addrs_result = format!("{}:{}", host, port).to_socket_addrs();
+        match socket_addrs_result {
+            Ok(mut socket_addrs) => {
+                match Bearer::connect_tcp_timeout(&socket_addrs.next().unwrap(), Duration::from_secs(timeout_seconds)) {
+                    Ok(bearer) => {
+                        match &bearer {
+                            Bearer::Tcp(tcp_stream) => {
+                                tcp_stream.set_keepalive_ms(Some(30_000u32)).unwrap();
+                            }
+                            Bearer::Unix(_) => {}
+                        }
+                        let connect_duration = start.elapsed();
+
+                        let mut plexer = StdPlexer::new(bearer);
+
+                        //handshake is channel0
+                        let mut channel0 = plexer.use_channel(0).into();
+
+                        plexer.muxer.spawn();
+                        plexer.demuxer.spawn();
+
+                        let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
+                        let _last = run_agent(handshake::Initiator::initial(versions), &mut channel0).unwrap();
+                        debug!("{:?}", _last);
+                        match _last.output {
+                            Output::Pending => {
+                                ping_json_error(out, "Pending".to_string(), host, port);
+                            }
+                            Output::Accepted(version_number, _) => {
+                                let total_duration = start.elapsed();
+                                ping_json_success(out, connect_duration, total_duration, version_number, host, port);
+                            }
+                            Output::Refused(refuse_reason) => {
+                                ping_json_error(out, format!("{:?}", refuse_reason), host, port);
+                            }
+                        }
                     }
                     Err(error) => {
-                        ping_json_error(out, error, host, port);
+                        ping_json_error(out, error.to_string(), host, port);
                     }
                 }
             }
             Err(error) => {
-                ping_json_error(out, format!("{}", error), host, port);
+                ping_json_error(out, error.to_string(), host, port);
             }
         }
     });
@@ -53,6 +87,7 @@ fn ping_json_success<W: Write>(
     out: &mut W,
     connect_duration: Duration,
     total_duration: Duration,
+    version_number: u64,
     host: &str,
     port: u16,
 ) {
@@ -62,6 +97,7 @@ fn ping_json_success<W: Write>(
             status: "ok".to_string(),
             host: host.to_string(),
             port,
+            remote_protocol_version: version_number,
             connect_duration_ms: connect_duration.as_millis(),
             duration_ms: total_duration.as_millis(),
         },
