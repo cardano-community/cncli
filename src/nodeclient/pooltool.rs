@@ -14,15 +14,39 @@ use crate::nodeclient::APP_USER_AGENT;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PooltoolStats {
+struct PooltoolStats0 {
     api_key: String,
     pool_id: String,
-    data: PooltoolData,
+    data: PooltoolData0,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PooltoolData {
+struct PooltoolData0 {
+    node_id: String,
+    version: String,
+    at: String,
+    block_no: i64,
+    slot_no: i64,
+    block_hash: String,
+    parent_hash: String,
+    leader_vrf: String,
+    leader_vrf_proof: String,
+    node_v_key: String,
+    platform: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PooltoolStats1 {
+    api_key: String,
+    pool_id: String,
+    data: PooltoolData1,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PooltoolData1 {
     node_id: String,
     version: String,
     at: String,
@@ -91,30 +115,56 @@ impl PoolToolNotifier {
 
         match reqwest::blocking::Client::builder().user_agent(APP_USER_AGENT).build() {
             Ok(client) => {
-                let pooltool_result = client
-                    .post("https://api.pooltool.io/v1/sendstats")
-                    .body(
-                        serde_json::ser::to_string(&PooltoolStats {
-                            api_key: self.api_key.clone(),
-                            pool_id: self.pool_id.clone(),
-                            data: PooltoolData {
-                                node_id: "".to_string(),
-                                version: self.node_version.clone(),
-                                at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
-                                block_no: header.block_number,
-                                slot_no: header.slot_number,
-                                block_hash: hex::encode(&header.hash),
-                                parent_hash: hex::encode(&header.prev_hash),
-                                leader_vrf: hex::encode(&header.leader_vrf_0),
-                                block_vrf: hex::encode(&header.block_vrf_0),
-                                block_vrf_proof: hex::encode(&header.block_vrf_1),
-                                node_v_key: hex::encode(&header.node_vkey),
-                                platform: "cncli".to_string(),
-                            },
-                        })
-                        .unwrap(),
-                    )
-                    .send();
+                let pooltool_result = if header.block_vrf_0.is_empty() {
+                    client
+                        .post("https://api.pooltool.io/v0/sendstats")
+                        .body(
+                            serde_json::ser::to_string(&PooltoolStats0 {
+                                api_key: self.api_key.clone(),
+                                pool_id: self.pool_id.clone(),
+                                data: PooltoolData0 {
+                                    node_id: "".to_string(),
+                                    version: self.node_version.clone(),
+                                    at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+                                    block_no: header.block_number,
+                                    slot_no: header.slot_number,
+                                    block_hash: hex::encode(&header.hash),
+                                    parent_hash: hex::encode(&header.prev_hash),
+                                    leader_vrf: hex::encode(&header.leader_vrf_0),
+                                    leader_vrf_proof: hex::encode(&header.leader_vrf_1),
+                                    node_v_key: hex::encode(&header.node_vkey),
+                                    platform: "cncli".to_string(),
+                                },
+                            })
+                            .unwrap(),
+                        )
+                        .send()
+                } else {
+                    client
+                        .post("https://api.pooltool.io/v1/sendstats")
+                        .body(
+                            serde_json::ser::to_string(&PooltoolStats1 {
+                                api_key: self.api_key.clone(),
+                                pool_id: self.pool_id.clone(),
+                                data: PooltoolData1 {
+                                    node_id: "".to_string(),
+                                    version: self.node_version.clone(),
+                                    at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+                                    block_no: header.block_number,
+                                    slot_no: header.slot_number,
+                                    block_hash: hex::encode(&header.hash),
+                                    parent_hash: hex::encode(&header.prev_hash),
+                                    leader_vrf: hex::encode(&header.leader_vrf_0),
+                                    block_vrf: hex::encode(&header.block_vrf_0),
+                                    block_vrf_proof: hex::encode(&header.block_vrf_1),
+                                    node_v_key: hex::encode(&header.node_vkey),
+                                    platform: "cncli".to_string(),
+                                },
+                            })
+                            .unwrap(),
+                        )
+                        .send()
+                };
 
                 match pooltool_result {
                     Ok(response) => match response.text() {
