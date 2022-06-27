@@ -10,7 +10,7 @@ This command validates that the remote server is on the given network and return
 
 ```bash
 cncli ping --help
-cncli-ping 5.0.0
+cncli-ping 5.0.2
 
 USAGE:
     cncli ping [OPTIONS] --host <host>
@@ -39,7 +39,7 @@ cncli ping --host north-america.relays-new.cardano-mainnet.iohk.io
   "status": "ok",
   "host": "north-america.relays-new.cardano-mainnet.iohk.io",
   "port": 3001,
-  "remoteProtocolVersion": 7,
+  "networkProtocolVersion": 7,
   "connectDurationMs": 154,
   "durationMs": 237
 }
@@ -92,7 +92,7 @@ cncli ping --host north-america.relays-new.cardano-testnet.iohkdev.io --port 300
   "status": "ok",
   "host": "north-america.relays-new.cardano-testnet.iohkdev.io",
   "port": 3001,
-  "remoteProtocolVersion": 7,
+  "networkProtocolVersion": 7,
   "connectDurationMs": 48,
   "durationMs": 97
 }

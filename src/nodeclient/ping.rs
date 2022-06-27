@@ -17,7 +17,7 @@ struct PingSuccess {
     status: String,
     host: String,
     port: u16,
-    remote_protocol_version: u64,
+    network_protocol_version: u64,
     connect_duration_ms: u128,
     duration_ms: u128,
 }
@@ -97,7 +97,7 @@ fn ping_json_success<W: Write>(
             status: "ok".to_string(),
             host: host.to_string(),
             port,
-            remote_protocol_version: version_number,
+            network_protocol_version: version_number,
             connect_duration_ms: connect_duration.as_millis(),
             duration_ms: total_duration.as_millis(),
         },

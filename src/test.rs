@@ -79,7 +79,7 @@ fn test_ping_failure_bad_magic() {
 
     ping::ping(&mut stdout, &host, port, network_magic, 2);
 
-    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"Refused(7, \\\"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1097911063}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 111111}, diffusionMode = InitiatorAndResponderDiffusionMode}\\\")\"\n}");
+    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"north-america.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 3001,\n  \"errorMessage\": \"Refused(9, \\\"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1097911063}, diffusionMode = InitiatorOnlyDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 111111}, diffusionMode = InitiatorAndResponderDiffusionMode}\\\")\"\n}");
 }
 
 #[test]
