@@ -42,6 +42,9 @@ pub fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u64, ti
                         match &bearer {
                             Bearer::Tcp(tcp_stream) => {
                                 tcp_stream.set_keepalive_ms(Some(30_000u32)).unwrap();
+                                tcp_stream
+                                    .set_read_timeout(Some(Duration::from_secs(timeout_seconds)))
+                                    .unwrap();
                             }
                             Bearer::Unix(_) => {}
                         }
@@ -56,18 +59,31 @@ pub fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u64, ti
                         plexer.demuxer.spawn();
 
                         let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
-                        let _last = run_agent(handshake::Initiator::initial(versions), &mut channel0).unwrap();
-                        debug!("{:?}", _last);
-                        match _last.output {
-                            Output::Pending => {
-                                ping_json_error(out, "Pending".to_string(), host, port);
+                        match run_agent(handshake::Initiator::initial(versions), &mut channel0) {
+                            Ok(last) => {
+                                debug!("{:?}", last);
+                                match last.output {
+                                    Output::Pending => {
+                                        ping_json_error(out, "Pending".to_string(), host, port);
+                                    }
+                                    Output::Accepted(version_number, _) => {
+                                        let total_duration = start.elapsed();
+                                        ping_json_success(
+                                            out,
+                                            connect_duration,
+                                            total_duration,
+                                            version_number,
+                                            host,
+                                            port,
+                                        );
+                                    }
+                                    Output::Refused(refuse_reason) => {
+                                        ping_json_error(out, format!("{:?}", refuse_reason), host, port);
+                                    }
+                                }
                             }
-                            Output::Accepted(version_number, _) => {
-                                let total_duration = start.elapsed();
-                                ping_json_success(out, connect_duration, total_duration, version_number, host, port);
-                            }
-                            Output::Refused(refuse_reason) => {
-                                ping_json_error(out, format!("{:?}", refuse_reason), host, port);
+                            Err(err) => {
+                                ping_json_error(out, err.to_string(), host, port);
                             }
                         }
                     }
