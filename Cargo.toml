@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "5.0.2"
+version = "5.0.3"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -14,12 +14,12 @@ bigdecimal = "0.2.0"
 num-bigint = "0.3.1"
 blake2b_simd = "0.5.11"
 byteorder = "1.3.4"
-#pallas-miniprotocols = { git = "https://github.com/AndrewWestberg/pallas", rev="2f3c2432272486e337ff48cc85c76ecbf4a0ad1f" }
-#pallas-multiplexer = { git = "https://github.com/AndrewWestberg/pallas", rev="2f3c2432272486e337ff48cc85c76ecbf4a0ad1f" }
-#pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="2f3c2432272486e337ff48cc85c76ecbf4a0ad1f" }
-pallas-miniprotocols = "0.11.0-beta.0"
-pallas-multiplexer = "0.11.0-beta.0"
-pallas-traverse = "0.11.0-beta.0"
+#pallas-miniprotocols = { git = "https://github.com/AndrewWestberg/pallas", rev="e41759c90fc32cfb478780126c8cd7fb7e831843" }
+#pallas-multiplexer = { git = "https://github.com/AndrewWestberg/pallas", rev="e41759c90fc32cfb478780126c8cd7fb7e831843" }
+#pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="e41759c90fc32cfb478780126c8cd7fb7e831843" }
+pallas-miniprotocols = "0.12.0-alpha.0"
+pallas-multiplexer = "0.12.0-alpha.0"
+pallas-traverse = "0.12.0-alpha.0"
 chrono = "0.4.19"
 chrono-tz = "0.5.3"
 futures = "0.3.8"
