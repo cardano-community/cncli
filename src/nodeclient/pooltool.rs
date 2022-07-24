@@ -58,6 +58,8 @@ struct PooltoolData1 {
     block_vrf: String,
     block_vrf_proof: String,
     node_v_key: String,
+    protocol_major_version: i64,
+    protocol_minor_version: i64,
     platform: String,
 }
 
@@ -158,6 +160,8 @@ impl PoolToolNotifier {
                                     block_vrf: hex::encode(&header.block_vrf_0),
                                     block_vrf_proof: hex::encode(&header.block_vrf_1),
                                     node_v_key: hex::encode(&header.node_vkey),
+                                    protocol_major_version: header.protocol_major_version,
+                                    protocol_minor_version: header.protocol_minor_version,
                                     platform: "cncli".to_string(),
                                 },
                             })
