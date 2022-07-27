@@ -15,7 +15,7 @@ fn main() {
         // Use set libsodium env path
         if env::var("SODIUM_LIB_DIR").is_ok() {
             let libdir = env::var("SODIUM_LIB_DIR").unwrap();
-            println!("cargo:rustc-link-search=native={}", Path::new(&libdir).join("lib").display());
+            println!("cargo:rustc-link-search=native={}", Path::new(&libdir).display());
             println!("cargo:rustc-link-lib=static=sodium");
         } else {
             // Build and link IOHK libsodium
@@ -33,7 +33,6 @@ fn main() {
             println!("cargo:rustc-link-lib=static=sodium");
         }
     }
-    
     // Link with libsodium system library
     #[cfg(feature = "libsodium-sys")]
     {
