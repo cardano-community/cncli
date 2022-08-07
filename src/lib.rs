@@ -83,6 +83,13 @@ pub mod nodeclient {
             network_magic: u64,
             #[structopt(long, help = "Exit at 100% sync'd.")]
             no_service: bool,
+            #[structopt(
+                short,
+                long,
+                default_value = "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
+                help = "shelley genesis hash value"
+            )]
+            shelley_genesis_hash: String,
         },
         Leaderlog {
             #[structopt(
@@ -251,8 +258,16 @@ pub mod nodeclient {
                 ref port,
                 ref network_magic,
                 ref no_service,
+                ref shelley_genesis_hash,
             } => {
-                sync::sync(db, host.as_str(), *port, *network_magic, *no_service);
+                sync::sync(
+                    db,
+                    host.as_str(),
+                    *port,
+                    *network_magic,
+                    shelley_genesis_hash.as_str(),
+                    *no_service,
+                );
             }
             Command::Leaderlog {
                 ref db,

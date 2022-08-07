@@ -3,11 +3,11 @@ use std::io;
 use crate::nodeclient::sync::BlockHeader;
 use blake2b_simd::Params;
 use log::{debug, error, info};
-use rusqlite::{named_params, Connection, Error, NO_PARAMS};
+use rusqlite::{named_params, Connection, Error};
 use std::path::Path;
 
 pub trait BlockStore {
-    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, network_magic: u32) -> io::Result<()>;
+    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, shelley_genesis_hash: &str) -> io::Result<()>;
     fn load_blocks(&mut self) -> Option<Vec<(i64, Vec<u8>)>>;
 }
 
@@ -28,10 +28,10 @@ impl SqLiteBlockStore {
             debug!("Intialize database.");
             tx.execute(
                 "CREATE TABLE IF NOT EXISTS db_version (version INTEGER PRIMARY KEY)",
-                NO_PARAMS,
+                [],
             )?;
             let mut stmt = tx.prepare("SELECT version FROM db_version")?;
-            let mut rows = stmt.query(NO_PARAMS)?;
+            let mut rows = stmt.query([])?;
             let version: i64 = match rows.next()? {
                 None => -1,
                 Some(row) => row.get(0)?,
@@ -64,20 +64,17 @@ impl SqLiteBlockStore {
                     protocol_minor_version INTEGER NOT NULL, \
                     orphaned INTEGER NOT NULL DEFAULT 0 \
                     )",
-                    NO_PARAMS,
+                    [],
                 )?;
                 tx.execute(
                     "CREATE INDEX IF NOT EXISTS idx_chain_slot_number ON chain(slot_number)",
-                    NO_PARAMS,
+                    [],
                 )?;
-                tx.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_chain_orphaned ON chain(orphaned)",
-                    NO_PARAMS,
-                )?;
-                tx.execute("CREATE INDEX IF NOT EXISTS idx_chain_hash ON chain(hash)", NO_PARAMS)?;
+                tx.execute("CREATE INDEX IF NOT EXISTS idx_chain_orphaned ON chain(orphaned)", [])?;
+                tx.execute("CREATE INDEX IF NOT EXISTS idx_chain_hash ON chain(hash)", [])?;
                 tx.execute(
                     "CREATE INDEX IF NOT EXISTS idx_chain_block_number ON chain(block_number)",
-                    NO_PARAMS,
+                    [],
                 )?;
             }
 
@@ -94,33 +91,22 @@ impl SqLiteBlockStore {
                     hash TEXT NOT NULL,
                     UNIQUE(epoch,pool_id)
                 )",
-                    NO_PARAMS,
+                    [],
                 )?;
             }
 
             if version < 3 {
                 info!("Upgrade database to version 3...");
-                tx.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_chain_node_vkey ON chain(node_vkey)",
-                    NO_PARAMS,
-                )?;
-                tx.execute(
-                    "ALTER TABLE chain ADD COLUMN pool_id TEXT NOT NULL DEFAULT ''",
-                    NO_PARAMS,
-                )?;
-                tx.execute(
-                    "CREATE INDEX IF NOT EXISTS idx_chain_pool_id ON chain(pool_id)",
-                    NO_PARAMS,
-                )?;
+                tx.execute("CREATE INDEX IF NOT EXISTS idx_chain_node_vkey ON chain(node_vkey)", [])?;
+                tx.execute("ALTER TABLE chain ADD COLUMN pool_id TEXT NOT NULL DEFAULT ''", [])?;
+                tx.execute("CREATE INDEX IF NOT EXISTS idx_chain_pool_id ON chain(pool_id)", [])?;
 
-                let count: i64 = tx.query_row("SELECT COUNT(DISTINCT node_vkey) from chain", NO_PARAMS, |row| {
-                    row.get(0)
-                })?;
+                let count: i64 = tx.query_row("SELECT COUNT(DISTINCT node_vkey) from chain", [], |row| row.get(0))?;
 
                 if count > 0 {
                     let mut stmt = tx.prepare("SELECT DISTINCT node_vkey FROM chain")?;
                     let vkeys = stmt
-                        .query_map(NO_PARAMS, |row| {
+                        .query_map([], |row| {
                             let node_vkey_result: Result<String, Error> = row.get(0);
                             let node_vkey = node_vkey_result?;
                             Ok(node_vkey)
@@ -141,7 +127,7 @@ impl SqLiteBlockStore {
                                 .as_bytes(),
                         );
 
-                        tx.execute_named(
+                        tx.execute(
                             "UPDATE chain SET pool_id=:pool_id WHERE node_vkey=:node_vkey",
                             named_params! {
                                 ":pool_id": pool_id,
@@ -159,14 +145,8 @@ impl SqLiteBlockStore {
 
             if version < 4 {
                 info!("Upgrade database to version 4...");
-                tx.execute(
-                    "ALTER TABLE chain ADD COLUMN block_vrf_0 TEXT NOT NULL DEFAULT ''",
-                    NO_PARAMS,
-                )?;
-                tx.execute(
-                    "ALTER TABLE chain ADD COLUMN block_vrf_1 TEXT NOT NULL DEFAULT ''",
-                    NO_PARAMS,
-                )?;
+                tx.execute("ALTER TABLE chain ADD COLUMN block_vrf_0 TEXT NOT NULL DEFAULT ''", [])?;
+                tx.execute("ALTER TABLE chain ADD COLUMN block_vrf_1 TEXT NOT NULL DEFAULT ''", [])?;
             }
 
             // Update the db version now that we've upgraded the user's database fully
@@ -187,8 +167,8 @@ impl SqLiteBlockStore {
     fn sql_save_block(
         &mut self,
         pending_blocks: &mut Vec<BlockHeader>,
-        network_magic: u32,
-    ) -> Result<(), rusqlite::Error> {
+        shelley_genesis_hash: &str,
+    ) -> Result<(), Error> {
         let db = &mut self.db;
 
         // get the last block eta_v (nonce) in the db
@@ -201,56 +181,11 @@ impl SqLiteBlockStore {
                 ) {
                     Ok(eta_v) => eta_v,
                     Err(_) => {
-                        match network_magic {
-                            764824073 => {
-                                // mainnet genesis hash
-                                info!("Start nonce calculation for mainnet.");
-                                String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81")
-                            }
-                            1097911063 => {
-                                // Testnet genesis hash
-                                info!("Start nonce calculation for testnet.");
-                                String::from("849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4")
-                            }
-                            3 => {
-                                // Launchpad genesis hash
-                                info!("Start nonce calculation for launchpad.");
-                                String::from("8587fca9128b0470dcaf928f00bb2bd99dec5047e080a2da3aa419bd17023d75")
-                            }
-                            12 => {
-                                // allegra genesis hash
-                                info!("Start nonce calculation for allegra testnet.");
-                                String::from("47daa6201f436c90f9c76e343e0fd6536262b7ca2455ec306aa2fcc45c97bb4d")
-                            }
-                            141 => {
-                                // guild genesis hash
-                                info!("Start nonce calculation for guild testnet.");
-                                String::from("6e32e475f05087edc92945a9fbebe8aa15fdb4333cbd3842737152967065fbf0")
-                            }
-                            5 => {
-                                // alonzo-blue genesis hash
-                                info!("Start nonce calculation for alonzo-blue testnet.");
-                                String::from("60ba98183b381c933acaa298a815e090bdb86726fd19562e12f6ed6aa78caef2")
-                            }
-                            7 => {
-                                // alonzo-white genesis hash
-                                info!("Start nonce calculation for alonzo-white testnet.");
-                                String::from("b72001cddc21713dd63d899c1993a5b0728cd909eb261fff0e50d10f46340f1f")
-                            }
-                            8 => {
-                                // alonzo-purple genesis hash
-                                info!("Start nonce calculation for alonzo-purple testnet.");
-                                String::from("b143c75727f4b2fb372db713e719f9b958bb428e305a668bda6190443db4c191")
-                            }
-                            9 => {
-                                // vasil-dev genesis hash
-                                info!("Start nonce calculation for vasil-dev testnet.");
-                                String::from("3c824cd1fa5dda79e3331765960deb3393ab89f97af011b5d3d2ea8b501aaf63")
-                            }
-                            _ => {
-                                panic!("Unknown genesis hash for network_magic {}", network_magic);
-                            }
-                        }
+                        info!(
+                            "Start nonce calculation with shelley_genesis_hash: {:?}",
+                            shelley_genesis_hash
+                        );
+                        shelley_genesis_hash.to_string()
                     }
                 },
             )
@@ -326,26 +261,7 @@ impl SqLiteBlockStore {
                                 Ok(eta_v) => eta_v,
                                 Err(_) => {
                                     error!("Missing eta_v for block {:?}", block.block_number - 1);
-                                    match network_magic {
-                                        764824073 => {
-                                            // mainnet genesis hash
-                                            String::from(
-                                                "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
-                                            )
-                                        }
-                                        141 => {
-                                            // guild genesis hash
-                                            String::from(
-                                                "6e32e475f05087edc92945a9fbebe8aa15fdb4333cbd3842737152967065fbf0",
-                                            )
-                                        }
-                                        _ => {
-                                            // assume testnet genesis hash
-                                            String::from(
-                                                "849a1764f152e1b09c89c0dfdbcbdd38d711d1fec2db5dfa0f87cf2737a0eaf4",
-                                            )
-                                        }
-                                    }
+                                    shelley_genesis_hash.to_string()
                                 }
                             },
                         )
@@ -379,7 +295,7 @@ impl SqLiteBlockStore {
                     .as_bytes()
                     .to_vec();
 
-                insert_stmt.execute_named(named_params! {
+                insert_stmt.execute(named_params! {
                     ":block_number" : block.block_number,
                     ":slot_number": block.slot_number,
                     ":hash" : hex::encode(block.hash),
@@ -412,8 +328,8 @@ impl SqLiteBlockStore {
 }
 
 impl BlockStore for SqLiteBlockStore {
-    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, network_magic: u32) -> io::Result<()> {
-        match self.sql_save_block(pending_blocks, network_magic) {
+    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, shelley_genesis_hash: &str) -> io::Result<()> {
+        match self.sql_save_block(pending_blocks, shelley_genesis_hash) {
             Ok(_) => Ok(()),
             Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Database error!")),
         }
@@ -425,7 +341,7 @@ impl BlockStore for SqLiteBlockStore {
             .prepare("SELECT slot_number, hash FROM chain where orphaned = 0 ORDER BY slot_number DESC LIMIT 33")
             .unwrap();
         let blocks = stmt
-            .query_map(NO_PARAMS, |row| {
+            .query_map([], |row| {
                 let slot_result: Result<i64, Error> = row.get(0);
                 let hash_result: Result<String, Error> = row.get(1);
                 let slot = slot_result?;
