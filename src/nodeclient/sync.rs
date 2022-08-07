@@ -51,7 +51,7 @@ struct LoggingObserver {
     pub last_log_time: Instant,
     pub exit_when_tip_reached: bool,
     pub block_store: Option<Box<dyn BlockStore>>,
-    pub network_magic: u32,
+    pub shelley_genesis_hash: String,
     pub pending_blocks: Vec<BlockHeader>,
 }
 
@@ -61,7 +61,7 @@ impl Default for LoggingObserver {
             last_log_time: Instant::now().sub(Duration::from_secs(6)),
             exit_when_tip_reached: false,
             block_store: None,
-            network_magic: 764824073,
+            shelley_genesis_hash: String::from("1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81"),
             pending_blocks: Vec::new(),
         }
     }
@@ -95,7 +95,10 @@ impl chainsync::Observer<chainsync::HeaderContent> for LoggingObserver {
                                     block_number: header.header_body.block_number as i64,
                                     slot_number: slot as i64,
                                     hash: hash.to_vec(),
-                                    prev_hash: header.header_body.prev_hash.to_vec(),
+                                    prev_hash: match header.header_body.prev_hash {
+                                        None => vec![],
+                                        Some(prev_hash) => prev_hash.to_vec(),
+                                    },
                                     node_vkey: header.header_body.issuer_vkey.to_vec(),
                                     node_vrf_vkey: header.header_body.vrf_vkey.to_vec(),
                                     block_vrf_0: vec![],
@@ -120,7 +123,7 @@ impl chainsync::Observer<chainsync::HeaderContent> for LoggingObserver {
                                     match self.block_store.as_mut() {
                                         None => {}
                                         Some(store) => {
-                                            store.save_block(&mut self.pending_blocks, self.network_magic)?;
+                                            store.save_block(&mut self.pending_blocks, &self.shelley_genesis_hash)?;
                                         }
                                     }
 
@@ -139,7 +142,10 @@ impl chainsync::Observer<chainsync::HeaderContent> for LoggingObserver {
                                     block_number: header.header_body.block_number as i64,
                                     slot_number: slot as i64,
                                     hash: hash.to_vec(),
-                                    prev_hash: header.header_body.prev_hash.to_vec(),
+                                    prev_hash: match header.header_body.prev_hash {
+                                        None => vec![],
+                                        Some(prev_hash) => prev_hash.to_vec(),
+                                    },
                                     node_vkey: header.header_body.issuer_vkey.to_vec(),
                                     node_vrf_vkey: header.header_body.vrf_vkey.to_vec(),
                                     block_vrf_0: header.header_body.vrf_result.0.to_vec(),
@@ -166,7 +172,7 @@ impl chainsync::Observer<chainsync::HeaderContent> for LoggingObserver {
                                     match self.block_store.as_mut() {
                                         None => {}
                                         Some(store) => {
-                                            store.save_block(&mut self.pending_blocks, self.network_magic)?;
+                                            store.save_block(&mut self.pending_blocks, &self.shelley_genesis_hash)?;
                                         }
                                     }
 
@@ -232,7 +238,7 @@ fn do_chainsync(
     skip_to_tip: bool,
     exit_when_tip_reached: bool,
     mut block_store: Option<Box<dyn BlockStore>>,
-    network_magic: u32,
+    shelley_genesis_hash: &str,
 ) {
     let mut chain_blocks: Vec<Point> = vec![];
 
@@ -283,6 +289,7 @@ fn do_chainsync(
             hex::decode("87882b6778a831d0f19f03ee3fb5e95081afa835976abc1b8dd6f7b65421a816").unwrap(),
         ),
     );
+    chain_blocks.push(Point::Origin);
 
     if skip_to_tip {
         let agent: TipFinder = TipFinder::initial(Point::Origin);
@@ -299,7 +306,7 @@ fn do_chainsync(
             LoggingObserver {
                 exit_when_tip_reached,
                 block_store,
-                network_magic,
+                shelley_genesis_hash: shelley_genesis_hash.to_string(),
                 ..Default::default()
             },
         ),
@@ -307,7 +314,7 @@ fn do_chainsync(
     );
 }
 
-pub(crate) fn sync(db: &Path, host: &str, port: u16, network_magic: u64, no_service: bool) {
+pub(crate) fn sync(db: &Path, host: &str, port: u16, network_magic: u64, shelley_genesis_hash: &str, no_service: bool) {
     block_on(async {
         loop {
             // Retry to establish connection forever
@@ -344,7 +351,7 @@ pub(crate) fn sync(db: &Path, host: &str, port: u16, network_magic: u64, no_serv
                                 false,
                                 no_service,
                                 Some(Box::new(block_store)),
-                                network_magic as u32,
+                                shelley_genesis_hash,
                             );
                         }
                         Output::Refused(refuse_reason) => {
@@ -416,7 +423,7 @@ pub(crate) fn sendtip(
                                 true,
                                 false,
                                 Some(Box::new(pooltool_notifier)),
-                                MAINNET_MAGIC as u32,
+                                "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
                             );
                         }
                         Output::Refused(refuse_reason) => {

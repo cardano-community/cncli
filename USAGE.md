@@ -108,7 +108,7 @@ This command connects to a remote node and synchronizes blocks to a local sqlite
 
 ```bash
 cncli sync --help
-cncli-sync 5.0.0
+cncli-sync 5.1.0
 
 USAGE:
     cncli sync [FLAGS] [OPTIONS] --host <host>
@@ -119,10 +119,12 @@ FLAGS:
     -V, --version       Prints version information
 
 OPTIONS:
-    -d, --db <db>                          sqlite database file [default: ./cncli.db]
-    -h, --host <host>                      cardano-node hostname to connect to
-        --network-magic <network-magic>    network magic. [default: 764824073]
-    -p, --port <port>                      cardano-node port [default: 3001]
+    -d, --db <db>                                        sqlite database file [default: ./cncli.db]
+    -h, --host <host>                                    cardano-node hostname to connect to
+        --network-magic <network-magic>                  network magic. [default: 764824073]
+    -p, --port <port>                                    cardano-node port [default: 3001]
+    -s, --shelley-genesis-hash <shelley-genesis-hash>
+            shelley genesis hash value [default: 1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81]
 ```
 
 #### Example sync command

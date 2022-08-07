@@ -203,7 +203,11 @@ impl PoolToolNotifier {
 }
 
 impl BlockStore for PoolToolNotifier {
-    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, _network_magic: u32) -> std::io::Result<()> {
+    fn save_block(
+        &mut self,
+        pending_blocks: &mut Vec<BlockHeader>,
+        _shelley_genesis_hash: &str,
+    ) -> std::io::Result<()> {
         self.send_to_pooltool(pending_blocks.last().unwrap());
         Ok(())
     }

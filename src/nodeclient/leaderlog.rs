@@ -14,7 +14,7 @@ use log::{debug, error, info, trace};
 use num_bigint::{BigInt, Sign};
 use rayon::prelude::*;
 use rug::Rational;
-use rusqlite::{named_params, Connection, OptionalExtension, NO_PARAMS};
+use rusqlite::{named_params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
 
@@ -132,7 +132,7 @@ pub(crate) fn read_vrf_key(vrf_key_path: &Path) -> Result<VrfKey, Error> {
 }
 
 fn get_tip_slot_number(db: &Connection) -> Result<i64, rusqlite::Error> {
-    db.query_row("SELECT MAX(slot_number) FROM chain", NO_PARAMS, |row| row.get(0))
+    db.query_row("SELECT MAX(slot_number) FROM chain", [], |row| row.get(0))
 }
 
 fn get_eta_v_before_slot(db: &Connection, slot_number: i64) -> Result<String, rusqlite::Error> {
@@ -148,7 +148,7 @@ fn get_prev_hash_before_slot(db: &Connection, slot_number: i64) -> Result<String
 }
 
 fn get_current_slots(db: &Connection, epoch: i64, pool_id: &str) -> Result<(i64, String), rusqlite::Error> {
-    db.query_row_named(
+    db.query_row(
         "SELECT slot_qty, hash FROM slots WHERE epoch = :epoch AND pool_id = :pool_id LIMIT 1",
         named_params! {
                 ":epoch": epoch,
@@ -159,7 +159,7 @@ fn get_current_slots(db: &Connection, epoch: i64, pool_id: &str) -> Result<(i64,
 }
 
 fn get_prev_slots(db: &Connection, epoch: i64, pool_id: &str) -> Result<Option<String>, rusqlite::Error> {
-    db.query_row_named(
+    db.query_row(
         "SELECT slots FROM slots WHERE epoch = :epoch AND pool_id = :pool_id LIMIT 1",
         named_params! {
                 ":epoch": epoch,
@@ -644,7 +644,7 @@ pub(crate) fn calculate_leader_logs(
 
                                                             let hash = hex::encode(Params::new().hash_length(32).to_state().update(slots.as_ref()).finalize().as_bytes());
 
-                                                            match insert_slots_statement.execute_named(
+                                                            match insert_slots_statement.execute(
                                                                 named_params! {
                                                                     ":epoch" : epoch,
                                                                     ":pool_id" : pool_id,
