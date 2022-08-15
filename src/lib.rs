@@ -135,6 +135,13 @@ pub mod nodeclient {
                 help = "Consensus algorithm - Alonzo and earlier uses tpraos, Babbage and later uses praos"
             )]
             consensus: String,
+            #[structopt(
+                long,
+                env = "SHELLEY_TRANS_EPOCH",
+                default_value = "-1",
+                help = "Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files"
+            )]
+            shelley_transition_epoch: i64,
         },
         Sendtip {
             #[structopt(
@@ -171,6 +178,13 @@ pub mod nodeclient {
             byron_genesis: PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
             shelley_genesis: PathBuf,
+            #[structopt(
+                long,
+                env = "SHELLEY_TRANS_EPOCH",
+                default_value = "-1",
+                help = "Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files"
+            )]
+            shelley_transition_epoch: i64,
             #[structopt(long, env = "OVERRIDE_TIME", hide_env_values = true, hidden = true)]
             override_time: Option<String>,
         },
@@ -187,6 +201,13 @@ pub mod nodeclient {
             byron_genesis: PathBuf,
             #[structopt(parse(from_os_str), long, help = "shelley genesis json file")]
             shelley_genesis: PathBuf,
+            #[structopt(
+                long,
+                env = "SHELLEY_TRANS_EPOCH",
+                default_value = "-1",
+                help = "Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files"
+            )]
+            shelley_transition_epoch: i64,
         },
         Nonce {
             #[structopt(
@@ -209,6 +230,13 @@ pub mod nodeclient {
                 help = "Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch"
             )]
             ledger_set: LedgerSet,
+            #[structopt(
+                long,
+                env = "SHELLEY_TRANS_EPOCH",
+                default_value = "-1",
+                help = "Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files"
+            )]
+            shelley_transition_epoch: i64,
         },
         Challenge {
             #[structopt(long, help = "validating domain e.g. pooltool.io")]
@@ -282,6 +310,7 @@ pub mod nodeclient {
                 ref pool_vrf_skey,
                 ref timezone,
                 ref consensus,
+                ref shelley_transition_epoch,
             } => {
                 leaderlog::calculate_leader_logs(
                     db,
@@ -297,6 +326,7 @@ pub mod nodeclient {
                     timezone,
                     false,
                     consensus,
+                    shelley_transition_epoch,
                 );
             }
             Command::Nonce {
@@ -305,6 +335,7 @@ pub mod nodeclient {
                 ref shelley_genesis,
                 ref extra_entropy,
                 ref ledger_set,
+                ref shelley_transition_epoch,
             } => leaderlog::calculate_leader_logs(
                 db,
                 byron_genesis,
@@ -319,6 +350,7 @@ pub mod nodeclient {
                 "America/Los_Angeles",
                 true,
                 "praos",
+                shelley_transition_epoch,
             ),
             Command::Sendtip {
                 ref config,
@@ -359,6 +391,7 @@ pub mod nodeclient {
                 ref db,
                 ref byron_genesis,
                 ref shelley_genesis,
+                ref shelley_transition_epoch,
                 ref override_time,
             } => {
                 if !config.exists() {
@@ -366,14 +399,22 @@ pub mod nodeclient {
                     return;
                 }
                 let pooltool_config: PooltoolConfig = get_pooltool_config(config);
-                leaderlog::send_slots(db, byron_genesis, shelley_genesis, pooltool_config, override_time);
+                leaderlog::send_slots(
+                    db,
+                    byron_genesis,
+                    shelley_genesis,
+                    pooltool_config,
+                    shelley_transition_epoch,
+                    override_time,
+                );
             }
             Command::Status {
                 ref db,
                 ref byron_genesis,
                 ref shelley_genesis,
+                ref shelley_transition_epoch,
             } => {
-                leaderlog::status(db, byron_genesis, shelley_genesis);
+                leaderlog::status(db, byron_genesis, shelley_genesis, shelley_transition_epoch);
             }
             Command::Challenge { ref domain } => {
                 signing::create_challenge(domain);

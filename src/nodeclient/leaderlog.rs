@@ -170,19 +170,27 @@ fn get_prev_slots(db: &Connection, epoch: i64, pool_id: &str) -> Result<Option<S
     .optional()
 }
 
-fn get_shelley_transition_epoch(network_magic: u32) -> i64 {
+fn guess_shelley_transition_epoch(network_magic: u32) -> i64 {
     match network_magic {
         764824073 => {
             // mainnet
             208
         }
         1097911063 => {
-            //testnet
+            //testnet / ghostnet
             74
         }
         141 => {
             //guild
             2
+        }
+        1 => {
+            //preprod
+            4
+        }
+        2 => {
+            //preview testnet
+            0
         }
         _ => {
             // alonzo, fallback
@@ -191,8 +199,16 @@ fn get_shelley_transition_epoch(network_magic: u32) -> i64 {
     }
 }
 
-fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, current_slot: i64) -> (i64, i64) {
-    let shelley_transition_epoch = get_shelley_transition_epoch(shelley.network_magic);
+fn get_first_slot_of_epoch(
+    byron: &ByronGenesis,
+    shelley: &ShelleyGenesis,
+    current_slot: i64,
+    shelley_trans_epoch: i64,
+) -> (i64, i64) {
+    let shelley_transition_epoch = match shelley_trans_epoch {
+        -1 => guess_shelley_transition_epoch(shelley.network_magic),
+        _ => shelley_trans_epoch,
+    };
     let byron_epoch_length = 10 * byron.protocol_consts.k;
     let byron_slots = byron_epoch_length * shelley_transition_epoch;
     let shelley_slots = current_slot - byron_slots;
@@ -203,8 +219,16 @@ fn get_first_slot_of_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, curre
     (epoch, first_slot_of_epoch)
 }
 
-fn slot_to_naivedatetime(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64) -> NaiveDateTime {
-    let shelley_transition_epoch = get_shelley_transition_epoch(shelley.network_magic);
+fn slot_to_naivedatetime(
+    byron: &ByronGenesis,
+    shelley: &ShelleyGenesis,
+    slot: i64,
+    shelley_trans_epoch: i64,
+) -> NaiveDateTime {
+    let shelley_transition_epoch = match shelley_trans_epoch {
+        -1 => guess_shelley_transition_epoch(shelley.network_magic),
+        _ => shelley_trans_epoch,
+    };
     let network_start_time = NaiveDateTime::from_timestamp(byron.start_time, 0);
     let byron_epoch_length = 10 * byron.protocol_consts.k;
     let byron_slots = byron_epoch_length * shelley_transition_epoch;
@@ -216,8 +240,14 @@ fn slot_to_naivedatetime(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i
     network_start_time + Duration::seconds(byron_secs) + Duration::seconds(shelley_secs)
 }
 
-fn slot_to_timestamp(byron: &ByronGenesis, shelley: &ShelleyGenesis, slot: i64, tz: &Tz) -> String {
-    let slot_time = slot_to_naivedatetime(byron, shelley, slot);
+fn slot_to_timestamp(
+    byron: &ByronGenesis,
+    shelley: &ShelleyGenesis,
+    slot: i64,
+    tz: &Tz,
+    shelley_trans_epoch: i64,
+) -> String {
+    let slot_time = slot_to_naivedatetime(byron, shelley, slot, shelley_trans_epoch);
     tz.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
@@ -393,6 +423,7 @@ pub(crate) fn calculate_leader_logs(
     timezone: &str,
     is_just_nonce: bool,
     consensus: &str,
+    shelley_transition_epoch: &i64,
 ) {
     let tz: Tz = match timezone.parse::<Tz>() {
         Err(_) => {
@@ -451,7 +482,7 @@ pub(crate) fn calculate_leader_logs(
                     debug!("tip_slot_number: {}", tip_slot_number);
 
                     // Make sure we're fully sync'd
-                    let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
+                    let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number,  *shelley_transition_epoch).timestamp();
                     let system_time = Utc::now().timestamp();
                     if system_time - tip_time > 900 {
                         handle_error(format!(
@@ -468,7 +499,7 @@ pub(crate) fn calculate_leader_logs(
                         LedgerSet::Go => -shelley.epoch_length,
                     };
                     let (epoch, first_slot_of_epoch) =
-                        get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots);
+                        get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots,*shelley_transition_epoch);
                     debug!("epoch: {}", epoch);
                     let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
                     debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
@@ -512,7 +543,7 @@ pub(crate) fn calculate_leader_logs(
                                                 Some(entropy) => {
                                                     let mut nonce_entropy = String::new();
                                                     nonce_entropy.push_str(&*hex::encode(&epoch_nonce));
-                                                    nonce_entropy.push_str(&*entropy);
+                                                    nonce_entropy.push_str(entropy);
                                                     Params::new()
                                                         .hash_length(32)
                                                         .to_state()
@@ -618,7 +649,7 @@ pub(crate) fn calculate_leader_logs(
                                                             no,
                                                             slot: *slot,
                                                             slot_in_epoch: slot - first_slot_of_epoch,
-                                                            at: slot_to_timestamp(&byron, &shelley, *slot, &tz),
+                                                            at: slot_to_timestamp(&byron, &shelley, *slot, &tz, *shelley_transition_epoch),
                                                         };
 
                                                         debug!("Found assigned slot: {:?}", &slot);
@@ -690,7 +721,7 @@ pub(crate) fn calculate_leader_logs(
     }
 }
 
-pub(crate) fn status(db_path: &Path, byron_genesis: &Path, shelley_genesis: &Path) {
+pub(crate) fn status(db_path: &Path, byron_genesis: &Path, shelley_genesis: &Path, shelley_trans_epoch: &i64) {
     if !db_path.exists() {
         handle_error("database not found!");
         return;
@@ -706,7 +737,9 @@ pub(crate) fn status(db_path: &Path, byron_genesis: &Path, shelley_genesis: &Pat
                     match get_tip_slot_number(&db) {
                         Ok(tip_slot_number) => {
                             debug!("tip_slot_number: {}", tip_slot_number);
-                            let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
+                            let tip_time =
+                                slot_to_naivedatetime(&byron, &shelley, tip_slot_number, *shelley_trans_epoch)
+                                    .timestamp();
                             let system_time = Utc::now().timestamp();
                             if system_time - tip_time < 120 {
                                 print_status_synced();
@@ -733,6 +766,7 @@ pub(crate) fn send_slots(
     byron_genesis: &Path,
     shelley_genesis: &Path,
     pooltool_config: PooltoolConfig,
+    shelley_trans_epoch: &i64,
     override_time: &Option<String>,
 ) {
     if !db_path.exists() {
@@ -750,10 +784,13 @@ pub(crate) fn send_slots(
                     match get_tip_slot_number(&db) {
                         Ok(tip_slot_number) => {
                             debug!("tip_slot_number: {}", tip_slot_number);
-                            let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number).timestamp();
+                            let tip_time =
+                                slot_to_naivedatetime(&byron, &shelley, tip_slot_number, *shelley_trans_epoch)
+                                    .timestamp();
                             let system_time = Utc::now().timestamp();
                             if system_time - tip_time < 120 {
-                                let (epoch, _) = get_first_slot_of_epoch(&byron, &shelley, tip_slot_number);
+                                let (epoch, _) =
+                                    get_first_slot_of_epoch(&byron, &shelley, tip_slot_number, *shelley_trans_epoch);
                                 debug!("epoch: {}", epoch);
                                 for pool in pooltool_config.pools.iter() {
                                     match get_current_slots(&db, epoch, &pool.pool_id) {

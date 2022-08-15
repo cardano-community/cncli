@@ -149,8 +149,8 @@ This simple command gives you an ok if the database is fully synced. It will ret
 #### Show Status Help
 
 ```bash
-cncli status --help
-cncli-status 5.0.0
+$ cncli status --help
+cncli-status 5.1.1
 
 USAGE:
     cncli status [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -160,9 +160,12 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-        --byron-genesis <byron-genesis>        byron genesis json file
-    -d, --db <db>                              sqlite database file [default: ./cncli.db]
-        --shelley-genesis <shelley-genesis>    shelley genesis json file
+        --byron-genesis <byron-genesis>                          byron genesis json file
+    -d, --db <db>                                                sqlite database file [default: ./cncli.db]
+        --shelley-genesis <shelley-genesis>                      shelley genesis json file
+        --shelley-transition-epoch <shelley-transition-epoch>
+            Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files [env:
+            SHELLEY_TRANS_EPOCH=]  [default: -1]
 ```
 
 #### Status when fully synced
@@ -201,7 +204,7 @@ This command validates that a block hash or partial block hash is on-chain. You 
 #### Show Validate Help
 
 ```bash
-cncli validate --help
+$cncli validate --help
 cncli-validate 5.0.0
 
 USAGE:
@@ -277,7 +280,7 @@ This command calculates the epoch nonce value. This command requires that you us
 
 ```bash
 $ cncli nonce --help
-cncli-nonce 5.0.0
+cncli-nonce 5.1.1
 
 USAGE:
     cncli nonce [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -287,12 +290,16 @@ FLAGS:
     -V, --version    Prints version information
 
 OPTIONS:
-        --byron-genesis <byron-genesis>        byron genesis json file
-    -d, --db <db>                              sqlite database file [default: ./cncli.db]
-        --extra-entropy <extra-entropy>        hex string of the extra entropy value
-        --ledger-set <ledger-set>              Which ledger data to use. prev - previous epoch, current - current epoch,
-                                               next - future epoch [default: current]
-        --shelley-genesis <shelley-genesis>    shelley genesis json file
+        --byron-genesis <byron-genesis>                          byron genesis json file
+    -d, --db <db>                                                sqlite database file [default: ./cncli.db]
+        --extra-entropy <extra-entropy>                          hex string of the extra entropy value
+        --ledger-set <ledger-set>
+            Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch [default:
+            current]
+        --shelley-genesis <shelley-genesis>                      shelley genesis json file
+        --shelley-transition-epoch <shelley-transition-epoch>
+            Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files [env:
+            SHELLEY_TRANS_EPOCH=]  [default: -1]
 ```
 
 #### Calculate nonce
@@ -335,33 +342,27 @@ echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
 #### Show Leaderlog Help
 
 ```bash
-cncli leaderlog --help
-cncli-leaderlog 5.0.0
+$ cncli leaderlog --help
+cncli-nonce 5.1.1
 
 USAGE:
-    cncli leaderlog [OPTIONS] --active-stake <active-stake> --byron-genesis <byron-genesis> --pool-id <pool-id> --pool-stake <pool-stake> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
+    cncli nonce [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-        --active-stake <active-stake>          total active stake snapshot value in lovelace
-        --byron-genesis <byron-genesis>        byron genesis json file
-    -c, --consensus <consensus>                Consensus algorithm - Alonzo and earlier uses tpraos, Babbage and later
-                                               uses praos [default: praos]
-        --d <d>                                decentralization parameter [default: 0]
-    -d, --db <db>                              sqlite database file [default: ./cncli.db]
-        --extra-entropy <extra-entropy>        hex string of the extra entropy value
-        --ledger-set <ledger-set>              Which ledger data to use. prev - previous epoch, current - current epoch,
-                                               next - future epoch [default: current]
-        --pool-id <pool-id>                    lower-case hex pool id
-        --pool-stake <pool-stake>              pool active stake snapshot value in lovelace
-        --pool-vrf-skey <pool-vrf-skey>        pool's vrf.skey file
-        --shelley-genesis <shelley-genesis>    shelley genesis json file
-        --tz <timezone>                        TimeZone string from the IANA database -
-                                               https://en.wikipedia.org/wiki/List_of_tz_database_time_zones [default:
-                                               America/Los_Angeles]
+        --byron-genesis <byron-genesis>                          byron genesis json file
+    -d, --db <db>                                                sqlite database file [default: ./cncli.db]
+        --extra-entropy <extra-entropy>                          hex string of the extra entropy value
+        --ledger-set <ledger-set>
+            Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch [default:
+            current]
+        --shelley-genesis <shelley-genesis>                      shelley genesis json file
+        --shelley-transition-epoch <shelley-transition-epoch>
+            Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files [env:
+            SHELLEY_TRANS_EPOCH=]  [default: -1]
 ```
 
 #### Calculate leaderlog
@@ -426,7 +427,7 @@ It is important to point this command at your core nodes. This will help pooltoo
 #### Sendtip help
 
 ```bash
-cncli sendtip --help
+$ cncli sendtip --help
 cncli-sendtip 5.0.0
 
 USAGE:
@@ -496,7 +497,7 @@ The sendslots command securely sends pooltool the number of slots you have assig
 #### Sendslots help
 
 ```bash
-cncli sendslots --help
+$ cncli sendslots --help
 cncli-sendslots 5.0.0
 
 USAGE:
