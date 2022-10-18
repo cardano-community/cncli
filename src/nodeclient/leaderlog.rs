@@ -320,12 +320,18 @@ fn mk_input_vrf(slot: i64, eta0: &[u8]) -> Vec<u8> {
 fn vrf_eval_certified(seed: &[u8], pool_vrf_skey: &[u8]) -> Result<BigInt, String> {
     let certified_proof: Vec<u8> = sodium_crypto_vrf_prove(pool_vrf_skey, seed)?;
     let certified_proof_hash: Vec<u8> = sodium_crypto_vrf_proof_to_hash(&*certified_proof)?;
+    trace!("certified_proof_hash: {}", hex::encode(&certified_proof_hash));
     Ok(BigInt::from_bytes_be(Sign::Plus, &*certified_proof_hash))
 }
 
 fn vrf_leader_value(raw_vrf: BigInt) -> Result<BigInt, String> {
     let mut concat = vec![0x4C_u8]; // "L"
     let mut raw_vrf_bytes = raw_vrf.to_biguint().unwrap().to_bytes_be();
+    let pad_nulls = 64 - raw_vrf_bytes.len();
+    if pad_nulls > 0 {
+        let mut null_vec = vec![0_u8; pad_nulls];
+        concat.append(&mut null_vec);
+    }
     concat.append(&mut raw_vrf_bytes);
     trace!("concat: {}", hex::encode(&concat));
 

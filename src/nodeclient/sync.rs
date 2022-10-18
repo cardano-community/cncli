@@ -243,21 +243,18 @@ fn do_chainsync(
     let mut chain_blocks: Vec<Point> = vec![];
 
     /* Classic sync: Use blocks from store if available. */
-    match block_store.as_mut() {
-        Some(store) => {
-            match (*store).load_blocks() {
-                None => {}
-                Some(blocks) => {
-                    for (i, block) in blocks.iter().enumerate() {
-                        // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
-                        if (i == 0) || ((i > 1) && (i & (i - 1) == 0)) {
-                            chain_blocks.push(Point::Specific(block.0 as u64, block.1.clone()));
-                        }
+    if let Some(store) = block_store.as_mut() {
+        match (*store).load_blocks() {
+            None => {}
+            Some(blocks) => {
+                for (i, block) in blocks.iter().enumerate() {
+                    // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
+                    if (i == 0) || ((i > 1) && (i & (i - 1) == 0)) {
+                        chain_blocks.push(Point::Specific(block.0 as u64, block.1.clone()));
                     }
                 }
             }
         }
-        None => {}
     }
 
     // add known points
