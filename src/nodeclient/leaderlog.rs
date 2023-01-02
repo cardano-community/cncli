@@ -233,7 +233,7 @@ fn slot_to_naivedatetime(
         -1 => guess_shelley_transition_epoch(shelley.network_magic),
         _ => shelley_trans_epoch,
     };
-    let network_start_time = NaiveDateTime::from_timestamp(byron.start_time, 0);
+    let network_start_time = NaiveDateTime::from_timestamp_opt(byron.start_time, 0).unwrap();
     let byron_epoch_length = 10 * byron.protocol_consts.k;
     let byron_slots = byron_epoch_length * shelley_transition_epoch;
     let shelley_slots = slot - byron_slots;
