@@ -8,11 +8,10 @@ use async_std::task;
 use futures::executor::block_on;
 use log::{debug, error, info, warn};
 use net2::TcpStreamExt;
-use pallas_miniprotocols::chainsync::TipFinder;
+use pallas_miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
 use pallas_miniprotocols::handshake::n2n::VersionData;
-use pallas_miniprotocols::handshake::{Initiator, Output};
-use pallas_miniprotocols::{chainsync, handshake, run_agent, Point, MAINNET_MAGIC};
-use pallas_multiplexer::agents::ChannelBuffer;
+use pallas_miniprotocols::handshake::{Confirmation, Error};
+use pallas_miniprotocols::{chainsync, handshake, Point, MAINNET_MAGIC};
 use pallas_multiplexer::bearers::Bearer;
 use pallas_multiplexer::{StdChannel, StdPlexer};
 use pallas_traverse::MultiEraHeader;
@@ -67,15 +66,31 @@ impl Default for LoggingObserver {
     }
 }
 
-impl chainsync::Observer<chainsync::HeaderContent> for LoggingObserver {
+enum Continuation {
+    Proceed,
+    DropOut,
+}
+
+trait Observer<V> {
     fn on_roll_forward(
         &mut self,
-        content: chainsync::HeaderContent,
-        tip: &chainsync::Tip,
-    ) -> Result<chainsync::Continuation, Box<dyn std::error::Error>> {
+        content: &HeaderContent,
+        tip: &Tip,
+    ) -> Result<Continuation, Box<dyn std::error::Error>>;
+    fn on_rollback(&mut self, point: &Point) -> Result<Continuation, Box<dyn std::error::Error>>;
+    fn on_tip_reached(&mut self) -> Result<Continuation, Box<dyn std::error::Error>>;
+}
+
+impl Observer<HeaderContent> for LoggingObserver {
+    fn on_roll_forward(
+        &mut self,
+        content: &HeaderContent,
+        tip: &Tip,
+    ) -> Result<Continuation, Box<dyn std::error::Error>> {
+        let mut result: Result<Continuation, Box<dyn std::error::Error>> = Ok(Continuation::Proceed);
         match content.byron_prefix {
             None => {
-                let multi_era_header = MultiEraHeader::decode(content.variant, None, &*content.cbor);
+                let multi_era_header = MultiEraHeader::decode(content.variant, None, &content.cbor);
                 match multi_era_header {
                     Ok(multi_era_header) => {
                         let hash = multi_era_header.hash();
@@ -135,6 +150,9 @@ impl chainsync::Observer<chainsync::HeaderContent> for LoggingObserver {
                                     );
                                     self.last_log_time = Instant::now();
                                 }
+                                if is_tip {
+                                    result = self.on_tip_reached();
+                                }
                             }
                             MultiEraHeader::Babbage(header) => {
                                 //sqlite only handles signed values so some casting is done here
@@ -184,6 +202,9 @@ impl chainsync::Observer<chainsync::HeaderContent> for LoggingObserver {
                                     );
                                     self.last_log_time = Instant::now();
                                 }
+                                if is_tip {
+                                    result = self.on_tip_reached();
+                                }
                             }
                         }
                     }
@@ -198,43 +219,34 @@ impl chainsync::Observer<chainsync::HeaderContent> for LoggingObserver {
             }
         }
 
-        Ok(chainsync::Continuation::Proceed)
+        result
     }
 
-    fn on_intersect_found(
-        &mut self,
-        point: &Point,
-        tip: &chainsync::Tip,
-    ) -> Result<chainsync::Continuation, Box<dyn std::error::Error>> {
-        debug!("intersect was found {:?} (tip: {:?})", point, tip);
-
-        Ok(chainsync::Continuation::Proceed)
-    }
-
-    fn on_rollback(&mut self, point: &Point) -> Result<chainsync::Continuation, Box<dyn std::error::Error>> {
+    fn on_rollback(&mut self, point: &Point) -> Result<Continuation, Box<dyn std::error::Error>> {
         debug!("asked to roll back {:?}", point);
 
-        Ok(chainsync::Continuation::Proceed)
+        Ok(Continuation::Proceed)
     }
 
-    fn on_tip_reached(&mut self) -> Result<chainsync::Continuation, Box<dyn std::error::Error>> {
+    fn on_tip_reached(&mut self) -> Result<Continuation, Box<dyn std::error::Error>> {
         debug!("tip was reached");
         if self.exit_when_tip_reached {
             info!("Exiting...");
-            Ok(chainsync::Continuation::DropOut)
+            Ok(Continuation::DropOut)
         } else {
-            Ok(chainsync::Continuation::Proceed)
+            Ok(Continuation::Proceed)
         }
     }
 }
 
-fn do_handshake(mut channel: ChannelBuffer<StdChannel>, network_magic: u64) -> Initiator<VersionData> {
+fn do_handshake(channel: StdChannel, network_magic: u64) -> Result<Confirmation<VersionData>, Error> {
     let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
-    run_agent(handshake::Initiator::initial(versions), &mut channel).unwrap()
+    let mut client = handshake::N2NClient::new(channel);
+    client.handshake(versions)
 }
 
 fn do_chainsync(
-    mut channel: ChannelBuffer<StdChannel>,
+    channel: StdChannel,
     skip_to_tip: bool,
     exit_when_tip_reached: bool,
     mut block_store: Option<Box<dyn BlockStore>>,
@@ -288,27 +300,59 @@ fn do_chainsync(
     );
     chain_blocks.push(Point::Origin);
 
+    let mut client = chainsync::N2NClient::new(channel);
     if skip_to_tip {
-        let agent: TipFinder = TipFinder::initial(Point::Origin);
-        let agent: TipFinder = run_agent(agent, &mut channel).unwrap();
-        match agent.output {
-            None => {}
-            Some(tip) => chain_blocks.insert(0, tip.0),
-        };
+        client.intersect_tip().unwrap();
+    } else {
+        client.find_intersect(chain_blocks).unwrap();
     }
 
-    let _agent = run_agent(
-        chainsync::Consumer::<chainsync::HeaderContent, _>::initial(
-            Some(chain_blocks),
-            LoggingObserver {
-                exit_when_tip_reached,
-                block_store,
-                shelley_genesis_hash: shelley_genesis_hash.to_string(),
-                ..Default::default()
+    let mut logging_observer = LoggingObserver {
+        exit_when_tip_reached,
+        block_store,
+        shelley_genesis_hash: shelley_genesis_hash.to_string(),
+        ..Default::default()
+    };
+    let mut next = client.request_next().unwrap();
+    loop {
+        match &next {
+            NextResponse::RollForward(header_content, tip) => {
+                match logging_observer.on_roll_forward(header_content, tip) {
+                    Ok(continuation) => match continuation {
+                        Continuation::Proceed => {
+                            next = client.request_next().unwrap();
+                        }
+                        Continuation::DropOut => {
+                            client.send_done().unwrap();
+                            break;
+                        }
+                    },
+                    Err(error) => {
+                        error!("{:?}", error);
+                        std::process::exit(1);
+                    }
+                }
+            }
+            NextResponse::RollBackward(point, _tip) => match logging_observer.on_rollback(point) {
+                Ok(continuation) => match continuation {
+                    Continuation::Proceed => {
+                        next = client.request_next().unwrap();
+                    }
+                    Continuation::DropOut => {
+                        client.send_done().unwrap();
+                        break;
+                    }
+                },
+                Err(error) => {
+                    error!("{:?}", error);
+                    std::process::exit(1);
+                }
             },
-        ),
-        &mut channel,
-    );
+            NextResponse::Await => {
+                next = client.recv_while_must_reply().unwrap();
+            }
+        }
+    }
 }
 
 pub(crate) fn sync(db: &Path, host: &str, port: u16, network_magic: u64, shelley_genesis_hash: &str, no_service: bool) {
@@ -317,7 +361,7 @@ pub(crate) fn sync(db: &Path, host: &str, port: u16, network_magic: u64, shelley
             // Retry to establish connection forever
             let block_store = sqlite::SqLiteBlockStore::new(db).unwrap();
             match Bearer::connect_tcp_timeout(
-                &format!("{}:{}", host, port).to_socket_addrs().unwrap().next().unwrap(),
+                &format!("{host}:{port}").to_socket_addrs().unwrap().next().unwrap(),
                 Duration::from_secs(5),
             ) {
                 Ok(bearer) => {
@@ -331,28 +375,30 @@ pub(crate) fn sync(db: &Path, host: &str, port: u16, network_magic: u64, shelley
                     let mut plexer = StdPlexer::new(bearer);
 
                     //handshake is channel0
-                    let channel0 = plexer.use_channel(0).into();
+                    let channel0 = plexer.use_channel(0);
                     //chainsync is channel2
-                    let channel2 = plexer.use_channel(2).into();
+                    let channel2 = plexer.use_channel(2);
 
                     plexer.muxer.spawn();
                     plexer.demuxer.spawn();
 
-                    match do_handshake(channel0, network_magic).output {
-                        Output::Pending => {
-                            error!("Pending!");
-                        }
-                        Output::Accepted(_, _) => {
-                            do_chainsync(
-                                channel2,
-                                false,
-                                no_service,
-                                Some(Box::new(block_store)),
-                                shelley_genesis_hash,
-                            );
-                        }
-                        Output::Refused(refuse_reason) => {
-                            error!("{:?}", refuse_reason);
+                    match do_handshake(channel0, network_magic) {
+                        Ok(confirmation) => match confirmation {
+                            Confirmation::Accepted(_, _) => {
+                                do_chainsync(
+                                    channel2,
+                                    false,
+                                    no_service,
+                                    Some(Box::new(block_store)),
+                                    shelley_genesis_hash,
+                                );
+                            }
+                            Confirmation::Rejected(refuse_reason) => {
+                                error!("{:?}", refuse_reason);
+                            }
+                        },
+                        Err(error) => {
+                            error!("{:?}", error);
                         }
                     }
                 }
@@ -389,7 +435,7 @@ pub(crate) fn sendtip(
                 ..Default::default()
             };
             match Bearer::connect_tcp_timeout(
-                &format!("{}:{}", host, port).to_socket_addrs().unwrap().next().unwrap(),
+                &format!("{host}:{port}").to_socket_addrs().unwrap().next().unwrap(),
                 Duration::from_secs(5),
             ) {
                 Ok(bearer) => {
@@ -403,28 +449,30 @@ pub(crate) fn sendtip(
                     let mut plexer = StdPlexer::new(bearer);
 
                     //handshake is channel0
-                    let channel0 = plexer.use_channel(0).into();
+                    let channel0 = plexer.use_channel(0);
                     //chainsync is channel2
-                    let channel2 = plexer.use_channel(2).into();
+                    let channel2 = plexer.use_channel(2);
 
                     plexer.muxer.spawn();
                     plexer.demuxer.spawn();
 
-                    match do_handshake(channel0, MAINNET_MAGIC).output {
-                        Output::Pending => {
-                            error!("Pending!");
-                        }
-                        Output::Accepted(_, _) => {
-                            do_chainsync(
-                                channel2,
-                                true,
-                                false,
-                                Some(Box::new(pooltool_notifier)),
-                                "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
-                            );
-                        }
-                        Output::Refused(refuse_reason) => {
-                            error!("{:?}", refuse_reason);
+                    match do_handshake(channel0, MAINNET_MAGIC) {
+                        Ok(confirmation) => match confirmation {
+                            Confirmation::Accepted(_, _) => {
+                                do_chainsync(
+                                    channel2,
+                                    true,
+                                    false,
+                                    Some(Box::new(pooltool_notifier)),
+                                    "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
+                                );
+                            }
+                            Confirmation::Rejected(refuse_reason) => {
+                                error!("{:?}", refuse_reason);
+                            }
+                        },
+                        Err(error) => {
+                            error!("{:?}", error);
                         }
                     }
                 }

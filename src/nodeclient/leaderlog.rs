@@ -138,7 +138,7 @@ fn get_tip_slot_number(db: &Connection) -> Result<i64, rusqlite::Error> {
 fn get_eta_v_before_slot(db: &Connection, slot_number: i64) -> Result<String, rusqlite::Error> {
     db.query_row(
         "SELECT eta_v FROM chain WHERE orphaned = 0 AND slot_number < ?1 ORDER BY slot_number DESC LIMIT 1",
-        &[&slot_number],
+        [&slot_number],
         |row| row.get(0),
     )
 }
@@ -146,7 +146,7 @@ fn get_eta_v_before_slot(db: &Connection, slot_number: i64) -> Result<String, ru
 fn get_prev_hash_before_slot(db: &Connection, slot_number: i64) -> Result<String, rusqlite::Error> {
     db.query_row(
         "SELECT prev_hash FROM chain WHERE orphaned = 0 AND slot_number < ?1 ORDER BY slot_number DESC LIMIT 1",
-        &[&slot_number],
+        [&slot_number],
         |row| row.get(0),
     )
 }
@@ -284,7 +284,7 @@ fn mk_seed(slot: i64, eta0: &[u8]) -> Vec<u8> {
     let mut concat = [0u8; 8 + 32];
     NetworkEndian::write_i64(&mut concat, slot);
     concat[8..].copy_from_slice(eta0);
-    trace!("concat: {}", hex::encode(&concat));
+    trace!("concat: {}", hex::encode(concat));
 
     let slot_to_seed = Params::new()
         .hash_length(32)
@@ -306,7 +306,7 @@ fn mk_input_vrf(slot: i64, eta0: &[u8]) -> Vec<u8> {
     let mut concat = [0u8; 8 + 32];
     NetworkEndian::write_i64(&mut concat, slot);
     concat[8..].copy_from_slice(eta0);
-    trace!("concat: {}", hex::encode(&concat));
+    trace!("concat: {}", hex::encode(concat));
 
     Params::new()
         .hash_length(32)
@@ -319,9 +319,9 @@ fn mk_input_vrf(slot: i64, eta0: &[u8]) -> Vec<u8> {
 
 fn vrf_eval_certified(seed: &[u8], pool_vrf_skey: &[u8]) -> Result<BigInt, String> {
     let certified_proof: Vec<u8> = sodium_crypto_vrf_prove(pool_vrf_skey, seed)?;
-    let certified_proof_hash: Vec<u8> = sodium_crypto_vrf_proof_to_hash(&*certified_proof)?;
+    let certified_proof_hash: Vec<u8> = sodium_crypto_vrf_proof_to_hash(&certified_proof)?;
     trace!("certified_proof_hash: {}", hex::encode(&certified_proof_hash));
-    Ok(BigInt::from_bytes_be(Sign::Plus, &*certified_proof_hash))
+    Ok(BigInt::from_bytes_be(Sign::Plus, &certified_proof_hash))
 }
 
 fn vrf_leader_value(raw_vrf: BigInt) -> Result<BigInt, String> {
@@ -337,13 +337,12 @@ fn vrf_leader_value(raw_vrf: BigInt) -> Result<BigInt, String> {
 
     Ok(BigInt::from_bytes_be(
         Sign::Plus,
-        &*Params::new()
+        Params::new()
             .hash_length(32)
             .to_state()
             .update(&concat)
             .finalize()
-            .as_bytes()
-            .to_owned(),
+            .as_bytes(),
     ))
 }
 
@@ -365,7 +364,7 @@ fn is_slot_leader_praos(
     trace!("is_slot_leader: {}", slot);
     let seed: Vec<u8> = mk_input_vrf(slot, eta0);
     trace!("seed: {}", hex::encode(&seed));
-    let cert_nat: BigInt = vrf_eval_certified(&*seed, pool_vrf_skey)?;
+    let cert_nat: BigInt = vrf_eval_certified(&seed, pool_vrf_skey)?;
     trace!("cert_nat: {}", &cert_nat);
     let cert_leader_vrf: BigInt = vrf_leader_value(cert_nat)?;
     trace!("cert_leader_vrf: {}", cert_leader_vrf);
@@ -401,7 +400,7 @@ fn is_slot_leader_tpraos(
     trace!("is_slot_leader: {}", slot);
     let seed: Vec<u8> = mk_seed(slot, eta0);
     trace!("seed: {}", hex::encode(&seed));
-    let cert_nat: BigInt = vrf_eval_certified(&*seed, pool_vrf_skey)?;
+    let cert_nat: BigInt = vrf_eval_certified(&seed, pool_vrf_skey)?;
     trace!("cert_nat: {}", &cert_nat);
     let denominator = cert_nat_max - BigDecimal::from(cert_nat);
     let recip_q: BigDecimal = normalize(cert_nat_max / denominator);
@@ -474,7 +473,7 @@ pub(crate) fn calculate_leader_logs(
 
     if consensus != "praos" && consensus != "tpraos" {
         handle_error(format!(
-            "Invalid Consensus: --consensus {}", consensus
+            "Invalid Consensus: --consensus {consensus}"
         ));
         return;
     }
@@ -496,8 +495,7 @@ pub(crate) fn calculate_leader_logs(
                     let system_time = Utc::now().timestamp();
                     if system_time - tip_time > 900 {
                         handle_error(format!(
-                            "db not fully synced! system_time: {}, tip_time: {}",
-                            system_time, tip_time
+                            "db not fully synced! system_time: {system_time}, tip_time: {tip_time}"
                         ));
                         return;
                     }
@@ -523,8 +521,7 @@ pub(crate) fn calculate_leader_logs(
                     let tip_slot_number = get_tip_slot_number(&db).unwrap();
                     if tip_slot_number < stability_window_start {
                         handle_error(format!(
-                            "Not enough blocks sync'd to calculate! Try again later after slot {} is sync'd.",
-                            stability_window_start
+                            "Not enough blocks sync'd to calculate! Try again later after slot {stability_window_start} is sync'd."
                         ));
                         return;
                     }
@@ -538,12 +535,12 @@ pub(crate) fn calculate_leader_logs(
                                         Ok(nh) => {
                                             debug!("nh: {}", nh);
                                             let mut nc_nh = String::new();
-                                            nc_nh.push_str(&*nc);
-                                            nc_nh.push_str(&*nh);
+                                            nc_nh.push_str(&nc);
+                                            nc_nh.push_str(&nh);
                                             let epoch_nonce = Params::new()
                                                 .hash_length(32)
                                                 .to_state()
-                                                .update(&*hex::decode(nc_nh).unwrap())
+                                                .update(&hex::decode(nc_nh).unwrap())
                                                 .finalize()
                                                 .as_bytes()
                                                 .to_owned();
@@ -552,12 +549,12 @@ pub(crate) fn calculate_leader_logs(
                                                 None => { epoch_nonce }
                                                 Some(entropy) => {
                                                     let mut nonce_entropy = String::new();
-                                                    nonce_entropy.push_str(&*hex::encode(&epoch_nonce));
+                                                    nonce_entropy.push_str(&hex::encode(&epoch_nonce));
                                                     nonce_entropy.push_str(entropy);
                                                     Params::new()
                                                         .hash_length(32)
                                                         .to_state()
-                                                        .update(&*hex::decode(nonce_entropy).unwrap())
+                                                        .update(&hex::decode(nonce_entropy).unwrap())
                                                         .finalize()
                                                         .as_bytes()
                                                         .to_owned()
@@ -679,7 +676,7 @@ pub(crate) fn calculate_leader_logs(
                                                                 if i > 0 {
                                                                     slots.push(',');
                                                                 }
-                                                                slots.push_str(&*assigned_slot.slot.to_string())
+                                                                slots.push_str(&assigned_slot.slot.to_string())
                                                             }
                                                             slots.push(']');
 
@@ -697,7 +694,7 @@ pub(crate) fn calculate_leader_logs(
                                                                 Ok(_) => {
                                                                     match serde_json::to_string_pretty(&leader_log) {
                                                                         Ok(leader_log_json) => {
-                                                                            println!("{}", leader_log_json);
+                                                                            println!("{leader_log_json}");
                                                                         }
                                                                         Err(error) => { handle_error(error) }
                                                                     }
@@ -887,7 +884,7 @@ pub fn handle_error<T: Display>(error_message: T) {
         &mut stdout(),
         &LeaderLogError {
             status: "error".to_string(),
-            error_message: format!("{}", error_message),
+            error_message: format!("{error_message}"),
         },
     )
     .unwrap();

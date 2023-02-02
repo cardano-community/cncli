@@ -21,8 +21,7 @@ pub(crate) fn sodium_crypto_vrf_prove(secret_key: &[u8], seed: &[u8]) -> Result<
         );
         if rc != 0 {
             Err(format!(
-                "libsodium crypto_vrf_prove() failed, returned {}, expected 0",
-                rc
+                "libsodium crypto_vrf_prove() failed, returned {rc}, expected 0"
             ))
         } else {
             proof.set_len(80);
@@ -37,8 +36,7 @@ pub(crate) fn sodium_crypto_vrf_proof_to_hash(proof: &[u8]) -> Result<Vec<u8>, S
         let rc = crypto_vrf_proof_to_hash(hash.as_mut_ptr(), proof.as_ptr());
         if rc != 0 {
             Err(format!(
-                "libsodium crypto_vrf_proof_to_hash() failed, returned {}, expected 0",
-                rc
+                "libsodium crypto_vrf_proof_to_hash() failed, returned {rc}, expected 0"
             ))
         } else {
             hash.set_len(64);
@@ -59,8 +57,7 @@ pub(crate) fn sodium_crypto_vrf_verify(public_key: &[u8], signature: &[u8], seed
         );
         if rc != 0 {
             Err(format!(
-                "libsodium crypto_vrf_verify() failed, returned {}, expected 0",
-                rc
+                "libsodium crypto_vrf_verify() failed, returned {rc}, expected 0"
             ))
         } else {
             verification.set_len(64);

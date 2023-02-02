@@ -377,7 +377,7 @@ pub mod nodeclient {
                             pool.host,
                             pool.port,
                             api_key,
-                            &*cardano_node_path,
+                            &cardano_node_path,
                         );
                     }));
                 }

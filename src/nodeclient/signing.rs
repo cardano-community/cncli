@@ -49,11 +49,11 @@ pub(crate) fn create_challenge(domain: &str) {
             let challenge = Params::new()
                 .hash_length(32)
                 .to_state()
-                .update(&*challenge_seed)
+                .update(&challenge_seed)
                 .finalize()
                 .as_bytes()
                 .to_owned();
-            debug!("challenge: {}", hex::encode(&challenge));
+            debug!("challenge: {}", hex::encode(challenge));
             serde_json::ser::to_writer_pretty(
                 &mut stdout(),
                 &ChallengeSuccess {
@@ -75,7 +75,7 @@ pub(crate) fn sign_challenge(pool_vrf_skey: &Path, domain: &str, nonce: &str) {
             let challenge_bytes = Params::new()
                 .hash_length(32)
                 .to_state()
-                .update(&*challenge_seed_bytes)
+                .update(&challenge_seed_bytes)
                 .finalize()
                 .as_bytes()
                 .to_owned();
@@ -86,7 +86,7 @@ pub(crate) fn sign_challenge(pool_vrf_skey: &Path, domain: &str, nonce: &str) {
                         handle_error("Pool VRF Skey must be of type: VrfSigningKey_PraosVRF");
                         return;
                     }
-                    match sodium_crypto_vrf_prove(&*vrf_skey.key, &*challenge_bytes) {
+                    match sodium_crypto_vrf_prove(&vrf_skey.key, &challenge_bytes) {
                         Ok(signature) => {
                             debug!("signature: {}", hex::encode(&signature));
                             serde_json::ser::to_writer_pretty(
@@ -121,7 +121,7 @@ pub(crate) fn verify_challenge(
             let challenge_bytes = Params::new()
                 .hash_length(32)
                 .to_state()
-                .update(&*challenge_seed_bytes)
+                .update(&challenge_seed_bytes)
                 .finalize()
                 .as_bytes()
                 .to_owned();
@@ -137,7 +137,7 @@ pub(crate) fn verify_challenge(
                         Params::new()
                             .hash_length(32)
                             .to_state()
-                            .update(&*vrf_vkey.key)
+                            .update(&vrf_vkey.key)
                             .finalize()
                             .as_bytes(),
                     );
@@ -145,8 +145,7 @@ pub(crate) fn verify_challenge(
 
                     if pool_vrf_vkey_hash != vkey_hash_verify {
                         handle_error(format!(
-                            "Hash of pool-vrf-vkey({}) did not match supplied pool-vrf-vkey-hash({})",
-                            vkey_hash_verify, pool_vrf_vkey_hash
+                            "Hash of pool-vrf-vkey({vkey_hash_verify}) did not match supplied pool-vrf-vkey-hash({pool_vrf_vkey_hash})"
                         ));
                         return;
                     }
@@ -158,8 +157,7 @@ pub(crate) fn verify_challenge(
                                 Ok(signature_hash) => {
                                     debug!("signature_hash: {}", hex::encode(&signature_hash));
                                     // Verify that the signature matches
-                                    match sodium_crypto_vrf_verify(&*vrf_vkey.key, &*signature_bytes, &*challenge_bytes)
-                                    {
+                                    match sodium_crypto_vrf_verify(&vrf_vkey.key, &signature_bytes, &challenge_bytes) {
                                         Ok(verification) => {
                                             debug!("verification: {}", hex::encode(&verification));
                                             if verification != signature_hash {
@@ -195,7 +193,7 @@ fn handle_error<T: Display>(error_message: T) {
         &mut stdout(),
         &SignVerifyError {
             status: "error".to_string(),
-            error_message: format!("{}", error_message),
+            error_message: format!("{error_message}"),
         },
     )
     .unwrap();
