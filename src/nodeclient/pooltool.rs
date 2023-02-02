@@ -101,7 +101,7 @@ impl PoolToolNotifier {
                     let version_string = String::from_utf8_lossy(&output.stdout);
                     let cap = Regex::new("cardano-node (\\d+\\.\\d+\\.\\d+) .*\ngit rev ([a-f\\d]{5}).*")
                         .unwrap()
-                        .captures(&*version_string)
+                        .captures(&version_string)
                         .unwrap();
                     self.node_version = format!(
                         "{}:{}",

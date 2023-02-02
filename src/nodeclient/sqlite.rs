@@ -122,7 +122,7 @@ impl SqLiteBlockStore {
                             Params::new()
                                 .hash_length(28)
                                 .to_state()
-                                .update(&*node_vkey_bytes)
+                                .update(&node_vkey_bytes)
                                 .finalize()
                                 .as_bytes(),
                         );
@@ -153,10 +153,10 @@ impl SqLiteBlockStore {
             if version < 0 {
                 tx.execute(
                     "INSERT INTO db_version (version) VALUES (?1)",
-                    &[&SqLiteBlockStore::DB_VERSION],
+                    [&SqLiteBlockStore::DB_VERSION],
                 )?;
             } else {
-                tx.execute("UPDATE db_version SET version=?1", &[&SqLiteBlockStore::DB_VERSION])?;
+                tx.execute("UPDATE db_version SET version=?1", [&SqLiteBlockStore::DB_VERSION])?;
             }
         }
         tx.commit()?;
@@ -176,7 +176,7 @@ impl SqLiteBlockStore {
             hex::decode(
                 match db.query_row(
                     "SELECT eta_v, block_number FROM chain WHERE block_number = ?1 and orphaned = 0",
-                    &[&(pending_blocks.first().unwrap().block_number - 1)],
+                    [&(pending_blocks.first().unwrap().block_number - 1)],
                     |row| row.get(0),
                 ) {
                     Ok(eta_v) => eta_v,
@@ -247,7 +247,7 @@ impl SqLiteBlockStore {
 
             for block in pending_blocks.drain(..) {
                 // Set any necessary blocks as orphans
-                let orphan_num = orphan_stmt.execute(&[&block.block_number])?;
+                let orphan_num = orphan_stmt.execute([&block.block_number])?;
 
                 if orphan_num > 0 {
                     // get the last block eta_v (nonce) in the db
@@ -255,7 +255,7 @@ impl SqLiteBlockStore {
                         hex::decode(
                             match tx.query_row(
                                 "SELECT eta_v, block_number FROM chain WHERE block_number = ?1 and orphaned = 0",
-                                &[&(block.block_number - 1)],
+                                [&(block.block_number - 1)],
                                 |row| row.get(0),
                             ) {
                                 Ok(eta_v) => eta_v,
@@ -272,7 +272,7 @@ impl SqLiteBlockStore {
                 let mut block_eta_v = Params::new()
                     .hash_length(32)
                     .to_state()
-                    .update(&*block.eta_vrf_0)
+                    .update(&block.eta_vrf_0)
                     .finalize()
                     .as_bytes()
                     .to_vec();
@@ -281,7 +281,7 @@ impl SqLiteBlockStore {
                 prev_eta_v = Params::new()
                     .hash_length(32)
                     .to_state()
-                    .update(&*prev_eta_v)
+                    .update(&prev_eta_v)
                     .finalize()
                     .as_bytes()
                     .to_vec();
@@ -290,7 +290,7 @@ impl SqLiteBlockStore {
                 let pool_id = Params::new()
                     .hash_length(28)
                     .to_state()
-                    .update(&*block.node_vkey)
+                    .update(&block.node_vkey)
                     .finalize()
                     .as_bytes()
                     .to_vec();

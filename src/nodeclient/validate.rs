@@ -13,7 +13,7 @@ struct Block {
 }
 
 pub fn validate_block(db_path: &Path, hash: &str) {
-    let like = format!("{}%", hash);
+    let like = format!("{hash}%");
     match query_block(db_path, like) {
         Ok(block) => {
             println!(
@@ -39,9 +39,8 @@ pub fn validate_block(db_path: &Path, hash: &str) {
             println!(
                 "{{\n\
             \x20\"status\": \"error\",\n\
-            \x20\"errorMessage\": \"{}\"\n\
-            }}",
-                error
+            \x20\"errorMessage\": \"{error}\"\n\
+            }}"
             );
         }
     }
@@ -55,7 +54,7 @@ fn query_block(db_path: &Path, like: String) -> Result<Block, Error> {
     let db = Connection::open(db_path)?;
     let query_result = db.query_row(
         "SELECT block_number,slot_number,hash,prev_hash,pool_id,leader_vrf_0,orphaned FROM chain WHERE hash LIKE ? ORDER BY orphaned ASC",
-        &[&like],
+        [&like],
         |row| {
             Ok(Block {
                 block_number: row.get(0)?,
