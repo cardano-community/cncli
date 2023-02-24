@@ -87,7 +87,7 @@ git checkout <latest_tag_name>
 ```
 
 ```bash
-cargo install --path . --force
+cargo install --path . --force --target x86_64-unknown-linux-gnu
 ```
 
 ```bash
@@ -125,7 +125,7 @@ git checkout <latest_tag_name>
 ```
 
 ```bash
-cargo install --path . --force
+cargo install --path . --force --target x86_64-unknown-linux-gnu
 ```
 
 ```bash

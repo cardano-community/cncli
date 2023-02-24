@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "5.3.0"
+version = "5.3.1"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -12,14 +12,14 @@ links = "libsodium"
 async-std = "1.12.0"
 bigdecimal = "0.3.0"
 num-bigint = "0.4.3"
-blake2b_simd = "1.0.0"
+blake2b_simd = "1.0.1"
 byteorder = "1.4.3"
 #pallas-miniprotocols = { git = "https://github.com/AndrewWestberg/pallas", rev="22b74673f749cea571703044460bfb476ee2ed8e" }
 #pallas-multiplexer = { git = "https://github.com/AndrewWestberg/pallas", rev="22b74673f749cea571703044460bfb476ee2ed8e" }
 #pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="22b74673f749cea571703044460bfb476ee2ed8e" }
-pallas-miniprotocols = "0.17.0"
-pallas-multiplexer = "0.17.0"
-pallas-traverse = "0.17.0"
+pallas-miniprotocols = "0.18.0"
+pallas-multiplexer = "0.18.0"
+pallas-traverse = "0.18.0"
 chrono = "0.4.22"
 chrono-tz = "0.8.1"
 futures = "0.3.23"
@@ -28,7 +28,7 @@ libc = "0.2.132"
 net2 = "0.2.37"
 regex = "1.6.0"
 reqwest = { version = "0.11.14", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
-rug = { version = "1.17.0", default-features = false, features = ["integer", "rational", "float", "serde"] }
+rug = { version = "1.19.1", default-features = false, features = ["integer", "rational", "float", "serde"] }
 rusqlite = { version = "0.28.0", features = ["bundled"] }
 serde = { version = "1.0.144", features = ["derive"] }
 serde-aux = "4.0.0"
@@ -45,11 +45,11 @@ env_logger = "0.10.0"
 pretty_env_logger = "0.4.0"
 
 # fix cross-compile
-gmp-mpfr-sys = { version="1.4.10", features=["force-cross"] }
+gmp-mpfr-sys = { version = "1.5.0", features = ["force-cross"] }
 
 [build-dependencies]
-autotools = "0.2.5"
-pkg-config = "0.3.25"
+autotools = "0.2.6"
+pkg-config = "0.3.26"
 
 [features]
 libsodium-sys = []
