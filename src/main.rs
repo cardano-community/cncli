@@ -1,12 +1,17 @@
 extern crate chrono_tz;
-extern crate libc;
 
 use std::env::{set_var, var};
 use std::{panic, process};
 
+#[cfg(not(target_env = "msvc"))]
+use jemallocator::Jemalloc;
 use structopt::StructOpt;
 
 use cncli::nodeclient::{self, Command};
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "cncli", about = "A community-built cardano-node CLI")]

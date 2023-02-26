@@ -12,7 +12,7 @@ jobs:
       fail-fast: false
       matrix:
         job:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
           - { os: macos-latest, target: x86_64-apple-darwin }
     steps:
       - name: Checkout
@@ -53,7 +53,7 @@ jobs:
               ;;
             *-unknown-linux-*)
               sudo apt-get -y update
-              sudo apt-get -y install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
+              sudo apt-get -y install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools
               ;;
             *-apple-darwin)
               brew install automake
