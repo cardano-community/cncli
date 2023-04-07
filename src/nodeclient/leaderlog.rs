@@ -12,8 +12,8 @@ use chrono_tz::Tz;
 use itertools::sorted;
 use log::{debug, error, info, trace};
 use num_bigint::{BigInt, Sign};
+use num_rational::BigRational;
 use rayon::prelude::*;
-use rug::Rational;
 use rusqlite::{named_params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
@@ -255,11 +255,13 @@ fn slot_to_timestamp(
     tz.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
-pub fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &Rational) -> bool {
+pub fn is_overlay_slot(first_slot_of_epoch: &i64, current_slot: &i64, d: &BigRational) -> bool {
     trace!("d: {:?}", &d);
-    let diff_slot = Rational::from((current_slot - first_slot_of_epoch).abs());
+    // let diff_slot = Rational::from((current_slot - first_slot_of_epoch).abs());
+    let diff_slot: BigRational = BigRational::from_i64((current_slot - first_slot_of_epoch).abs()).unwrap();
     trace!("diff_slot: {:?}", &diff_slot);
-    let diff_slot_inc: Rational = Rational::from(&diff_slot + 1);
+    //let diff_slot_inc: Rational = Rational::from(&diff_slot + 1);
+    let diff_slot_inc: BigRational = &diff_slot + BigRational::one();
     trace!("diff_slot_inc: {:?}", &diff_slot_inc);
     let left = (d * diff_slot).ceil();
     trace!("left: {:?}", &left);
@@ -491,7 +493,7 @@ pub(crate) fn calculate_leader_logs(
                     debug!("tip_slot_number: {}", tip_slot_number);
 
                     // Make sure we're fully sync'd
-                    let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number,  *shelley_transition_epoch).timestamp();
+                    let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number, *shelley_transition_epoch).timestamp();
                     let system_time = Utc::now().timestamp();
                     if system_time - tip_time > 900 {
                         handle_error(format!(
@@ -507,7 +509,7 @@ pub(crate) fn calculate_leader_logs(
                         LedgerSet::Go => -shelley.epoch_length,
                     };
                     let (epoch, first_slot_of_epoch) =
-                        get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots,*shelley_transition_epoch);
+                        get_first_slot_of_epoch(&byron, &shelley, tip_slot_number + additional_slots, *shelley_transition_epoch);
                     debug!("epoch: {}", epoch);
                     let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
                     debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
@@ -583,7 +585,7 @@ pub(crate) fn calculate_leader_logs(
                                                     debug!("extra_entropy: {:?}", &ledger_info.extra_entropy);
 
                                                     let d: f64 =
-                                                        (ledger_info.decentralization.to_f64() * 100.0).round() / 100.0;
+                                                        (ledger_info.decentralization.to_f64().unwrap() * 100.0).round() / 100.0;
                                                     debug!("d: {:?}", &d);
                                                     let epoch_slots_ideal = (sigma.to_f64().unwrap()
                                                         * (shelley.epoch_length.to_f64().unwrap()

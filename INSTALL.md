@@ -9,11 +9,11 @@ You can install CNCLI using either the release binaries or compiling the Rust co
 To install CNCLI from a binary release, download the [latest release](https://github.com/cardano-community/cncli/releases) and extract it in the ```/usr/local/bin/``` directory of the ```block producing node``` server of your stake pool. Adjust the ```<latest_release_version>``` variable in the command to the latest release available:
 
 ```bash
-curl -sLJ https://github.com/cardano-community/cncli/releases/download/v<latest_release_version>/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz -o /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz
+curl -sLJ https://github.com/cardano-community/cncli/releases/download/v<latest_release_version>/cncli-<latest_release_version>-x86_64-unknown-linux-musl.tar.gz -o /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-musl.tar.gz
 ```
 
 ```bash
-tar xzvf /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz -C /usr/local/bin/
+tar xzvf /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-musl.tar.gz -C /usr/local/bin/
 ```
 
 ### Compile from source
@@ -71,7 +71,7 @@ source $HOME/.cargo/env
 ```
 
 ```bash
-sudo apt-get update -y && sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf
+sudo apt-get update -y && sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools
 ```
 
 ```bash
@@ -125,7 +125,7 @@ git checkout <latest_tag_name>
 ```
 
 ```bash
-cargo install --path . --force --target x86_64-unknown-linux-gnu
+cargo install --path . --force
 ```
 
 ```bash
@@ -134,7 +134,7 @@ cncli --version
 
 ## Cross Platform build with Nix + Flakes
 
-We are going to to build cncli with [Nix](https://nixos.org/guides/install-nix.html) and [Nix Flakes](https://www.tweag.io/blog/2020-05-25-flakes/)
+We are going to build cncli with [Nix](https://nixos.org/guides/install-nix.html) and [Nix Flakes](https://www.tweag.io/blog/2020-05-25-flakes/)
 
 ### Install Nix + Flakes
 

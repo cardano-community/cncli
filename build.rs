@@ -39,7 +39,7 @@ fn main() {
         pkg_config::Config::new().probe("libsodium").unwrap();
     }
 
-    println!("cargo:return-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build.rs");
 }
 
 fn run<F>(name: &str, mut configure: F)

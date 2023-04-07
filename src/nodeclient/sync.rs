@@ -302,9 +302,21 @@ fn do_chainsync(
 
     let mut client = chainsync::N2NClient::new(channel);
     if skip_to_tip {
-        client.intersect_tip().unwrap();
+        match client.intersect_tip() {
+            Ok(_) => {}
+            Err(err) => {
+                error!("intersect_tip error!: {:?}", err);
+                return;
+            }
+        }
     } else {
-        client.find_intersect(chain_blocks).unwrap();
+        match client.find_intersect(chain_blocks) {
+            Ok(_) => {}
+            Err(err) => {
+                error!("find_intersect error!: {:?}", err);
+                return;
+            }
+        }
     }
 
     let mut logging_observer = LoggingObserver {
@@ -313,44 +325,77 @@ fn do_chainsync(
         shelley_genesis_hash: shelley_genesis_hash.to_string(),
         ..Default::default()
     };
-    let mut next = client.request_next().unwrap();
+    let next_result = client.request_next();
+    if next_result.is_err() {
+        error!("request_next error!: {:?}", next_result.unwrap_err());
+        return;
+    }
+    let mut next = next_result.unwrap();
     loop {
         match &next {
             NextResponse::RollForward(header_content, tip) => {
                 match logging_observer.on_roll_forward(header_content, tip) {
                     Ok(continuation) => match continuation {
-                        Continuation::Proceed => {
-                            next = client.request_next().unwrap();
-                        }
+                        Continuation::Proceed => match client.request_next() {
+                            Ok(next_response) => {
+                                next = next_response;
+                            }
+                            Err(error) => {
+                                error!("{:?}", error);
+                                break;
+                            }
+                        },
                         Continuation::DropOut => {
-                            client.send_done().unwrap();
+                            match client.send_done() {
+                                Ok(_) => {}
+                                Err(error) => {
+                                    error!("{:?}", error);
+                                }
+                            }
                             break;
                         }
                     },
                     Err(error) => {
                         error!("{:?}", error);
-                        std::process::exit(1);
+                        break;
                     }
                 }
             }
             NextResponse::RollBackward(point, _tip) => match logging_observer.on_rollback(point) {
                 Ok(continuation) => match continuation {
-                    Continuation::Proceed => {
-                        next = client.request_next().unwrap();
-                    }
+                    Continuation::Proceed => match client.request_next() {
+                        Ok(next_response) => {
+                            next = next_response;
+                        }
+                        Err(error) => {
+                            error!("{:?}", error);
+                            break;
+                        }
+                    },
                     Continuation::DropOut => {
-                        client.send_done().unwrap();
+                        match client.send_done() {
+                            Ok(_) => {}
+                            Err(error) => {
+                                error!("{:?}", error);
+                            }
+                        }
                         break;
                     }
                 },
                 Err(error) => {
                     error!("{:?}", error);
-                    std::process::exit(1);
+                    break;
                 }
             },
-            NextResponse::Await => {
-                next = client.recv_while_must_reply().unwrap();
-            }
+            NextResponse::Await => match client.recv_while_must_reply() {
+                Ok(next_response) => {
+                    next = next_response;
+                }
+                Err(error) => {
+                    error!("{:?}", error);
+                    break;
+                }
+            },
         }
     }
 }
