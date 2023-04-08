@@ -62,6 +62,10 @@ rustup update
 rustup component add clippy rustfmt
 ```
 
+```bash
+rustup target add xx86_64-unknown-linux-musl
+```
+
 #### Install dependencies and build cncli
 
 Adjust the ```<latest_tag_name>``` variable in the command to the latest tag available:
@@ -87,7 +91,7 @@ git checkout <latest_tag_name>
 ```
 
 ```bash
-cargo install --path . --force --target x86_64-unknown-linux-gnu
+cargo install --path . --force
 ```
 
 ```bash

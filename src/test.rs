@@ -2,6 +2,7 @@ use std::str::FromStr;
 
 use bigdecimal::{BigDecimal, One, Zero};
 use num_rational::BigRational;
+use regex::Regex;
 
 use cncli::nodeclient::math::{ceiling, exp, find_e, ln, round, split_ln};
 use cncli::nodeclient::ping;
@@ -77,11 +78,10 @@ fn test_ping_failure_bad_magic() {
 
     ping::ping(&mut stdout, &host, port, network_magic, 2);
 
-    #[cfg(target_os = "macos")]
-    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"preprod-node.world.dev.cardano.org\",\n  \"port\": 30000,\n  \"errorMessage\": \"Refused(10, \\\"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 111111}, diffusionMode = InitiatorAndResponderDiffusionMode}\\\")\"\n}");
-
-    #[cfg(target_os = "linux")]
-    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"preprod-node.world.dev.cardano.org\",\n  \"port\": 30000,\n  \"errorMessage\": \"Refused(10, \\\"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 111111}, diffusionMode = InitiatorAndResponderDiffusionMode}\\\")\"\n}");
+    let regex_str = "\\{\\n  \"status\": \"error\",\\n  \"host\": \"preprod-node.world.dev.cardano.org\",\\n  \"port\": 30000,\\n  \"errorMessage\": \"Refused\\(\\d+, \\\\\"version data mismatch: NodeToNodeVersionData \\{networkMagic = NetworkMagic \\{unNetworkMagic = 1\\}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData \\{networkMagic = NetworkMagic \\{unNetworkMagic = 111111\\}, diffusionMode = InitiatorAndResponderDiffusionMode}\\\\\"\\)\"\\n\\}";
+    let regex = Regex::new(regex_str);
+    let ping_result = std::str::from_utf8(&stdout).unwrap();
+    assert_eq!(regex.unwrap().is_match(ping_result), true);
 }
 
 #[test]
