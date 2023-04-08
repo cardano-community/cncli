@@ -63,7 +63,7 @@ rustup component add clippy rustfmt
 ```
 
 ```bash
-rustup target add xx86_64-unknown-linux-musl
+rustup target add x86_64-unknown-linux-musl
 ```
 
 #### Install dependencies and build cncli
