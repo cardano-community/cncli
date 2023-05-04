@@ -239,10 +239,13 @@ CNCLI can send your tip and block slots to [PoolTool](https://pooltool.io/). To 
 
 ### Systemd Services
 
-CNCLI ```sync``` and ```sendtip``` can be easily enabled as ```systemd``` services. When enabled as ```systemd``` services:
+CNCLI ```sync```, ```sendtip``` and ```leaderlog``` can be easily enabled as ```systemd``` services. When enabled as ```systemd``` services:
 
 - ```sync``` will continuously keep the ```cncli.db``` database synchronized.
 - ```sendtip``` will continuously send your stake pool ```tip``` to PoolTool.
+- ```leaderlog``` will run every day at 09:45 UTC and can be configured to run all or any of the following tasks:
+  - on day 1 of the epoch send the assigned slots for the current and previous epoch to PoolTool and
+  - on day 4 of the epoch calculate the leaderlog for the next epoch and mail it and/or write a slots.csv file.
 
 To set up ```systemd```:
 
@@ -292,6 +295,36 @@ SyslogIdentifier=cncli-sendtip
 WantedBy=multi-user.target
 ```
 
+- Copy the following to ```/etc/systemd/system/cncli-leaderlog.service```
+
+```text
+[Unit]
+Description=CNCLI Leaderlog
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cncli-leaderlog.sh
+
+[Install]
+WantedBy=multi-user.target
+```
+
+- Copy the following to ```/etc/systemd/system/cncli-leaderlog.timer```
+
+```text
+[Unit]
+Description=CNCLI Leaderlog
+
+[Timer]
+OnCalendar=*-*-* 09:45:00 UTC
+Unit=cncli-leaderlog.service
+
+[Install]
+WantedBy=timers.target
+```
+
+- Copy ```scripts/cncli-leaderlog.sh``` to ```/usr/local/bin/cncli-leaderlog.sh```, make sure it's executable and configure the variables in the script to fit your environment.
+
 - To enable and run the above services, run:
 
 ```bash
@@ -304,6 +337,10 @@ sudo systemctl start cncli-sync.service
 
 ```bash
 sudo systemctl start cncli-sendtip.service
+```
+
+```bash
+sudo systemctl enable cncli-leaderlog.timer --now
 ```
 
 ### Helper Scripts
