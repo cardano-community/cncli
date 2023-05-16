@@ -32,6 +32,7 @@ binCnCli="/usr/local/bin/cncli"
 dbCnCli="/var/local/cncli/db.sqlite"
 
 # Script internal variables
+binCardanoCliMajorVersion=$(cardano-cli --version | head -n 1 | awk '{print $2}' | cut -d'.' -f1)
 secondsCardanoStart=$(date +%s -d "2017-09-23 21:44:51 +0000")
 daysCardanoStart=$(( secondsCardanoStart / 86400 ))
 secondsNow=$(date +%s)
@@ -59,8 +60,14 @@ calculateLeaderLog ()
             --stake-pool-id $hexStakePool --mainnet)
         if [[ $? -eq 0 ]]; then echo "done"; else echo "failed!"; fi
 
-        poolTotalStake=$(echo "$poolSnapshot" | jq -r '.poolStakeMark')
-        poolActiveStake=$(echo "$poolSnapshot" | jq -r '.activeStakeMark')
+        if [[ $binCardanoCliMajorVersion -eq 1 ]];
+        then
+            poolTotalStake=$(echo "$poolSnapshot" | jq -r .poolStakeMark)
+            poolActiveStake=$(echo "$poolSnapshot" | jq -r .activeStakeMark)
+        else
+            poolTotalStake=$(echo "$poolSnapshot" | jq -r .pools.${hexStakePool}.$3)
+            poolActiveStake=$(echo "$poolSnapshot" | jq -r .total.$3)
+        fi
 
         $binCnCli leaderlog \
             --db $dbCnCli --pool-id $hexStakePool --pool-vrf-skey $vrfSigningKeyFile \
@@ -126,14 +133,14 @@ writeLeaderSlots ()
 
 if [[ $dayOfEpoch -eq 1 ]];
 then
-    calculateLeaderLog prev $(($currentEpoch-1))
-    calculateLeaderLog current $currentEpoch
+    calculateLeaderLog prev $(($currentEpoch-1)) stakeSet
+    calculateLeaderLog current $currentEpoch stakeSet
     sendPoolToolSlots
 fi
 
 if [[ $dayOfEpoch -eq 4 && $secondsLeftInEpoch -le 129600 && $secondsLeftInEpoch -gt 84600 ]];
 then
-    calculateLeaderLog next $(($currentEpoch+1))
+    calculateLeaderLog next $(($currentEpoch+1)) stakeMark
     mailLeaderLog next $(($currentEpoch+1))
     writeLeaderSlots
 fi
