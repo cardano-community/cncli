@@ -83,18 +83,13 @@ calculateLeaderLog ()
 
 mailLeaderLog ()
 {
-    if [[ `jq -r '.status' <<< "$(cat /tmp/leaderlog)"` == "ok" ]];
+    if [[ "${mailLeaderLogTo}" != "" && -r "/tmp/leaderlog" ]];
     then
-        if [[ "${mailLeaderLogTo}" != "" ]];
-        then
-            echo -n "Mailing leaderlog to ${mailLeaderLogTo}... "
-            cat /tmp/leaderlog | jq | mail -s "Leaderlog for $1 epoch (${2})" -- $mailLeaderLogTo
-            if [[ $? -eq 0 ]]; then echo "done"; else echo "failed!"; fi
-        else
-            echo "Not mailing leaderlog"
-        fi
+        echo -n "Mailing leaderlog to ${mailLeaderLogTo}... "
+        cat /tmp/leaderlog | jq | mail -s "Leaderlog for $1 epoch (${2})" -- $mailLeaderLogTo
+        if [[ $? -eq 0 ]]; then echo "done"; else echo "failed!"; fi
     else
-        cat /tmp/leaderlog
+        echo "Not mailing leaderlog"
     fi
 }
 
@@ -121,10 +116,10 @@ sendPoolToolSlots ()
 
 writeLeaderSlots ()
 {
-    if [[ "${slotsCsvFile}" != "" && -w `dirname "${slotsCsvFile}"` ]];
+    if [[ "${slotsCsvFile}" != "" && -w `dirname "${slotsCsvFile}"` && `jq -r '.status' <<< "$(cat /tmp/leaderlog)"` == "ok" ]];
     then
         echo -n "Writing leaderlog to ${slotsCsvFile}... "
-        echo /tmp/leaderlog | jq -r '.assignedSlots[] | (.at|tostring) + "," + (.slot|tostring) + "," + (.no|tostring)' > $slotsCsvFile
+        cat /tmp/leaderlog | jq -r '.assignedSlots[] | (.at|tostring) + "," + (.slot|tostring) + "," + (.no|tostring)' > $slotsCsvFile
         if [[ $? -eq 0 ]]; then echo "done"; else echo "failed!"; fi
     else
         echo "Not writing slots.csv"
