@@ -62,8 +62,8 @@ calculateLeaderLog ()
 
         if [[ $binCardanoCliMajorVersion -eq 1 ]];
         then
-            poolTotalStake=$(echo "$poolSnapshot" | jq -r .poolStakeMark)
-            poolActiveStake=$(echo "$poolSnapshot" | jq -r .activeStakeMark)
+            poolTotalStake=$(echo "$poolSnapshot" | jq -r .pool${3^})
+            poolActiveStake=$(echo "$poolSnapshot" | jq -r .active${3^})
         else
             poolTotalStake=$(echo "$poolSnapshot" | jq -r .pools.${hexStakePool}.$3)
             poolActiveStake=$(echo "$poolSnapshot" | jq -r .total.$3)
@@ -128,7 +128,7 @@ writeLeaderSlots ()
 
 if [[ $dayOfEpoch -eq 1 ]];
 then
-    calculateLeaderLog prev $(($currentEpoch-1)) stakeSet
+    calculateLeaderLog prev $(($currentEpoch-1)) stakeGo
     calculateLeaderLog current $currentEpoch stakeSet
     sendPoolToolSlots
 fi
