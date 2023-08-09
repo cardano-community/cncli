@@ -29,6 +29,7 @@ shelleyGenesisFile="/etc/cardano/mainnet/shelley-genesis.json"
 byronGenesisFile="/etc/cardano/mainnet/byron-genesis.json"
 binCardanoCli="/usr/local/bin/cardano-cli"
 binCnCli="/usr/local/bin/cncli"
+binPython3="/usr/bin/python3"
 dbCnCli="/var/local/cncli/db.sqlite"
 
 # Script internal variables
@@ -62,11 +63,11 @@ calculateLeaderLog ()
 
         if [[ $binCardanoCliMajorVersion -eq 1 ]];
         then
-            poolTotalStake=$(echo "$poolSnapshot" | jq -r .pool${3^})
-            poolActiveStake=$(echo "$poolSnapshot" | jq -r .active${3^})
+            poolTotalStake=$(echo "$poolSnapshot" | $binPython3 -c "import sys, json; print(json.load(sys.stdin)['pool${3^}'])")
+            poolActiveStake=$(echo "$poolSnapshot" | $binPython3 -c "import sys, json; print(json.load(sys.stdin)['active${3^}'])")
         else
-            poolTotalStake=$(echo "$poolSnapshot" | jq -r .pools.${hexStakePool}.$3)
-            poolActiveStake=$(echo "$poolSnapshot" | jq -r .total.$3)
+            poolTotalStake=$(echo "$poolSnapshot" | $binPython3 -c "import sys, json; print(json.load(sys.stdin)['pools']['${hexStakePool}']['${3}'])")
+            poolActiveStake=$(echo "$poolSnapshot" | $binPython3 -c "import sys, json; print(json.load(sys.stdin)['total']['$3'])")
         fi
 
         $binCnCli leaderlog \
@@ -74,7 +75,6 @@ calculateLeaderLog ()
             --byron-genesis $byronGenesisFile --shelley-genesis $shelleyGenesisFile \
             --pool-stake $poolTotalStake --active-stake $poolActiveStake \
             --tz $timezone --ledger-set ${1} > /tmp/leaderlog
-
     else
         echo "The VRF signing key file is not readable."
         exit 1
