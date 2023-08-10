@@ -4,8 +4,8 @@
 #
 # Depending on the day of the epoch we are in (1 to 5) this script will run one
 # or more of the tasks above.
-# On day 1: send slots for the current and previous epoch to PoolTool.
-# On day 4: calculate and mail next epoch leaderlog and write slots.csv.
+# On epoch start: send slots for the current and previous epoch to PoolTool.
+# On epoch day 4: calculate next epoch leaderlog, mail it and/or write slots.csv.
 #
 # Usage:   Via systemd timer or ./cncli-leaderlog.sh
 # Author:  Leon • HAPPY Staking Pool
@@ -126,14 +126,16 @@ writeLeaderSlots ()
     fi
 }
 
-if [[ $dayOfEpoch -eq 1 ]];
+# Run within 10 minutes of epoch start
+if [[ $dayOfEpoch -eq 0 && $secondsLeftInEpoch -lt 432000 && $secondsLeftInEpoch -gt 431400 ]];
 then
     calculateLeaderLog prev $(($currentEpoch-1)) stakeGo
     calculateLeaderLog current $currentEpoch stakeSet
     sendPoolToolSlots
 fi
 
-if [[ $dayOfEpoch -eq 4 && $secondsLeftInEpoch -le 129600 && $secondsLeftInEpoch -gt 84600 ]];
+# Run as soon as the leaderlog is available
+if [[ $dayOfEpoch -eq 4 && $secondsLeftInEpoch -le 129600 && $secondsLeftInEpoch -gt 129000 ]];
 then
     calculateLeaderLog next $(($currentEpoch+1)) stakeMark
     mailLeaderLog next $(($currentEpoch+1))
