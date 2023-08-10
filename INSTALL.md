@@ -243,9 +243,9 @@ CNCLI ```sync```, ```sendtip``` and ```leaderlog``` can be easily enabled as ```
 
 - ```sync``` will continuously keep the ```cncli.db``` database synchronized.
 - ```sendtip``` will continuously send your stake pool ```tip``` to PoolTool.
-- ```leaderlog``` will run every day at 09:45 UTC and can be configured to run all or any of the following tasks:
-  - on day 1 of the epoch send the assigned slots for the current and previous epoch to PoolTool and
-  - on day 4 of the epoch calculate the leaderlog for the next epoch and mail it and/or write a slots.csv file.
+- ```leaderlog``` will run twice per day and can be configured to run all or any of the following tasks:
+  - on beginning of the epoch send the assigned slots for the current and previous epoch to PoolTool and
+  - on day 4 of the epoch calculate the leaderlog for the next epoch, mail it and/or write a slots.csv file.
 
 To set up ```systemd```:
 
@@ -316,7 +316,7 @@ WantedBy=multi-user.target
 Description=CNCLI Leaderlog
 
 [Timer]
-OnCalendar=*-*-* 09:45:00 UTC
+OnCalendar=*-*-* 09,21:50:00 UTC
 Unit=cncli-leaderlog.service
 
 [Install]
