@@ -63,11 +63,12 @@ calculateLeaderLog ()
 
         if [[ $binCardanoCliMajorVersion -eq 1 ]];
         then
-            poolTotalStake=$(echo "$poolSnapshot" | $binPython3 -c "import sys, json; print(json.load(sys.stdin)['pool${3^}'])")
-            poolActiveStake=$(echo "$poolSnapshot" | $binPython3 -c "import sys, json; print(json.load(sys.stdin)['active${3^}'])")
+            poolTotalStake=$(echo "$poolSnapshot" | grep -oP "(?<=    \"pool${3^}\": )\d+(?=,?)")
+            poolActiveStake=$(echo "$poolSnapshot" | grep -oP "(?<=    \"active${3^}\": )\d+(?=,?)")
         else
-            poolTotalStake=$(echo "$poolSnapshot" | $binPython3 -c "import sys, json; print(json.load(sys.stdin)['pools']['${hexStakePool}']['${3}'])")
-            poolActiveStake=$(echo "$poolSnapshot" | $binPython3 -c "import sys, json; print(json.load(sys.stdin)['total']['$3'])")
+            stakeNumbers=$(echo "$poolSnapshot" | grep -oP "(?<=    \"$3\": )\d+(?=,?)")
+            poolTotalStake=$(echo $stakeNumbers | cut -d' ' -f1)
+            poolActiveStake=$(echo $stakeNumbers | cut -d' ' -f2)
         fi
 
         $binCnCli leaderlog \
