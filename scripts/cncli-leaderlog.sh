@@ -4,8 +4,8 @@
 #
 # Depending on the day of the epoch we are in (1 to 5) this script will run one
 # or more of the tasks above.
-# On day 1: send slots for the current and previous epoch to PoolTool.
-# On day 4: calculate and mail next epoch leaderlog and write slots.csv.
+# On epoch start: send slots for the current and previous epoch to PoolTool.
+# On epoch day 4: calculate next epoch leaderlog, mail it and/or write slots.csv.
 #
 # Usage:   Via systemd timer or ./cncli-leaderlog.sh
 # Author:  Leon • HAPPY Staking Pool
@@ -29,6 +29,7 @@ shelleyGenesisFile="/etc/cardano/mainnet/shelley-genesis.json"
 byronGenesisFile="/etc/cardano/mainnet/byron-genesis.json"
 binCardanoCli="/usr/local/bin/cardano-cli"
 binCnCli="/usr/local/bin/cncli"
+binPython3="/usr/bin/python3"
 dbCnCli="/var/local/cncli/db.sqlite"
 
 # Script internal variables
@@ -62,11 +63,12 @@ calculateLeaderLog ()
 
         if [[ $binCardanoCliMajorVersion -eq 1 ]];
         then
-            poolTotalStake=$(echo "$poolSnapshot" | jq -r .poolStakeMark)
-            poolActiveStake=$(echo "$poolSnapshot" | jq -r .activeStakeMark)
+            poolTotalStake=$(echo "$poolSnapshot" | grep -oP "(?<=    \"pool${3^}\": )\d+(?=,?)")
+            poolActiveStake=$(echo "$poolSnapshot" | grep -oP "(?<=    \"active${3^}\": )\d+(?=,?)")
         else
-            poolTotalStake=$(echo "$poolSnapshot" | jq -r .pools.${hexStakePool}.$3)
-            poolActiveStake=$(echo "$poolSnapshot" | jq -r .total.$3)
+            stakeNumbers=$(echo "$poolSnapshot" | grep -oP "(?<=    \"$3\": )\d+(?=,?)")
+            poolTotalStake=$(echo $stakeNumbers | cut -d' ' -f1)
+            poolActiveStake=$(echo $stakeNumbers | cut -d' ' -f2)
         fi
 
         $binCnCli leaderlog \
@@ -74,7 +76,6 @@ calculateLeaderLog ()
             --byron-genesis $byronGenesisFile --shelley-genesis $shelleyGenesisFile \
             --pool-stake $poolTotalStake --active-stake $poolActiveStake \
             --tz $timezone --ledger-set ${1} > /tmp/leaderlog
-
     else
         echo "The VRF signing key file is not readable."
         exit 1
@@ -126,14 +127,16 @@ writeLeaderSlots ()
     fi
 }
 
-if [[ $dayOfEpoch -eq 1 ]];
+# Run within 10 minutes of epoch start
+if [[ $dayOfEpoch -eq 0 && $secondsLeftInEpoch -lt 432000 && $secondsLeftInEpoch -gt 431400 ]];
 then
-    calculateLeaderLog prev $(($currentEpoch-1)) stakeSet
+    calculateLeaderLog prev $(($currentEpoch-1)) stakeGo
     calculateLeaderLog current $currentEpoch stakeSet
     sendPoolToolSlots
 fi
 
-if [[ $dayOfEpoch -eq 4 && $secondsLeftInEpoch -le 129600 && $secondsLeftInEpoch -gt 84600 ]];
+# Run as soon as the leaderlog is available
+if [[ $dayOfEpoch -eq 4 && $secondsLeftInEpoch -le 129600 && $secondsLeftInEpoch -gt 129000 ]];
 then
     calculateLeaderLog next $(($currentEpoch+1)) stakeMark
     mailLeaderLog next $(($currentEpoch+1))
