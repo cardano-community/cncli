@@ -2,12 +2,9 @@ use std::io::Write;
 use std::net::{SocketAddr, ToSocketAddrs};
 use std::time::{Duration, Instant};
 
-use futures::executor::block_on;
-use net2::TcpStreamExt;
-use pallas_miniprotocols::handshake;
-use pallas_miniprotocols::handshake::Confirmation;
-use pallas_multiplexer::bearers::Bearer;
-use pallas_multiplexer::StdPlexer;
+use pallas_network::miniprotocols::handshake::Confirmation;
+use pallas_network::miniprotocols::{handshake, PROTOCOL_N2N_HANDSHAKE};
+use pallas_network::multiplexer::{Bearer, Plexer};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -32,72 +29,62 @@ struct PingError {
     error_message: String,
 }
 
-pub fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u64, timeout_seconds: u64) {
-    block_on(async {
-        let start = Instant::now();
-        let socket_addrs_result = format!("{host}:{port}").to_socket_addrs();
-        match socket_addrs_result {
-            Ok(mut socket_addrs) => {
-                let socket_addr: &SocketAddr = &socket_addrs.next().unwrap();
-                let dns_duration = start.elapsed();
-                match Bearer::connect_tcp_timeout(socket_addr, Duration::from_secs(timeout_seconds)) {
-                    Ok(bearer) => {
-                        match &bearer {
-                            Bearer::Tcp(tcp_stream) => {
-                                tcp_stream.set_keepalive_ms(Some(30_000u32)).unwrap();
-                                tcp_stream
-                                    .set_read_timeout(Some(Duration::from_secs(timeout_seconds)))
-                                    .unwrap();
+pub async fn ping<W: Write>(out: &mut W, host: &str, port: u16, network_magic: u64, timeout_seconds: u64) {
+    let start = Instant::now();
+    let socket_addrs_result = format!("{host}:{port}").to_socket_addrs();
+    match socket_addrs_result {
+        Ok(mut socket_addrs) => {
+            let socket_addr: &SocketAddr = &socket_addrs.next().unwrap();
+            let dns_duration = start.elapsed();
+            match Bearer::connect_tcp_timeout(socket_addr, Duration::from_secs(timeout_seconds)).await {
+                Ok(bearer) => {
+                    let connect_duration = start.elapsed() - dns_duration;
+
+                    let mut plexer = Plexer::new(bearer);
+
+                    let hs_channel = plexer.subscribe_client(PROTOCOL_N2N_HANDSHAKE);
+
+                    let _plexer_handle = tokio::spawn(async move { plexer.run().await });
+
+                    let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
+                    let mut client = handshake::Client::new(hs_channel);
+                    match client.handshake(versions).await {
+                        Ok(confirmation) => match confirmation {
+                            Confirmation::Accepted(version_number, _) => {
+                                let total_duration = start.elapsed();
+                                let handshake_duration = total_duration - connect_duration - dns_duration;
+                                ping_json_success(
+                                    out,
+                                    dns_duration,
+                                    connect_duration,
+                                    handshake_duration,
+                                    total_duration,
+                                    version_number,
+                                    host,
+                                    port,
+                                );
                             }
-                            Bearer::Unix(_) => {}
-                        }
-                        let connect_duration = start.elapsed() - dns_duration;
-
-                        let mut plexer = StdPlexer::new(bearer);
-
-                        //handshake is channel0
-                        let channel0 = plexer.use_channel(0);
-
-                        plexer.muxer.spawn();
-                        plexer.demuxer.spawn();
-
-                        let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
-                        let mut client = handshake::N2NClient::new(channel0);
-                        match client.handshake(versions) {
-                            Ok(confirmation) => match confirmation {
-                                Confirmation::Accepted(version_number, _) => {
-                                    let total_duration = start.elapsed();
-                                    let handshake_duration = total_duration - connect_duration - dns_duration;
-                                    ping_json_success(
-                                        out,
-                                        dns_duration,
-                                        connect_duration,
-                                        handshake_duration,
-                                        total_duration,
-                                        version_number,
-                                        host,
-                                        port,
-                                    );
-                                }
-                                Confirmation::Rejected(refuse_reason) => {
-                                    ping_json_error(out, format!("{refuse_reason:?}"), host, port);
-                                }
-                            },
-                            Err(error) => {
-                                ping_json_error(out, format!("{error}"), host, port);
+                            Confirmation::Rejected(refuse_reason) => {
+                                ping_json_error(out, format!("{refuse_reason:?}"), host, port);
                             }
+                            Confirmation::QueryReply(_) => {
+                                ping_json_error(out, "Unexpected QueryReply".to_string(), host, port);
+                            }
+                        },
+                        Err(error) => {
+                            ping_json_error(out, format!("{error}"), host, port);
                         }
-                    }
-                    Err(error) => {
-                        ping_json_error(out, error.to_string(), host, port);
                     }
                 }
-            }
-            Err(error) => {
-                ping_json_error(out, error.to_string(), host, port);
+                Err(error) => {
+                    ping_json_error(out, error.to_string(), host, port);
+                }
             }
         }
-    });
+        Err(error) => {
+            ping_json_error(out, error.to_string(), host, port);
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]

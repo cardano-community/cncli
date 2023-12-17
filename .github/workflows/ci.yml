@@ -12,11 +12,14 @@ jobs:
       fail-fast: false
       matrix:
         job:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, use-cross: true }
+          - { os: ubuntu-20.04, target: x86_64-unknown-linux-musl, use-cross: true }
           - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: macos-13-xlarge, target: aarch64-apple-darwin }
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           submodules: true # recurse submodules
       - name: Configure Environment
@@ -53,7 +56,8 @@ jobs:
               ;;
             *-unknown-linux-*)
               sudo apt-get -y update
-              sudo apt-get -y install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools
+              sudo apt-get -y install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+              pip install cargo-zigbuild
               ;;
             *-apple-darwin)
               brew install automake

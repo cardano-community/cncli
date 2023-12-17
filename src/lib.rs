@@ -267,7 +267,7 @@ pub mod nodeclient {
         },
     }
 
-    pub fn start(cmd: Command) {
+    pub async fn start(cmd: Command) {
         match cmd {
             Command::Ping {
                 ref host,
@@ -275,7 +275,7 @@ pub mod nodeclient {
                 ref network_magic,
                 ref timeout_seconds,
             } => {
-                ping::ping(&mut stdout(), host.as_str(), *port, *network_magic, *timeout_seconds);
+                ping::ping(&mut stdout(), host.as_str(), *port, *network_magic, *timeout_seconds).await;
             }
             Command::Validate { ref db, ref hash } => {
                 validate::validate_block(db, hash.as_str());
@@ -295,7 +295,8 @@ pub mod nodeclient {
                     *network_magic,
                     shelley_genesis_hash.as_str(),
                     *no_service,
-                );
+                )
+                .await;
             }
             Command::Leaderlog {
                 ref db,
@@ -371,14 +372,14 @@ pub mod nodeclient {
                     let api_key = pooltool_config.api_key.clone();
                     let cardano_node_path = cardano_node.clone();
                     handles.push(thread::spawn(move || {
-                        sync::sendtip(
+                        tokio::runtime::Runtime::new().unwrap().block_on(sync::sendtip(
                             pool.name,
                             pool.pool_id,
                             pool.host,
                             pool.port,
                             api_key,
                             &cardano_node_path,
-                        );
+                        ));
                     }));
                 }
 
