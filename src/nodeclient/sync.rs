@@ -4,16 +4,17 @@ use std::ops::Sub;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use async_std::task;
-use futures::executor::block_on;
+use thiserror::Error;
+
 use log::{debug, error, info, warn};
-use net2::TcpStreamExt;
-use pallas_miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
-use pallas_miniprotocols::handshake::n2n::VersionData;
-use pallas_miniprotocols::handshake::{Confirmation, Error};
-use pallas_miniprotocols::{chainsync, handshake, Point, MAINNET_MAGIC};
-use pallas_multiplexer::bearers::Bearer;
-use pallas_multiplexer::{StdChannel, StdPlexer};
+use pallas_network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
+use pallas_network::miniprotocols::handshake::n2n::VersionData;
+use pallas_network::miniprotocols::handshake::Confirmation;
+use pallas_network::miniprotocols::{
+    chainsync, handshake, keepalive, Point, MAINNET_MAGIC, PROTOCOL_N2N_CHAIN_SYNC, PROTOCOL_N2N_HANDSHAKE,
+    PROTOCOL_N2N_KEEP_ALIVE,
+};
+use pallas_network::multiplexer::{AgentChannel, Bearer, Plexer};
 use pallas_traverse::MultiEraHeader;
 
 use crate::nodeclient::pooltool;
@@ -21,6 +22,27 @@ use crate::nodeclient::sqlite;
 use crate::nodeclient::sqlite::BlockStore;
 
 const FIVE_SECS: Duration = Duration::from_secs(5);
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("loggingobserver error occurred")]
+    LoggingObserverError(String),
+
+    #[error("pallas_traverse error occurred")]
+    PallasTraverseError(#[from] pallas_traverse::Error),
+
+    #[error("io error occurred")]
+    IoError(#[from] std::io::Error),
+
+    #[error("keepalive error occurred")]
+    KeepAliveError(#[from] keepalive::Error),
+
+    #[error("chainsync error occurred")]
+    ChainSyncError(#[from] pallas_network::miniprotocols::chainsync::ClientError),
+
+    #[error("chainsync canceled")]
+    ChainSyncCanceled,
+}
 
 #[derive(Debug, Clone)]
 pub struct BlockHeader {
@@ -49,7 +71,7 @@ pub struct BlockHeader {
 struct LoggingObserver {
     pub last_log_time: Instant,
     pub exit_when_tip_reached: bool,
-    pub block_store: Option<Box<dyn BlockStore>>,
+    pub block_store: Option<Box<dyn BlockStore + Send>>,
     pub shelley_genesis_hash: String,
     pub pending_blocks: Vec<BlockHeader>,
 }
@@ -72,22 +94,14 @@ enum Continuation {
 }
 
 trait Observer<V> {
-    fn on_roll_forward(
-        &mut self,
-        content: &HeaderContent,
-        tip: &Tip,
-    ) -> Result<Continuation, Box<dyn std::error::Error>>;
-    fn on_rollback(&mut self, point: &Point) -> Result<Continuation, Box<dyn std::error::Error>>;
-    fn on_tip_reached(&mut self) -> Result<Continuation, Box<dyn std::error::Error>>;
+    fn on_roll_forward(&mut self, content: &HeaderContent, tip: &Tip) -> Result<Continuation, Error>;
+    fn on_rollback(&mut self, point: &Point) -> Result<Continuation, Error>;
+    fn on_tip_reached(&mut self) -> Result<Continuation, Error>;
 }
 
 impl Observer<HeaderContent> for LoggingObserver {
-    fn on_roll_forward(
-        &mut self,
-        content: &HeaderContent,
-        tip: &Tip,
-    ) -> Result<Continuation, Box<dyn std::error::Error>> {
-        let mut result: Result<Continuation, Box<dyn std::error::Error>> = Ok(Continuation::Proceed);
+    fn on_roll_forward(&mut self, content: &HeaderContent, tip: &Tip) -> Result<Continuation, Error> {
+        let mut result: Result<Continuation, Error> = Ok(Continuation::Proceed);
         match content.byron_prefix {
             None => {
                 let multi_era_header = MultiEraHeader::decode(content.variant, None, &content.cbor);
@@ -146,7 +160,7 @@ impl Observer<HeaderContent> for LoggingObserver {
                                         "block {} of {}: {:.2}% sync'd",
                                         header.header_body.block_number,
                                         tip.1,
-                                        block_number / tip_block_number * 100.0
+                                        (block_number / tip_block_number * 10000.0).floor() / 100.0
                                     );
                                     self.last_log_time = Instant::now();
                                 }
@@ -222,13 +236,13 @@ impl Observer<HeaderContent> for LoggingObserver {
         result
     }
 
-    fn on_rollback(&mut self, point: &Point) -> Result<Continuation, Box<dyn std::error::Error>> {
+    fn on_rollback(&mut self, point: &Point) -> Result<Continuation, Error> {
         debug!("asked to roll back {:?}", point);
 
         Ok(Continuation::Proceed)
     }
 
-    fn on_tip_reached(&mut self) -> Result<Continuation, Box<dyn std::error::Error>> {
+    fn on_tip_reached(&mut self) -> Result<Continuation, Error> {
         debug!("tip was reached");
         if self.exit_when_tip_reached {
             info!("Exiting...");
@@ -239,19 +253,22 @@ impl Observer<HeaderContent> for LoggingObserver {
     }
 }
 
-fn do_handshake(channel: StdChannel, network_magic: u64) -> Result<Confirmation<VersionData>, Error> {
+async fn do_handshake(
+    channel: AgentChannel,
+    network_magic: u64,
+) -> Result<Confirmation<VersionData>, handshake::Error> {
     let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
-    let mut client = handshake::N2NClient::new(channel);
-    client.handshake(versions)
+    let mut client = handshake::Client::new(channel);
+    client.handshake(versions).await
 }
 
-fn do_chainsync(
-    channel: StdChannel,
+async fn do_chainsync(
+    channel: AgentChannel,
     skip_to_tip: bool,
     exit_when_tip_reached: bool,
-    mut block_store: Option<Box<dyn BlockStore>>,
-    shelley_genesis_hash: &str,
-) {
+    mut block_store: Option<Box<dyn BlockStore + 'static + Send>>,
+    shelley_genesis_hash: String,
+) -> Result<(), Error> {
     let mut chain_blocks: Vec<Point> = vec![];
 
     /* Classic sync: Use blocks from store if available. */
@@ -302,167 +319,127 @@ fn do_chainsync(
 
     let mut client = chainsync::N2NClient::new(channel);
     if skip_to_tip {
-        match client.intersect_tip() {
-            Ok(_) => {}
-            Err(err) => {
-                error!("intersect_tip error!: {:?}", err);
-                return;
-            }
-        }
+        client.intersect_tip().await?;
     } else {
-        match client.find_intersect(chain_blocks) {
-            Ok(_) => {}
-            Err(err) => {
-                error!("find_intersect error!: {:?}", err);
-                return;
-            }
-        }
+        client.find_intersect(chain_blocks).await?;
     }
 
     let mut logging_observer = LoggingObserver {
         exit_when_tip_reached,
         block_store,
-        shelley_genesis_hash: shelley_genesis_hash.to_string(),
+        shelley_genesis_hash,
         ..Default::default()
     };
-    let next_result = client.request_next();
-    if next_result.is_err() {
-        error!("request_next error!: {:?}", next_result.unwrap_err());
-        return;
-    }
-    let mut next = next_result.unwrap();
+    let mut next = client.request_next().await?;
     loop {
         match &next {
             NextResponse::RollForward(header_content, tip) => {
-                match logging_observer.on_roll_forward(header_content, tip) {
-                    Ok(continuation) => match continuation {
-                        Continuation::Proceed => match client.request_next() {
-                            Ok(next_response) => {
-                                next = next_response;
+                match logging_observer.on_roll_forward(header_content, tip)? {
+                    Continuation::Proceed => next = client.request_next().await?,
+                    Continuation::DropOut => {
+                        client.send_done().await?;
+                        return Ok(());
+                    }
+                }
+            }
+            NextResponse::RollBackward(point, _tip) => match logging_observer.on_rollback(point)? {
+                Continuation::Proceed => next = client.request_next().await?,
+                Continuation::DropOut => {
+                    client.send_done().await?;
+                    return Ok(());
+                }
+            },
+            NextResponse::Await => next = client.recv_while_must_reply().await?,
+        }
+    }
+}
+
+async fn do_keepalive(channel: AgentChannel) -> Result<(), Error> {
+    let mut client = keepalive::Client::new(channel);
+    debug!("keepalive process started!");
+    loop {
+        tokio::time::sleep(Duration::from_secs(20)).await;
+        debug!("sending keepalive...");
+        client.send_keepalive().await?;
+        debug!("keepalive sent!");
+    }
+}
+
+pub(crate) async fn sync(
+    db: &Path,
+    host: &str,
+    port: u16,
+    network_magic: u64,
+    shelley_genesis_hash: &str,
+    no_service: bool,
+) {
+    loop {
+        // Retry to establish connection forever
+        let block_store = sqlite::SqLiteBlockStore::new(db).unwrap();
+        match Bearer::connect_tcp_timeout(
+            &format!("{host}:{port}").to_socket_addrs().unwrap().next().unwrap(),
+            FIVE_SECS,
+        )
+        .await
+        {
+            Ok(bearer) => {
+                let mut plexer = Plexer::new(bearer);
+
+                let hs_channel = plexer.subscribe_client(PROTOCOL_N2N_HANDSHAKE);
+                let cs_channel = plexer.subscribe_client(PROTOCOL_N2N_CHAIN_SYNC);
+                let ka_channel = plexer.subscribe_client(PROTOCOL_N2N_KEEP_ALIVE);
+
+                let running_plexer = plexer.spawn();
+
+                match do_handshake(hs_channel, network_magic).await {
+                    Ok(confirmation) => match confirmation {
+                        Confirmation::Accepted(_, _) => {
+                            let shelley_genesis_hash = shelley_genesis_hash.to_string();
+                            let cs_handle = tokio::spawn(do_chainsync(
+                                cs_channel,
+                                false,
+                                no_service,
+                                Some(Box::new(block_store)),
+                                shelley_genesis_hash,
+                            ));
+                            let ka_handle = tokio::spawn(do_keepalive(ka_channel));
+                            let result = tokio::select! {
+                                    cs_result = cs_handle => cs_result,
+                                    ka_result = ka_handle => ka_result,
                             }
-                            Err(error) => {
-                                error!("{:?}", error);
-                                break;
+                            .expect("error joining tokio threads");
+                            if let Err(err) = result {
+                                error!("miniprotocol error: {:?}", err);
                             }
-                        },
-                        Continuation::DropOut => {
-                            match client.send_done() {
-                                Ok(_) => {}
-                                Err(error) => {
-                                    error!("{:?}", error);
-                                }
-                            }
-                            break;
+                            running_plexer.abort().await;
+                        }
+                        Confirmation::Rejected(refuse_reason) => {
+                            error!("{:?}", refuse_reason);
+                        }
+                        Confirmation::QueryReply(_) => {
+                            error!("Unexpected QueryReply");
                         }
                     },
                     Err(error) => {
                         error!("{:?}", error);
-                        break;
                     }
                 }
             }
-            NextResponse::RollBackward(point, _tip) => match logging_observer.on_rollback(point) {
-                Ok(continuation) => match continuation {
-                    Continuation::Proceed => match client.request_next() {
-                        Ok(next_response) => {
-                            next = next_response;
-                        }
-                        Err(error) => {
-                            error!("{:?}", error);
-                            break;
-                        }
-                    },
-                    Continuation::DropOut => {
-                        match client.send_done() {
-                            Ok(_) => {}
-                            Err(error) => {
-                                error!("{:?}", error);
-                            }
-                        }
-                        break;
-                    }
-                },
-                Err(error) => {
-                    error!("{:?}", error);
-                    break;
-                }
-            },
-            NextResponse::Await => match client.recv_while_must_reply() {
-                Ok(next_response) => {
-                    next = next_response;
-                }
-                Err(error) => {
-                    error!("{:?}", error);
-                    break;
-                }
-            },
+            Err(error) => {
+                error!("{}", error);
+            }
         }
+
+        if no_service {
+            break;
+        }
+
+        warn!("Disconnected... retry in 5 secs...");
+        tokio::time::sleep(FIVE_SECS).await;
     }
 }
 
-pub(crate) fn sync(db: &Path, host: &str, port: u16, network_magic: u64, shelley_genesis_hash: &str, no_service: bool) {
-    block_on(async {
-        loop {
-            // Retry to establish connection forever
-            let block_store = sqlite::SqLiteBlockStore::new(db).unwrap();
-            match Bearer::connect_tcp_timeout(
-                &format!("{host}:{port}").to_socket_addrs().unwrap().next().unwrap(),
-                Duration::from_secs(5),
-            ) {
-                Ok(bearer) => {
-                    match &bearer {
-                        Bearer::Tcp(tcp_stream) => {
-                            tcp_stream.set_keepalive_ms(Some(30_000u32)).unwrap();
-                        }
-                        Bearer::Unix(_) => {}
-                    }
-
-                    let mut plexer = StdPlexer::new(bearer);
-
-                    //handshake is channel0
-                    let channel0 = plexer.use_channel(0);
-                    //chainsync is channel2
-                    let channel2 = plexer.use_channel(2);
-
-                    plexer.muxer.spawn();
-                    plexer.demuxer.spawn();
-
-                    match do_handshake(channel0, network_magic) {
-                        Ok(confirmation) => match confirmation {
-                            Confirmation::Accepted(_, _) => {
-                                do_chainsync(
-                                    channel2,
-                                    false,
-                                    no_service,
-                                    Some(Box::new(block_store)),
-                                    shelley_genesis_hash,
-                                );
-                            }
-                            Confirmation::Rejected(refuse_reason) => {
-                                error!("{:?}", refuse_reason);
-                            }
-                        },
-                        Err(error) => {
-                            error!("{:?}", error);
-                        }
-                    }
-                }
-                Err(error) => {
-                    error!("{}", error);
-                }
-            }
-
-            if no_service {
-                break;
-            }
-
-            warn!("Disconnected... retry in 5 secs...");
-            task::sleep(Duration::from_secs(5)).await;
-        }
-    });
-}
-
-pub(crate) fn sendtip(
+pub(crate) async fn sendtip(
     pool_name: String,
     pool_id: String,
     host: String,
@@ -470,64 +447,68 @@ pub(crate) fn sendtip(
     api_key: String,
     cardano_node_path: &Path,
 ) {
-    block_on(async {
-        loop {
-            let pooltool_notifier = pooltool::PoolToolNotifier {
-                pool_name: pool_name.clone(),
-                pool_id: pool_id.clone(),
-                api_key: api_key.clone(),
-                cardano_node_path: cardano_node_path.to_path_buf(),
-                ..Default::default()
-            };
-            match Bearer::connect_tcp_timeout(
-                &format!("{host}:{port}").to_socket_addrs().unwrap().next().unwrap(),
-                Duration::from_secs(5),
-            ) {
-                Ok(bearer) => {
-                    match &bearer {
-                        Bearer::Tcp(tcp_stream) => {
-                            tcp_stream.set_keepalive_ms(Some(30_000u32)).unwrap();
-                        }
-                        Bearer::Unix(_) => {}
-                    }
+    loop {
+        let pooltool_notifier = pooltool::PoolToolNotifier {
+            pool_name: pool_name.clone(),
+            pool_id: pool_id.clone(),
+            api_key: api_key.clone(),
+            cardano_node_path: cardano_node_path.to_path_buf(),
+            ..Default::default()
+        };
+        match Bearer::connect_tcp_timeout(
+            &format!("{host}:{port}").to_socket_addrs().unwrap().next().unwrap(),
+            FIVE_SECS,
+        )
+        .await
+        {
+            Ok(bearer) => {
+                let mut plexer = Plexer::new(bearer);
 
-                    let mut plexer = StdPlexer::new(bearer);
+                let hs_channel = plexer.subscribe_client(PROTOCOL_N2N_HANDSHAKE);
+                let cs_channel = plexer.subscribe_client(PROTOCOL_N2N_CHAIN_SYNC);
+                let ka_channel = plexer.subscribe_client(PROTOCOL_N2N_KEEP_ALIVE);
 
-                    //handshake is channel0
-                    let channel0 = plexer.use_channel(0);
-                    //chainsync is channel2
-                    let channel2 = plexer.use_channel(2);
+                let running_plexer = plexer.spawn();
 
-                    plexer.muxer.spawn();
-                    plexer.demuxer.spawn();
-
-                    match do_handshake(channel0, MAINNET_MAGIC) {
-                        Ok(confirmation) => match confirmation {
-                            Confirmation::Accepted(_, _) => {
-                                do_chainsync(
-                                    channel2,
-                                    true,
-                                    false,
-                                    Some(Box::new(pooltool_notifier)),
-                                    "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81",
-                                );
+                match do_handshake(hs_channel, MAINNET_MAGIC).await {
+                    Ok(confirmation) => match confirmation {
+                        Confirmation::Accepted(_, _) => {
+                            let cs_handle = tokio::spawn(do_chainsync(
+                                cs_channel,
+                                true,
+                                false,
+                                Some(Box::new(pooltool_notifier)),
+                                "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81".to_string(),
+                            ));
+                            let ka_handle = tokio::spawn(do_keepalive(ka_channel));
+                            let result = tokio::select! {
+                                cs_result = cs_handle => cs_result,
+                                ka_result = ka_handle => ka_result,
                             }
-                            Confirmation::Rejected(refuse_reason) => {
-                                error!("{:?}", refuse_reason);
+                            .expect("error joining tokio threads");
+                            if let Err(err) = result {
+                                error!("miniprotocol error: {:?}", err);
                             }
-                        },
-                        Err(error) => {
-                            error!("{:?}", error);
+                            running_plexer.abort().await;
                         }
+                        Confirmation::Rejected(refuse_reason) => {
+                            error!("{:?}", refuse_reason);
+                        }
+                        Confirmation::QueryReply(_) => {
+                            error!("Unexpected QueryReply");
+                        }
+                    },
+                    Err(error) => {
+                        error!("{:?}", error);
                     }
-                }
-                Err(error) => {
-                    error!("{}", error);
                 }
             }
-
-            warn!("Disconnected... retry in 5 secs...");
-            task::sleep(Duration::from_secs(5)).await;
+            Err(error) => {
+                error!("{}", error);
+            }
         }
-    });
+
+        warn!("Disconnected... retry in 5 secs...");
+        tokio::time::sleep(FIVE_SECS).await;
+    }
 }

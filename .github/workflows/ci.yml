@@ -12,11 +12,14 @@ jobs:
       fail-fast: false
       matrix:
         job:
-          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl }
-          - { os: macos-latest, target: x86_64-apple-darwin }
+          - { os: ubuntu-22.04, label: ubuntu22, target: x86_64-unknown-linux-gnu }
+          - { os: ubuntu-22.04, label: ubuntu22, target: x86_64-unknown-linux-musl, use-cross: true }
+          - { os: ubuntu-20.04, label: ubuntu20, target: x86_64-unknown-linux-musl, use-cross: true }
+          - { os: macos-latest, label: macos, target: x86_64-apple-darwin }
+          # - { os: ubuntu-22.04, label: macos, target: aarch64-apple-darwin, use-cross: true }
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
         with:
           submodules: true # recurse submodules
       - name: Configure Environment
@@ -44,18 +47,18 @@ jobs:
           esac
       - name: Install Prerequisites
         run: |
-          case ${{ matrix.job.target }} in
-            x86_64-pc-windows-gnu)
+          case ${{ matrix.job.os }} in
+            windows64*)
               pacman -S --noconfirm --needed mingw-w64-x86_64-gcc base-devel autoconf
               ;;
-            i686-pc-windows-gnu)
+            windows32*)
               pacman -S --noconfirm --needed mingw-w64-i686-gcc base-devel autoconf
               ;;
-            *-unknown-linux-*)
+            ubuntu*)
               sudo apt-get -y update
-              sudo apt-get -y install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools
+              sudo apt-get -y install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
               ;;
-            *-apple-darwin)
+            macos*)
               brew install automake
               ;;
           esac
@@ -82,6 +85,7 @@ jobs:
           command: clippy
           args: --release --features "${{ join(matrix.job.features, ',') }}" --target ${{ matrix.job.target }} -- -D warnings
       - name: Test
+        if: "${{ ! contains(matrix.job.target, 'aarch64') }}"
         uses: actions-rs/cargo@v1
         with:
           use-cross: ${{ matrix.job.use-cross }}
@@ -99,7 +103,7 @@ jobs:
           PROJECT_NAME=$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.toml)
           PROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
           PKG_SUFFIX=".tar.gz" ; case ${{ matrix.job.target }} in *-pc-windows-*) PKG_SUFFIX=".zip" ;; esac;
-          PKG_NAME=${PROJECT_NAME}-${PROJECT_VERSION}-${{ matrix.job.target }}${PKG_SUFFIX}
+          PKG_NAME=${PROJECT_NAME}-${PROJECT_VERSION}-${{ matrix.job.label }}-${{ matrix.job.target }}${PKG_SUFFIX}
 
           case ${{ matrix.job.target }} in
             *-pc-windows-*) 7z -y a "${PKG_NAME}" ./target/${{matrix.job.target}}/release/cncli.exe | tail -2 ;;
@@ -117,6 +121,7 @@ jobs:
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/v')
         with:
+          prerelease: "${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}"
           files: ${{ steps.package.outputs.PKG_PATH }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
