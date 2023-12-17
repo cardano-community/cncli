@@ -10,6 +10,8 @@ macro_rules! log {
 }
 
 fn main() {
+    built::write_built_file().expect("Failed to acquire build-time information");
+
     #[cfg(not(feature = "libsodium-sys"))]
     {
         // Use set libsodium env path

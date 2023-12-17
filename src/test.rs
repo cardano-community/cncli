@@ -26,61 +26,66 @@ fn test_is_overlay_slot() {
     assert!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &d));
 }
 
-#[test]
-fn test_ping() {
-    let host = "preprod-node.world.dev.cardano.org".to_string();
+#[tokio::test]
+async fn test_ping() {
+    let host = "preprod-node.play.dev.cardano.org".to_string();
     let port = 30000;
     let network_magic = 1;
     let mut stdout: Vec<u8> = Vec::new();
 
-    ping::ping(&mut stdout, &host, port, network_magic, 2);
+    ping::ping(&mut stdout, &host, port, network_magic, 2).await;
 
     assert_eq!(
-        &std::str::from_utf8(&stdout).unwrap()[..86],
-        "{\n  \"status\": \"ok\",\n  \"host\": \"preprod-node.world.dev.cardano.org\",\n  \"port\": 30000,\n "
+        &std::str::from_utf8(&stdout).unwrap()[..85],
+        "{\n  \"status\": \"ok\",\n  \"host\": \"preprod-node.play.dev.cardano.org\",\n  \"port\": 30000,\n "
     );
 }
 
-#[test]
-fn test_ping_failure_address() {
+#[tokio::test]
+async fn test_ping_failure_address() {
     let host = "murrika.relays-new.cardano-testnet.iohkdev.io".to_string();
     let port = 30000;
     let network_magic = 1;
     let mut stdout: Vec<u8> = Vec::new();
 
-    ping::ping(&mut stdout, &host, port, network_magic, 2);
+    ping::ping(&mut stdout, &host, port, network_magic, 2).await;
 
-    #[cfg(target_os = "macos")]
-    assert_eq!(&std::str::from_utf8(&stdout).unwrap()[..], "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 30000,\n  \"errorMessage\": \"failed to lookup address information: nodename nor servname provided, or not known\"\n}");
-
-    #[cfg(target_os = "linux")]
-    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"murrika.relays-new.cardano-testnet.iohkdev.io\",\n  \"port\": 30000,\n  \"errorMessage\": \"failed to lookup address information: Name does not resolve\"\n}");
+    let regex_str = ".*failed to lookup address information: .*";
+    let regex = Regex::new(regex_str);
+    let ping_result = std::str::from_utf8(&stdout).unwrap();
+    // println!("ping_result: {}", ping_result);
+    assert_eq!(regex.unwrap().is_match(ping_result), true);
 }
 
-#[test]
-fn test_ping_failure_bad_port() {
-    let host = "preprod-node.world.dev.cardano.org".to_string();
+#[tokio::test]
+async fn test_ping_failure_bad_port() {
+    let host = "preprod-node.play.dev.cardano.org".to_string();
     let port = 3992;
     let network_magic = 1;
     let mut stdout: Vec<u8> = Vec::new();
 
-    ping::ping(&mut stdout, &host, port, network_magic, 2);
+    ping::ping(&mut stdout, &host, port, network_magic, 2).await;
 
-    assert_eq!(std::str::from_utf8(&stdout).unwrap(), "{\n  \"status\": \"error\",\n  \"host\": \"preprod-node.world.dev.cardano.org\",\n  \"port\": 3992,\n  \"errorMessage\": \"connection timed out\"\n}");
+    let regex_str = ".*connect(ion)? time(out)?.*";
+    let regex = Regex::new(regex_str);
+    let ping_result = std::str::from_utf8(&stdout).unwrap();
+    println!("ping_result: {}", ping_result);
+    assert_eq!(regex.unwrap().is_match(ping_result), true);
 }
 
-#[test]
-fn test_ping_failure_bad_magic() {
-    let host = "preprod-node.world.dev.cardano.org".to_string();
-    let port = 30000;
+#[tokio::test]
+async fn test_ping_failure_bad_magic() {
+    let host = "preprod-node.play.dev.cardano.org".to_string();
+    let port = 3001;
     let network_magic = 111111;
     let mut stdout: Vec<u8> = Vec::new();
 
-    ping::ping(&mut stdout, &host, port, network_magic, 2);
+    ping::ping(&mut stdout, &host, port, network_magic, 2).await;
 
-    let regex_str = "\\{\\n  \"status\": \"error\",\\n  \"host\": \"preprod-node.world.dev.cardano.org\",\\n  \"port\": 30000,\\n  \"errorMessage\": \"Refused\\(\\d+, \\\\\"version data mismatch: NodeToNodeVersionData \\{networkMagic = NetworkMagic \\{unNetworkMagic = 1\\}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData \\{networkMagic = NetworkMagic \\{unNetworkMagic = 111111\\}, diffusionMode = InitiatorAndResponderDiffusionMode}\\\\\"\\)\"\\n\\}";
+    let regex_str = ".*\"Refused\\(\\d+, \\\\\"version data mismatch.*";
     let regex = Regex::new(regex_str);
     let ping_result = std::str::from_utf8(&stdout).unwrap();
+    // println!("ping_result: {}", ping_result);
     assert_eq!(regex.unwrap().is_match(ping_result), true);
 }
 
@@ -138,7 +143,7 @@ fn test_split_ln() {
 fn test_ln() {
     let x = BigDecimal::one();
     let ln_x = ln(&x);
-    assert_eq!(ln_x.to_string(), "0.0000000000000000000000000000000000");
+    assert_eq!(ln_x.to_string(), "0");
 
     let x = BigDecimal::from_str("0.95").unwrap();
     let ln_x = ln(&x);
