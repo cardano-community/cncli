@@ -21,6 +21,8 @@ use crate::nodeclient::pooltool;
 use crate::nodeclient::sqlite;
 use crate::nodeclient::sqlite::BlockStore;
 
+use super::sqlite::SqLiteBlockStore;
+
 const FIVE_SECS: Duration = Duration::from_secs(5);
 
 #[derive(Error, Debug)]
@@ -253,38 +255,24 @@ impl Observer<HeaderContent> for LoggingObserver {
     }
 }
 
-async fn do_handshake(
-    channel: AgentChannel,
-    network_magic: u64,
-) -> Result<Confirmation<VersionData>, handshake::Error> {
-    let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
-    let mut client = handshake::Client::new(channel);
-    client.handshake(versions).await
-}
+fn get_intersect_blocks(block_store: &mut SqLiteBlockStore) -> Result<Vec<Point>, Error> {
+    let start = Instant::now();
+    debug!("get_intersect_blocks");
 
-async fn do_chainsync(
-    channel: AgentChannel,
-    skip_to_tip: bool,
-    exit_when_tip_reached: bool,
-    mut block_store: Option<Box<dyn BlockStore + 'static + Send>>,
-    shelley_genesis_hash: String,
-) -> Result<(), Error> {
     let mut chain_blocks: Vec<Point> = vec![];
 
     /* Classic sync: Use blocks from store if available. */
-    if let Some(store) = block_store.as_mut() {
-        match (*store).load_blocks() {
-            None => {}
-            Some(blocks) => {
-                for (i, block) in blocks.iter().enumerate() {
-                    // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
-                    if (i == 0) || ((i > 1) && (i & (i - 1) == 0)) {
-                        chain_blocks.push(Point::Specific(block.0 as u64, block.1.clone()));
-                    }
+    match block_store.load_blocks() {
+        None => {}
+        Some(blocks) => {
+            for (i, block) in blocks.iter().enumerate() {
+                // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
+                if (i == 0) || ((i > 1) && (i & (i - 1) == 0)) {
+                    chain_blocks.push(Point::Specific(block.0 as u64, block.1.clone()));
                 }
             }
         }
-    }
+    };
 
     // add known points
     chain_blocks.push(
@@ -317,11 +305,33 @@ async fn do_chainsync(
     );
     chain_blocks.push(Point::Origin);
 
+    info!("get_intersect_blocks took: {:?}", start.elapsed());
+
+    Ok(chain_blocks)
+}
+
+async fn do_handshake(
+    channel: AgentChannel,
+    network_magic: u64,
+) -> Result<Confirmation<VersionData>, handshake::Error> {
+    let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
+    let mut client = handshake::Client::new(channel);
+    client.handshake(versions).await
+}
+
+async fn do_chainsync(
+    channel: AgentChannel,
+    skip_to_tip: bool,
+    exit_when_tip_reached: bool,
+    chain_blocks: Option<Vec<Point>>,
+    block_store: Option<Box<dyn BlockStore + 'static + Send>>,
+    shelley_genesis_hash: String,
+) -> Result<(), Error> {
     let mut client = chainsync::N2NClient::new(channel);
     if skip_to_tip {
         client.intersect_tip().await?;
     } else {
-        client.find_intersect(chain_blocks).await?;
+        client.find_intersect(chain_blocks.unwrap()).await?;
     }
 
     let mut logging_observer = LoggingObserver {
@@ -375,7 +385,8 @@ pub(crate) async fn sync(
 ) {
     loop {
         // Retry to establish connection forever
-        let block_store = sqlite::SqLiteBlockStore::new(db).unwrap();
+        let mut block_store = sqlite::SqLiteBlockStore::new(db).unwrap();
+        let chain_blocks = get_intersect_blocks(&mut block_store).unwrap();
         match Bearer::connect_tcp_timeout(
             &format!("{host}:{port}").to_socket_addrs().unwrap().next().unwrap(),
             FIVE_SECS,
@@ -399,6 +410,7 @@ pub(crate) async fn sync(
                                 cs_channel,
                                 false,
                                 no_service,
+                                Some(chain_blocks),
                                 Some(Box::new(block_store)),
                                 shelley_genesis_hash,
                             ));
@@ -477,6 +489,7 @@ pub(crate) async fn sendtip(
                                 cs_channel,
                                 true,
                                 false,
+                                None,
                                 Some(Box::new(pooltool_notifier)),
                                 "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81".to_string(),
                             ));

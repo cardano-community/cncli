@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.0.0-alpha3"
+version = "6.0.0-alpha4"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -15,29 +15,29 @@ num-bigint = "0.4.4"
 num-rational = "0.4.1"
 blake2b_simd = "1.0.2"
 byteorder = "1.5.0"
-pallas-network = { git = "https://github.com/AndrewWestberg/pallas", rev="8b1364668062465dfaf44adeb067853cc4770624" }
-pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="8b1364668062465dfaf44adeb067853cc4770624" }
+pallas-network = { git = "https://github.com/AndrewWestberg/pallas", rev="7c88a69d3129f22f604ae63e6f20477285cace09" }
+pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="7c88a69d3129f22f604ae63e6f20477285cace09" }
 #pallas-network = "0.20.0"
 #pallas-traverse = "0.20.0"
 chrono = "0.4.31"
-chrono-tz = "0.8.4"
-futures = "0.3.29"
+chrono-tz = "0.8.5"
+futures = "0.3.30"
 hex = "0.4.3"
 libc = "0.2.151"
 regex = "1.10.2"
 reqwest = { version = "0.11.22", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
 rusqlite = { version = "0.30.0", features = ["bundled"] }
-serde = { version = "1.0.193", features = ["derive"] }
+serde = { version = "1.0.194", features = ["derive"] }
 serde-aux = "4.3.1"
 serde_cbor = "0.11.2"
-serde_json = "1.0.108"
+serde_json = "1.0.110"
 socket2 = "0.5.5"
 structopt = "0.3.26"
 rand = "0.8.5"
 rayon = "1.8.0"
 itertools = "0.12.0"
 tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync", "macros"] }
-thiserror = "1.0.51"
+thiserror = "1.0.56"
 tracing = "0.1.37"
 tracing-subscriber = "0.3.16"
 
