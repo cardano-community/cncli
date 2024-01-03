@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "cncli"
-version = "6.0.0-alpha4"
+version = "6.0.0-alpha5"
 dependencies = [
  "async-std",
  "autotools",
