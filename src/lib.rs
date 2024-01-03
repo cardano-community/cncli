@@ -142,6 +142,11 @@ pub mod nodeclient {
                 help = "Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files"
             )]
             shelley_transition_epoch: i64,
+            #[structopt(
+                long,
+                help = "Provide a nonce value in lower-case hex instead of calculating from the db"
+            )]
+            nonce: Option<String>,
         },
         Sendtip {
             #[structopt(
@@ -312,8 +317,9 @@ pub mod nodeclient {
                 ref timezone,
                 ref consensus,
                 ref shelley_transition_epoch,
+                ref nonce,
             } => {
-                leaderlog::calculate_leader_logs(
+                if let Err(error) = leaderlog::calculate_leader_logs(
                     db,
                     byron_genesis,
                     shelley_genesis,
@@ -328,7 +334,10 @@ pub mod nodeclient {
                     false,
                     consensus,
                     shelley_transition_epoch,
-                );
+                    nonce,
+                ) {
+                    handle_error(error);
+                }
             }
             Command::Nonce {
                 ref db,
@@ -337,22 +346,27 @@ pub mod nodeclient {
                 ref extra_entropy,
                 ref ledger_set,
                 ref shelley_transition_epoch,
-            } => leaderlog::calculate_leader_logs(
-                db,
-                byron_genesis,
-                shelley_genesis,
-                &0u64,
-                &0u64,
-                &0f64,
-                extra_entropy,
-                ledger_set,
-                "nonce",
-                &PathBuf::new(),
-                "America/Los_Angeles",
-                true,
-                "praos",
-                shelley_transition_epoch,
-            ),
+            } => {
+                if let Err(error) = leaderlog::calculate_leader_logs(
+                    db,
+                    byron_genesis,
+                    shelley_genesis,
+                    &0u64,
+                    &0u64,
+                    &0f64,
+                    extra_entropy,
+                    ledger_set,
+                    "nonce",
+                    &PathBuf::new(),
+                    "America/Los_Angeles",
+                    true,
+                    "praos",
+                    shelley_transition_epoch,
+                    &None,
+                ) {
+                    handle_error(error);
+                }
+            }
             Command::Sendtip {
                 ref config,
                 ref cardano_node,

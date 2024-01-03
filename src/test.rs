@@ -75,7 +75,7 @@ async fn test_ping_failure_bad_port() {
 
 #[tokio::test]
 async fn test_ping_failure_bad_magic() {
-    let host = "preprod-node.play.dev.cardano.org".to_string();
+    let host = "preview-node.play.dev.cardano.org".to_string();
     let port = 3001;
     let network_magic = 111111;
     let mut stdout: Vec<u8> = Vec::new();
