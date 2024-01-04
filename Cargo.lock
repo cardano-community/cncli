@@ -233,9 +233,9 @@ dependencies = [
 
 [[package]]
 name = "async-task"
-version = "4.6.0"
+version = "4.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e1d90cd0b264dfdd8eb5bad0a2c217c1f88fa96a8573f40e7b12de23fb468f46"
+checksum = "fbb36e985947064623dbd357f727af08ffd077f93d696782f3c56365fa2e2799"
 
 [[package]]
 name = "atomic-waker"
@@ -459,7 +459,7 @@ dependencies = [
 
 [[package]]
 name = "cncli"
-version = "6.0.0-alpha5"
+version = "6.0.0"
 dependencies = [
  "async-std",
  "autotools",
@@ -826,7 +826,7 @@ checksum = "87750cf4b7a4c0625b1529e4c543c2182106e4dedc60a2a6455e00d212c489ac"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.46",
+ "syn 2.0.47",
 ]
 
 [[package]]
@@ -1415,8 +1415,9 @@ checksum = "b15813163c1d831bf4a13c3610c05c0d03b39feb07f7e09fa234dac9b15aaf39"
 
 [[package]]
 name = "pallas-addresses"
-version = "0.20.0"
-source = "git+https://github.com/AndrewWestberg/pallas?rev=7c88a69d3129f22f604ae63e6f20477285cace09#7c88a69d3129f22f604ae63e6f20477285cace09"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "448cdac132c6a90f166098b3739d32f76c2a44ad7db443c1038db1ef57bef0c3"
 dependencies = [
  "base58",
  "bech32",
@@ -1430,8 +1431,9 @@ dependencies = [
 
 [[package]]
 name = "pallas-codec"
-version = "0.20.0"
-source = "git+https://github.com/AndrewWestberg/pallas?rev=7c88a69d3129f22f604ae63e6f20477285cace09#7c88a69d3129f22f604ae63e6f20477285cace09"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aaf1bfb0b6b942a380032e2d8fe8dabd4d97d2ec949ba9acf8e54b79f9c91682"
 dependencies = [
  "hex",
  "minicbor",
@@ -1441,8 +1443,9 @@ dependencies = [
 
 [[package]]
 name = "pallas-crypto"
-version = "0.20.0"
-source = "git+https://github.com/AndrewWestberg/pallas?rev=7c88a69d3129f22f604ae63e6f20477285cace09#7c88a69d3129f22f604ae63e6f20477285cace09"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "65e3d525729ed4dbf7a41387e15daea2bba582837d4139b8a3b578aad099f67f"
 dependencies = [
  "cryptoxide",
  "hex",
@@ -1454,8 +1457,9 @@ dependencies = [
 
 [[package]]
 name = "pallas-network"
-version = "0.20.0"
-source = "git+https://github.com/AndrewWestberg/pallas?rev=7c88a69d3129f22f604ae63e6f20477285cace09#7c88a69d3129f22f604ae63e6f20477285cace09"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b222e9054f01da84b0cd2bb992a6447d23747f0269c7715557c9df7a271baea3"
 dependencies = [
  "byteorder",
  "hex",
@@ -1471,8 +1475,9 @@ dependencies = [
 
 [[package]]
 name = "pallas-primitives"
-version = "0.20.0"
-source = "git+https://github.com/AndrewWestberg/pallas?rev=7c88a69d3129f22f604ae63e6f20477285cace09#7c88a69d3129f22f604ae63e6f20477285cace09"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cbcfeb1663613296e09b6a0a81b49e6547402271f5159031c7bb9bc83e9014e9"
 dependencies = [
  "base58",
  "bech32",
@@ -1486,8 +1491,9 @@ dependencies = [
 
 [[package]]
 name = "pallas-traverse"
-version = "0.20.0"
-source = "git+https://github.com/AndrewWestberg/pallas?rev=7c88a69d3129f22f604ae63e6f20477285cace09#7c88a69d3129f22f604ae63e6f20477285cace09"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7914e34c26adb83c0595133281492b8c03a08c214301fa2314e996ece91a6ba7"
 dependencies = [
  "hex",
  "pallas-addresses",
@@ -1665,9 +1671,9 @@ dependencies = [
 
 [[package]]
 name = "proc-macro2"
-version = "1.0.74"
+version = "1.0.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2de98502f212cfcea8d0bb305bd0f49d7ebdd75b64ba0a68f937d888f4e0d6db"
+checksum = "907a61bd0f64c2f29cd1cf1dc34d05176426a3f504a78010f08416ddb7b13708"
 dependencies = [
  "unicode-ident",
 ]
@@ -1948,14 +1954,14 @@ checksum = "a3385e45322e8f9931410f01b3031ec534c3947d0e94c18049af4d9f9907d4e0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.46",
+ "syn 2.0.47",
 ]
 
 [[package]]
 name = "serde_json"
-version = "1.0.110"
+version = "1.0.111"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6fbd975230bada99c8bb618e0c365c2eefa219158d5c6c29610fd09ff1833257"
+checksum = "176e46fa42316f18edd598015a5166857fc835ec732f5215eac6b7bdbf0a84f4"
 dependencies = [
  "itoa",
  "ryu",
@@ -2083,9 +2089,9 @@ dependencies = [
 
 [[package]]
 name = "syn"
-version = "2.0.46"
+version = "2.0.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89456b690ff72fddcecf231caedbe615c59480c93358a93dfae7fc29e3ebbf0e"
+checksum = "1726efe18f42ae774cc644f330953a5e7b3c3003d3edcecf18850fe9d4dd9afb"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2148,7 +2154,7 @@ checksum = "fa0faa943b50f3db30a20aa7e265dbc66076993efed8463e8de414e5d06d3471"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.46",
+ "syn 2.0.47",
 ]
 
 [[package]]
@@ -2201,7 +2207,7 @@ checksum = "5b8a1e28f2deaa14e508979454cb3a223b10b938b45af148bc0986de36f1923b"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.46",
+ "syn 2.0.47",
 ]
 
 [[package]]
@@ -2253,7 +2259,7 @@ checksum = "34704c8d6ebcbc939824180af020566b01a7c01f80641264eba0999f6c2b6be7"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.46",
+ "syn 2.0.47",
 ]
 
 [[package]]
@@ -2361,9 +2367,9 @@ checksum = "830b7e5d4d90034032940e4ace0d9a9a057e7a45cd94e6c007832e39edb82f6d"
 
 [[package]]
 name = "value-bag"
-version = "1.4.2"
+version = "1.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a72e1902dde2bd6441347de2b70b7f5d59bf157c6c62f0c44572607a1d55bbe"
+checksum = "62ce5bb364b23e66b528d03168df78b38c0f7b6fe17386928f29d5ab2e7cb2f7"
 
 [[package]]
 name = "vcpkg"
@@ -2425,7 +2431,7 @@ dependencies = [
  "once_cell",
  "proc-macro2",
  "quote",
- "syn 2.0.46",
+ "syn 2.0.47",
  "wasm-bindgen-shared",
 ]
 
@@ -2459,7 +2465,7 @@ checksum = "f0eb82fcb7930ae6219a7ecfd55b217f5f0893484b7a13022ebb2b2bf20b5283"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.46",
+ "syn 2.0.47",
  "wasm-bindgen-backend",
  "wasm-bindgen-shared",
 ]
@@ -2685,5 +2691,5 @@ checksum = "9ce1b18ccd8e73a9321186f97e46f9f04b778851177567b1975109d26a08d2a6"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.46",
+ "syn 2.0.47",
 ]

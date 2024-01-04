@@ -9,11 +9,11 @@ You can install CNCLI using either the release binaries or compiling the Rust co
 To install CNCLI from a binary release, download the [latest release](https://github.com/cardano-community/cncli/releases) and extract it in the ```/usr/local/bin/``` directory of the ```block producing node``` server of your stake pool. Adjust the ```<latest_release_version>``` variable in the command to the latest release available:
 
 ```bash
-curl -sLJ https://github.com/cardano-community/cncli/releases/download/v<latest_release_version>/cncli-<latest_release_version>-x86_64-unknown-linux-musl.tar.gz -o /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-musl.tar.gz
+$ curl -sLJ https://github.com/cardano-community/cncli/releases/download/v<latest_release_version>/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz -o /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz
 ```
 
 ```bash
-tar xzvf /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-musl.tar.gz -C /usr/local/bin/
+$ tar xzvf /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz -C /usr/local/bin/
 ```
 
 ### Compile from source
@@ -21,49 +21,50 @@ tar xzvf /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-musl.tar.gz -C
 #### Prepare RUST environment
 
 ```bash
-mkdir -p $HOME/.cargo/bin
+$ mkdir -p $HOME/.cargo/bin
 ```
 
 ```bash
-chown -R $USER\: $HOME/.cargo
+$ chown -R $USER\: $HOME/.cargo
 ```
 
 ```bash
-touch $HOME/.profile
+$ touch $HOME/.profile
 ```
 
 ```bash
-chown $USER\: $HOME/.profile
+$ chown $USER\: $HOME/.profile
 ```
 
 #### Install rustup - proceed with default install (option 1)
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+$ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 ```
 
 ```bash
-source $HOME/.cargo/env
+$ source $HOME/.cargo/env
 ```
 
 ```bash
-rustup install stable
+$ rustup install stable
 ```
 
 ```bash
-rustup default stable
+$ rustup default stable
 ```
 
 ```bash
-rustup update
+$ rustup update
 ```
 
 ```bash
-rustup component add clippy rustfmt
+$ rustup component add clippy rustfmt
 ```
 
+(Only if you want to build for the musl target)
 ```bash
-rustup target add x86_64-unknown-linux-musl
+$ rustup target add x86_64-unknown-linux-musl
 ```
 
 #### Install dependencies and build cncli
@@ -71,31 +72,35 @@ rustup target add x86_64-unknown-linux-musl
 Adjust the ```<latest_tag_name>``` variable in the command to the latest tag available:
 
 ```bash
-source $HOME/.cargo/env
+$ source $HOME/.cargo/env
 ```
 
 ```bash
-sudo apt-get update -y && sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools
+$ sudo apt-get update -y && sudo apt-get install -y automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools
 ```
 
 ```bash
-git clone --recurse-submodules https://github.com/cardano-community/cncli
+$ git clone --recurse-submodules https://github.com/cardano-community/cncli
 ```
 
 ```bash
-cd cncli
+$ cd cncli
 ```
 
 ```bash
-git checkout <latest_tag_name>
+$ git checkout <latest_tag_name>
 ```
 
 ```bash
-cargo install --path . --force
+$ cargo install --path . --force
+```
+or
+```bash
+$ cargo install --path . --force --target x86_64-unknown-linux-musl
 ```
 
 ```bash
-cncli --version
+$ cncli --version
 ```
 
 ### Checking that cncli is properly installed
@@ -103,7 +108,7 @@ cncli --version
 Run the following command to check if cncli is correctly installed and available in your system ```PATH``` variable:
 
 ```bash
-command -v cncli
+$ command -v cncli
 ```
 
 It should return ```/usr/local/bin/cncli```.
@@ -113,27 +118,31 @@ It should return ```/usr/local/bin/cncli```.
 Adjust the ```<latest_tag_name>``` variable in the command to the latest tag available:
 
 ```bash
-rustup update
+$ rustup update
 ```
 
 ```bash
-cd cncli
+$ cd cncli
 ```
 
 ```bash
-git fetch --all --prune
+$ git fetch --all --prune
 ```
 
 ```bash
-git checkout <latest_tag_name>
+$ git checkout <latest_tag_name>
 ```
 
 ```bash
-cargo install --path . --force
+$ cargo install --path . --force
+```
+or
+```bash
+$ cargo install --path . --force --target x86_64-unknown-linux-musl
 ```
 
 ```bash
-cncli --version
+$ cncli --version
 ```
 
 ## Cross Platform build with Nix + Flakes
@@ -264,8 +273,8 @@ LimitNOFILE=131072
 ExecStart=/usr/local/bin/cncli sync --host 127.0.0.1 --port 3000 --db /root/scripts/cncli.db
 KillSignal=SIGINT
 SuccessExitStatus=143
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=cncli-sync
 
 [Install]
@@ -287,8 +296,8 @@ LimitNOFILE=131072
 ExecStart=/usr/local/bin/cncli sendtip --cardano-node /usr/local/bin/cardano-node --config /root/scripts/pooltool.json
 KillSignal=SIGINT
 SuccessExitStatus=143
-StandardOutput=syslog
-StandardError=syslog
+StandardOutput=journal
+StandardError=journal
 SyslogIdentifier=cncli-sendtip
 
 [Install]
