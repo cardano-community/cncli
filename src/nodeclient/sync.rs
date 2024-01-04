@@ -159,10 +159,11 @@ impl Observer<HeaderContent> for LoggingObserver {
                                     }
 
                                     info!(
-                                        "block {} of {}: {:.2}% sync'd",
+                                        "block {} of {}: {:>6.*}% sync'd",
                                         header.header_body.block_number,
                                         tip.1,
-                                        (block_number / tip_block_number * 10000.0).floor() / 100.0
+                                        2,
+                                        (block_number / tip_block_number * 10000.0).floor() / 100.0,
                                     );
                                     self.last_log_time = Instant::now();
                                 }
@@ -211,10 +212,11 @@ impl Observer<HeaderContent> for LoggingObserver {
                                     }
 
                                     info!(
-                                        "block {} of {}: {:.2}% sync'd",
+                                        "block {} of {}: {:>6.*}% sync'd",
                                         header.header_body.block_number,
                                         tip_block_number,
-                                        block_number / tip_f64 * 100.0
+                                        2,
+                                        (block_number / tip_f64 * 10000.0).floor() / 100.0,
                                     );
                                     self.last_log_time = Instant::now();
                                 }

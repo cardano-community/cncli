@@ -9,8 +9,8 @@ This command validates that the remote server is on the given network and return
 #### Show Ping Help
 
 ```bash
-cncli ping --help
-cncli-ping 5.0.2
+$ cncli ping --help
+cncli-ping 6.0.0
 
 USAGE:
     cncli ping [OPTIONS] --host <host>
@@ -29,7 +29,7 @@ OPTIONS:
 #### Example Mainnet ping using defaults
 
 ```bash
-cncli ping --host north-america.relays-new.cardano-mainnet.iohk.io
+$ cncli ping --host backbone.cardano-mainnet.iohk.io
 ```
 
 ##### Ping Success Result
@@ -37,18 +37,20 @@ cncli ping --host north-america.relays-new.cardano-mainnet.iohk.io
 ```bash
 {
   "status": "ok",
-  "host": "north-america.relays-new.cardano-mainnet.iohk.io",
+  "host": "backbone.cardano-mainnet.iohk.io",
   "port": 3001,
-  "networkProtocolVersion": 7,
-  "connectDurationMs": 154,
-  "durationMs": 237
+  "networkProtocolVersion": 11,
+  "dnsDurationMs": 33,
+  "connectDurationMs": 131,
+  "handshakeDurationMs": 130,
+  "durationMs": 296
 }
 ```
 
 #### Example Mainnet ping timeout failure
 
 ```bash
-cncli ping --host north-america.relays-new.cardano-mainnet.iohk.io --port 9999
+$ cncli ping --host backbone.cardano-mainnet.iohk.io --port 9999
 ```
 
 ##### Ping Failure Result
@@ -56,16 +58,16 @@ cncli ping --host north-america.relays-new.cardano-mainnet.iohk.io --port 9999
 ```bash
 {
   "status": "error",
-  "host": "north-america.relays-new.cardano-mainnet.iohk.io",
+  "host": "backbone.cardano-mainnet.iohk.io",
   "port": 9999,
-  "errorMessage": "connection timed out"
+  "errorMessage": "connect timeout"
 }
 ```
 
 #### Example ping to testnet node with mainnet magic failure
 
 ```bash
-cncli ping --host north-america.relays-new.cardano-testnet.iohkdev.io
+$ cncli ping --host preprod-node.play.dev.cardano.org
 ```
 
 ##### Ping Magic Failure Result
@@ -73,16 +75,16 @@ cncli ping --host north-america.relays-new.cardano-testnet.iohkdev.io
 ```bash
 {
   "status": "error",
-  "host": "north-america.relays-new.cardano-testnet.iohkdev.io",
+  "host": "preprod-node.play.dev.cardano.org",
   "port": 3001,
-  "errorMessage": "Refused(7, \"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1097911063}, diffusionMode = InitiatorAndResponderDiffusionMode} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 764824073}, diffusionMode = InitiatorAndResponderDiffusionMode}\")"
+  "errorMessage": "Refused(11, \"version data mismatch: NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 1}, diffusionMode = InitiatorAndResponderDiffusionMode, peerSharing = PeerSharingDisabled, query = False} /= NodeToNodeVersionData {networkMagic = NetworkMagic {unNetworkMagic = 764824073}, diffusionMode = InitiatorAndResponderDiffusionMode, peerSharing = PeerSharingDisabled, query = False}\")"
 }
 ```
 
 #### Example ping to testnet success
 
 ```bash
-cncli ping --host north-america.relays-new.cardano-testnet.iohkdev.io --port 3001 --network-magic 1097911063
+$ cncli ping --host preprod-node.play.dev.cardano.org --port 3001 --network-magic 1
 ```
 
 ##### Ping Testnet Success Result
@@ -90,11 +92,13 @@ cncli ping --host north-america.relays-new.cardano-testnet.iohkdev.io --port 300
 ```bash
 {
   "status": "ok",
-  "host": "north-america.relays-new.cardano-testnet.iohkdev.io",
+  "host": "preprod-node.play.dev.cardano.org",
   "port": 3001,
-  "networkProtocolVersion": 7,
-  "connectDurationMs": 48,
-  "durationMs": 97
+  "networkProtocolVersion": 11,
+  "dnsDurationMs": 2,
+  "connectDurationMs": 47,
+  "handshakeDurationMs": 57,
+  "durationMs": 107
 }
 ```
 
@@ -107,8 +111,8 @@ This command connects to a remote node and synchronizes blocks to a local sqlite
 #### Show Sync Help
 
 ```bash
-cncli sync --help
-cncli-sync 5.1.0
+$ cncli sync --help
+cncli-sync 6.0.0
 
 USAGE:
     cncli sync [FLAGS] [OPTIONS] --host <host>
@@ -130,16 +134,17 @@ OPTIONS:
 #### Example sync command
 
 ```bash
-cncli sync --host 127.0.0.1 --port 3000
+$ cncli sync --host backbone.cardano-mainnet.iohk.io
 ```
 
 ##### Sync Result
 
 ```bash
- 2022-06-21T12:51:13.839Z INFO  cncli::nodeclient::sync   > block 7391393 of 7403845: 99.83% sync'd
- 2022-06-21T12:51:18.236Z INFO  cncli::nodeclient::sync   > block 7403845 of 7403845: 100.00% sync'd
- 2022-06-21T12:51:30.096Z INFO  cncli::nodeclient::sync   > block 7403846 of 7403846: 100.00% sync'd
- 2022-06-21T12:51:33.937Z INFO  cncli::nodeclient::sync   > block 7403847 of 7403847: 100.00% sync'd
+ 2024-01-04T17:21:11.298Z INFO  cncli::nodeclient::sync > get_intersect_blocks took: 308.175µs
+ 2024-01-04T17:21:15.805Z INFO  cncli::nodeclient::sync > block 9762075 of 9762081:  99.99% sync'd
+ 2024-01-04T17:21:16.811Z INFO  cncli::nodeclient::sync > block 9762081 of 9762081: 100.00% sync'd
+ 2024-01-04T17:22:24.287Z INFO  cncli::nodeclient::sync > block 9762082 of 9762082: 100.00% sync'd
+ 2024-01-04T17:22:38.313Z INFO  cncli::nodeclient::sync > block 9762083 of 9762083: 100.00% sync'd
 ```
 
 ### Status Command
@@ -150,7 +155,7 @@ This simple command gives you an ok if the database is fully synced. It will ret
 
 ```bash
 $ cncli status --help
-cncli-status 5.1.1
+cncli-status 6.0.0
 
 USAGE:
     cncli status [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -171,7 +176,7 @@ OPTIONS:
 #### Status when fully synced
 
 ```bash
-cncli status --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json
+$ cncli status --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json
 ```
 
 ##### Fully Synced Result
@@ -185,7 +190,7 @@ cncli status --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesi
 #### Status when not fully synced
 
 ```bash
-cncli status --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json --db dummy.db
+$ cncli status --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json --db dummy.db
 ```
 
 ##### Not In Sync Result
@@ -204,8 +209,8 @@ This command validates that a block hash or partial block hash is on-chain. You 
 #### Show Validate Help
 
 ```bash
-$cncli validate --help
-cncli-validate 5.0.0
+$ cncli validate --help
+cncli-validate 6.0.0
 
 USAGE:
     cncli validate [OPTIONS] --hash <hash>
@@ -222,7 +227,7 @@ OPTIONS:
 #### Validate block success
 
 ```bash
-cncli validate --hash 0c4b73
+$ cncli validate --hash 0c4b73
 ```
 
 ##### Validate Success Result
@@ -232,6 +237,7 @@ cncli validate --hash 0c4b73
  "status": "ok",
  "block_number": "4891104",
  "slot_number": "12597768",
+ "pool_id": "89af15a1c2b8e379aa8ca6d4d9b0134e373122f84f6f45fac2e26c47",
  "hash": "0c4b730183ab2533d423f9af56ed99efd8121f716f82aa95caa3e6c11f10dc8d",
  "prev_hash": "2142685e0912f1956c99551431270c1e199b85cde57fe56554d23ce111504fe9",
  "leader_vrf": "000111925d12aea26b1705ef244fe8930f437be294180b418fba47ebf386e73d5ec7bbd397df5ba44d085171a66266089fba10a089442e207d7ad730849f9293"
@@ -241,7 +247,7 @@ cncli validate --hash 0c4b73
 #### Validate block orphaned
 
 ```bash
-cncli validate --hash af6d8e
+$ cncli validate --hash ab7095
 ```
 
 ##### Validate Orphaned Result
@@ -249,18 +255,19 @@ cncli validate --hash af6d8e
 ```bash
 {
  "status": "orphaned",
- "block_number": "4891104",
- "slot_number": "12597768",
- "hash": "af6d8e8a21bd65b6542fecc51da82e59824ad51c43fb2bbc0dcd0c8f20f2adae",
- "prev_hash": "2142685e0912f1956c99551431270c1e199b85cde57fe56554d23ce111504fe9",
- "leader_vrf": "000c6abd406175af91def3c225fb758370d26e506275a9574eb88ebb886490f3a4a6d971c822193bb3a186b8c3d75c890f61bff09fbf7f0066b152a2707f9929"
+ "block_number": "9762067",
+ "slot_number": "112822212",
+ "pool_id": "ec736597797c68044b8fccd4e895929c0a842f2e9e0a9e221b0a3026",
+ "hash": "ab70958f10aac7399453a257b00377dd64615d36544d9a4c44abacc1ac66bf4f",
+ "prev_hash": "b84c068276492628bb373f0d1a67a55675f80e692a3767fbffaccc2fd08757e4",
+ "leader_vrf": "000130f59c1a9ed0129abea4ba2c1a8a175f0259ce94ef77efa2fc2724638202"
 }
 ```
 
 #### Validate block missing
 
 ```bash
-cncli validate --hash ffffff
+$ cncli validate --hash ba53ba11
 ```
 
 ##### Validate Missing Result
@@ -280,7 +287,7 @@ This command calculates the epoch nonce value. This command requires that you us
 
 ```bash
 $ cncli nonce --help
-cncli-nonce 5.1.1
+cncli-nonce 6.0.0
 
 USAGE:
     cncli nonce [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -305,13 +312,13 @@ OPTIONS:
 #### Calculate nonce
 
 ```bash
-cncli nonce --byron-genesis ~/haskell/test/byron-genesis.json --shelley-genesis ~/haskell/test/shelley-genesis.json --ledger-set next
+$ cncli nonce --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json --ledger-set next
 ```
 
 ##### Nonce Result
 
 ```bash
-60d68963ece4f16a30934f473fc3be51526f7c6ff2ac0b3f8a40a38623411f8e
+4c80bbb4bbec29a7e828dd0727e6a76878ab031b5abb4aa02c78287b1523f4e5
 ```
 
 ### Leaderlog Command
@@ -343,32 +350,46 @@ echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
 
 ```bash
 $ cncli leaderlog --help
-cncli-nonce 5.1.1
+cncli-leaderlog 6.0.0
 
 USAGE:
-    cncli nonce [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
+    cncli leaderlog [OPTIONS] --active-stake <active-stake> --byron-genesis <byron-genesis> --pool-id <pool-id> --pool-stake <pool-stake> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
+        --active-stake <active-stake>                            total active stake snapshot value in lovelace
         --byron-genesis <byron-genesis>                          byron genesis json file
+    -c, --consensus <consensus>
+            Consensus algorithm - Alonzo and earlier uses tpraos, Babbage and later uses praos [default: praos]
+
+        --d <d>                                                  decentralization parameter [default: 0]
     -d, --db <db>                                                sqlite database file [default: ./cncli.db]
         --extra-entropy <extra-entropy>                          hex string of the extra entropy value
         --ledger-set <ledger-set>
             Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch [default:
             current]
+        --nonce <nonce>
+            Provide a nonce value in lower-case hex instead of calculating from the db
+
+        --pool-id <pool-id>                                      lower-case hex pool id
+        --pool-stake <pool-stake>                                pool active stake snapshot value in lovelace
+        --pool-vrf-skey <pool-vrf-skey>                          pool's vrf.skey file
         --shelley-genesis <shelley-genesis>                      shelley genesis json file
         --shelley-transition-epoch <shelley-transition-epoch>
             Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files [env:
             SHELLEY_TRANS_EPOCH=]  [default: -1]
+        --tz <timezone>
+            TimeZone string from the IANA database - https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
+            [default: America/Los_Angeles]
 ```
 
 #### Calculate leaderlog
 
 ```bash
-cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --consensus tpraos --ledger-set current
+$ cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --consensus tpraos --ledger-set current
 ```
 
 ##### Leaderlog Success Result
@@ -401,7 +422,7 @@ cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d4771
 #### Calculate leaderlog failure (too soon for "next" logs, or un-synchronized database)
 
 ```bash
-cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --ledger-set next
+$ cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --ledger-set next
 ```
 
 ##### Leaderlog Too Soon Result
@@ -428,7 +449,7 @@ It is important to point this command at your core nodes. This will help pooltoo
 
 ```bash
 $ cncli sendtip --help
-cncli-sendtip 5.0.0
+cncli-sendtip 6.0.0
 
 USAGE:
     cncli sendtip [OPTIONS] --cardano-node <cardano-node>
@@ -471,7 +492,7 @@ You need to create a pooltool.json file so that the sendtip command knows what n
 #### Sending tips to pooltool
 
 ```bash
-cncli sendtip --cardano-node /usr/local/bin/cardano-node --config /root/scripts/pooltool.json
+$ cncli sendtip --cardano-node /usr/local/bin/cardano-node --config /root/scripts/pooltool.json
 ```
 
 ##### Sending Tip Result
@@ -498,7 +519,7 @@ The sendslots command securely sends pooltool the number of slots you have assig
 
 ```bash
 $ cncli sendslots --help
-cncli-sendslots 5.0.0
+cncli-sendslots 6.0.0
 
 USAGE:
     cncli sendslots [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -517,7 +538,7 @@ OPTIONS:
 #### Sendslots Success
 
 ```bash
-cncli sendslots --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json
+$ cncli sendslots --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json
 ```
 
 ##### Sendslots success Result
@@ -541,7 +562,7 @@ This command signs an arbitrary message string with the pool's vrf.skey. The out
 
 ```bash
 $ cncli sign --help
-cncli-sign 5.0.0
+cncli-sign 6.0.0
 
 USAGE:
     cncli sign --message <message> --pool-vrf-skey <pool-vrf-skey>
@@ -578,7 +599,7 @@ This command verifies the signature that was used to sign an arbitrary message s
 
 ```bash
 $ cncli verify --help
-cncli-verify 5.0.0
+cncli-verify 6.0.0
 
 USAGE:
     cncli verify --message <message> --pool-vrf-vkey <pool-vrf-vkey> --pool-vrf-vkey-hash <pool-vrf-vkey-hash> --signature <signature>
