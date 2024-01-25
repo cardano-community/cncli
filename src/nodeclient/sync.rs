@@ -37,7 +37,7 @@ pub enum Error {
     IoError(#[from] std::io::Error),
 
     #[error("keepalive error occurred")]
-    KeepAliveError(#[from] keepalive::Error),
+    KeepAliveError(#[from] keepalive::ClientError),
 
     #[error("chainsync error occurred")]
     ChainSyncError(#[from] pallas_network::miniprotocols::chainsync::ClientError),
