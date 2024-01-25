@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.0.0"
+version = "6.0.1"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -9,48 +9,48 @@ links = "libsodium"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-std = "1.12.0"
-bigdecimal = "0.4.2"
-num-bigint = "0.4.4"
-num-rational = "0.4.1"
-blake2b_simd = "1.0.2"
-byteorder = "1.5.0"
+async-std = "1.12"
+bigdecimal = "0.4"
+num-bigint = "0.4"
+num-rational = "0.4"
+blake2b_simd = "1.0"
+byteorder = "1.5"
 #pallas-network = { git = "https://github.com/AndrewWestberg/pallas", rev="7c88a69d3129f22f604ae63e6f20477285cace09" }
 #pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="7c88a69d3129f22f604ae63e6f20477285cace09" }
-pallas-network = "0.21.0"
-pallas-traverse = "0.21.0"
-chrono = "0.4.31"
-chrono-tz = "0.8.5"
-futures = "0.3.30"
-hex = "0.4.3"
-libc = "0.2.151"
-regex = "1.10.2"
-reqwest = { version = "0.11.22", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
-rusqlite = { version = "0.30.0", features = ["bundled"] }
-serde = { version = "1.0.194", features = ["derive"] }
-serde-aux = "4.3.1"
-serde_cbor = "0.11.2"
-serde_json = "1.0.110"
-socket2 = "0.5.5"
-structopt = "0.3.26"
-rand = "0.8.5"
-rayon = "1.8.0"
-itertools = "0.12.0"
+pallas-network = "0.22"
+pallas-traverse = "0.22"
+chrono = "0.4"
+chrono-tz = "0.8"
+futures = "0.3"
+hex = "0.4"
+libc = "0.2"
+regex = "1.10"
+reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
+rusqlite = { version = "0.30", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde-aux = "4.3"
+serde_cbor = "0.11"
+serde_json = "1.0"
+socket2 = "0.5"
+structopt = "0.3"
+rand = "0.8"
+rayon = "1.8"
+itertools = "0.12"
 tokio = { version = "1", features = ["rt", "net", "io-util", "time", "sync", "macros"] }
-thiserror = "1.0.56"
-tracing = "0.1.37"
-tracing-subscriber = "0.3.16"
+thiserror = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
 
 
 # logging
-log = "0.4.20"
-env_logger = "0.10.1"
-pretty_env_logger = "0.5.0"
+log = "0.4"
+env_logger = "0.11"
+pretty_env_logger = "0.5"
 
 [build-dependencies]
-autotools = "0.2.6"
-pkg-config = "0.3.28"
-built = { version = "0.7.1", features = ["git2"] }
+autotools = "0.2"
+pkg-config = "0.3"
+built = { version = "0.7", features = ["git2"] }
 
 [features]
 libsodium-sys = []

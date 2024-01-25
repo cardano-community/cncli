@@ -379,7 +379,7 @@ fn vrf_leader_value(raw_vrf: BigInt) -> Result<BigInt, Error> {
 // @param sigma The controlled stake proportion for the pool
 // @param eta0 The epoch nonce value
 // @param pool_vrf_skey The vrf signing key for the pool
-// @param cert_nat_max The value 2^512
+// @param cert_nat_max The value 2^256
 // @param c 1-activeSlotsCoeff - usually 0.95
 fn is_slot_leader_praos(
     slot: i64,
