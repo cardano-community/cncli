@@ -18,8 +18,8 @@ CNCLI is provided free of charge to the Cardano stake pool operator community. I
 
 - [Andrew Westberg](https://github.com/AndrewWestberg) - [**BCSH**](https://bluecheesestakehouse.com/)
 - [Michael Fazio](https://github.com/michaeljfazio) - [**SAND**](https://www.sandstone.io/)
-- [Andrea Callea](https://github.com/gacallea/) - [**SALAD**](https://insalada.io/)
-- [Thomas Diesler](https://github.com/tdiesler/) - [**ASTOR**](http://astorpool.net/)
+- [Andrea Callea](https://github.com/gacallea/)
+- [Thomas Diesler](https://github.com/tdiesler/)
 
 ### Contributing
 
