@@ -7,7 +7,7 @@ use std::str::FromStr;
 use bigdecimal::{BigDecimal, FromPrimitive, One, ToPrimitive};
 use blake2b_simd::Params;
 use byteorder::{ByteOrder, NetworkEndian};
-use chrono::{Duration, NaiveDateTime, TimeZone, Utc};
+use chrono::{DateTime, NaiveDateTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use itertools::sorted;
 use log::{debug, error, info, trace};
@@ -259,7 +259,7 @@ fn slot_to_naivedatetime(
         -1 => guess_shelley_transition_epoch(shelley.network_magic),
         _ => shelley_trans_epoch,
     };
-    let network_start_time = NaiveDateTime::from_timestamp_opt(byron.start_time, 0).unwrap();
+    let network_start_time = DateTime::from_timestamp(byron.start_time, 0).unwrap().naive_utc();
     let byron_epoch_length = 10 * byron.protocol_consts.k;
     let byron_slots = byron_epoch_length * shelley_transition_epoch;
     let shelley_slots = slot - byron_slots;
@@ -267,7 +267,7 @@ fn slot_to_naivedatetime(
     let byron_secs = (byron.block_version_data.slot_duration * byron_slots) / 1000;
     let shelley_secs = shelley_slots * shelley.slot_length;
 
-    network_start_time + Duration::seconds(byron_secs) + Duration::seconds(shelley_secs)
+    network_start_time + TimeDelta::try_seconds(byron_secs).unwrap() + TimeDelta::try_seconds(shelley_secs).unwrap()
 }
 
 fn slot_to_timestamp(
@@ -452,6 +452,7 @@ fn get_current_slot(byron: &ByronGenesis, shelley: &ShelleyGenesis, shelley_tran
 
     let genesis_start_time_sec = NaiveDateTime::parse_from_str(&shelley.system_start, "%Y-%m-%dT%H:%M:%SZ")
         .unwrap()
+        .and_utc()
         .timestamp();
 
     let trans_time_end = genesis_start_time_sec + (shelley_transition_epoch * shelley.epoch_length);
@@ -566,8 +567,9 @@ pub(crate) fn calculate_leader_logs(
         },
         None => {
             // Make sure we're fully sync'd
-            let tip_time =
-                slot_to_naivedatetime(&byron, &shelley, tip_slot_number, *shelley_transition_epoch).timestamp();
+            let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number, *shelley_transition_epoch)
+                .and_utc()
+                .timestamp();
             let system_time = Utc::now().timestamp();
             if system_time - tip_time > 900 {
                 return Err(Error::Leaderlog(format!(
@@ -583,11 +585,12 @@ pub(crate) fn calculate_leader_logs(
             let stability_window_start = first_slot_of_epoch - stability_window;
             debug!("stability_window: {}", stability_window);
             debug!("stability_window_start: {}", stability_window_start);
+            let stability_window_start_plus_1_min = stability_window_start + 60;
 
             let tip_slot_number = get_tip_slot_number(&db)?;
-            if tip_slot_number < stability_window_start {
+            if tip_slot_number < stability_window_start_plus_1_min {
                 return Err(Error::Leaderlog(format!(
-                    "Not enough blocks sync'd to calculate! Try again later after slot {stability_window_start} is sync'd."
+                    "Not enough blocks sync'd to calculate! Try again later after slot {stability_window_start_plus_1_min} is sync'd."
                 )));
             }
 
@@ -784,6 +787,7 @@ pub(crate) fn status(db_path: &Path, byron_genesis: &Path, shelley_genesis: &Pat
                             debug!("tip_slot_number: {}", tip_slot_number);
                             let tip_time =
                                 slot_to_naivedatetime(&byron, &shelley, tip_slot_number, *shelley_trans_epoch)
+                                    .and_utc()
                                     .timestamp();
                             let system_time = Utc::now().timestamp();
                             if system_time - tip_time < 120 {
@@ -831,6 +835,7 @@ pub(crate) fn send_slots(
                             debug!("tip_slot_number: {}", tip_slot_number);
                             let tip_time =
                                 slot_to_naivedatetime(&byron, &shelley, tip_slot_number, *shelley_trans_epoch)
+                                    .and_utc()
                                     .timestamp();
                             let system_time = Utc::now().timestamp();
                             if system_time - tip_time < 120 {

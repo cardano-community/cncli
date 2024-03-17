@@ -93,7 +93,7 @@ async fn test_ping_failure_bad_magic() {
 fn test_eps() {
     let eps = BigDecimal::from_str("1.E-24").unwrap();
     // println!("1/10^24 = {}", eps);
-    assert_eq!(eps.to_string(), "0.000000000000000000000001");
+    assert_eq!(eps.to_string(), "1E-24");
 }
 
 #[test]
@@ -119,7 +119,7 @@ fn test_exp() {
 
     let x = BigDecimal::from_str("-54.268914").unwrap();
     let exp_x = exp(&x);
-    assert_eq!(exp_x.to_string(), "0.0000000000000000000000026996664594");
+    assert_eq!(exp_x.to_string(), "2.6996664594E-24");
 }
 
 #[test]
@@ -143,7 +143,7 @@ fn test_split_ln() {
 fn test_ln() {
     let x = BigDecimal::one();
     let ln_x = ln(&x);
-    assert_eq!(ln_x.to_string(), "0");
+    assert_eq!(ln_x.to_string(), "0E-34");
 
     let x = BigDecimal::from_str("0.95").unwrap();
     let ln_x = ln(&x);
