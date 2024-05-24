@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.1.0"
+version = "6.2.0"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -11,31 +11,31 @@ links = "libsodium"
 [dependencies]
 async-std = "1.12"
 bigdecimal = "0.4"
-num-bigint = "0.4"
-num-rational = "0.4"
+num-bigint = "0.4.5"
+num-rational = "0.4.2"
 blake2b_simd = "1.0"
 byteorder = "1.5"
-#pallas-network = { git = "https://github.com/AndrewWestberg/pallas", rev="7c88a69d3129f22f604ae63e6f20477285cace09" }
-#pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="7c88a69d3129f22f604ae63e6f20477285cace09" }
-pallas-network = "0.24"
-pallas-traverse = "0.24"
-chrono = "0.4"
-chrono-tz = "0.8"
+#pallas-network = { git = "https://github.com/AndrewWestberg/pallas", rev="35f693c57eec5f70c4f8e2f6a24445b14c6104b9" }
+#pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="35f693c57eec5f70c4f8e2f6a24445b14c6104b9" }
+pallas-network = "0.27"
+pallas-traverse = "0.27"
+chrono = "0.4.38"
+chrono-tz = "0.9"
 futures = "0.3"
 hex = "0.4"
 libc = "0.2"
 regex = "1.10"
-reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
-serde-aux = "4.3"
+serde-aux = "4.5"
 serde_cbor = "0.11"
 serde_json = "1.0"
 socket2 = "0.5"
 structopt = "0.3"
 rand = "0.8"
-rayon = "1.8"
-itertools = "0.12"
+rayon = "1.10"
+itertools = "0.13"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
 thiserror = "1.0"
 tracing = "0.1"
