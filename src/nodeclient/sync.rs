@@ -7,14 +7,14 @@ use std::time::{Duration, Instant};
 use thiserror::Error;
 
 use log::{debug, error, info, warn};
+use pallas_network::facades::{KeepAliveLoop, PeerClient, DEFAULT_KEEP_ALIVE_INTERVAL_SEC};
 use pallas_network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
-use pallas_network::miniprotocols::handshake::n2n::VersionData;
 use pallas_network::miniprotocols::handshake::Confirmation;
 use pallas_network::miniprotocols::{
-    chainsync, handshake, keepalive, Point, MAINNET_MAGIC, PROTOCOL_N2N_CHAIN_SYNC, PROTOCOL_N2N_HANDSHAKE,
-    PROTOCOL_N2N_KEEP_ALIVE,
+    blockfetch, chainsync, handshake, keepalive, txsubmission, Point, MAINNET_MAGIC, PROTOCOL_N2N_BLOCK_FETCH,
+    PROTOCOL_N2N_CHAIN_SYNC, PROTOCOL_N2N_HANDSHAKE, PROTOCOL_N2N_KEEP_ALIVE, PROTOCOL_N2N_TX_SUBMISSION,
 };
-use pallas_network::multiplexer::{AgentChannel, Bearer, Plexer};
+use pallas_network::multiplexer::{Bearer, Plexer};
 use pallas_traverse::MultiEraHeader;
 
 use crate::nodeclient::pooltool;
@@ -40,7 +40,7 @@ pub enum Error {
     KeepAliveError(#[from] keepalive::ClientError),
 
     #[error("chainsync error occurred")]
-    ChainSyncError(#[from] pallas_network::miniprotocols::chainsync::ClientError),
+    ChainSyncError(#[from] chainsync::ClientError),
 
     #[error("chainsync canceled")]
     ChainSyncCanceled,
@@ -120,7 +120,7 @@ impl Observer<HeaderContent> for LoggingObserver {
                             MultiEraHeader::Byron(_byron_header) => {
                                 warn!("skipping byron block header!");
                             }
-                            MultiEraHeader::AlonzoCompatible(header) => {
+                            MultiEraHeader::ShelleyCompatible(header) => {
                                 //sqlite only handles signed values so some casting is done here
                                 self.pending_blocks.push(BlockHeader {
                                     block_number: header.header_body.block_number as i64,
@@ -171,7 +171,7 @@ impl Observer<HeaderContent> for LoggingObserver {
                                     result = self.on_tip_reached();
                                 }
                             }
-                            MultiEraHeader::Babbage(header) => {
+                            MultiEraHeader::BabbageCompatible(header) => {
                                 //sqlite only handles signed values so some casting is done here
                                 self.pending_blocks.push(BlockHeader {
                                     block_number: header.header_body.block_number as i64,
@@ -312,24 +312,14 @@ fn get_intersect_blocks(block_store: &mut SqLiteBlockStore) -> Result<Vec<Point>
     Ok(chain_blocks)
 }
 
-async fn do_handshake(
-    channel: AgentChannel,
-    network_magic: u64,
-) -> Result<Confirmation<VersionData>, handshake::Error> {
-    let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
-    let mut client = handshake::Client::new(channel);
-    client.handshake(versions).await
-}
-
 async fn do_chainsync(
-    channel: AgentChannel,
+    mut client: chainsync::N2NClient,
     skip_to_tip: bool,
     exit_when_tip_reached: bool,
     chain_blocks: Option<Vec<Point>>,
     block_store: Option<Box<dyn BlockStore + 'static + Send>>,
     shelley_genesis_hash: String,
 ) -> Result<(), Error> {
-    let mut client = chainsync::N2NClient::new(channel);
     if skip_to_tip {
         client.intersect_tip().await?;
     } else {
@@ -366,17 +356,6 @@ async fn do_chainsync(
     }
 }
 
-async fn do_keepalive(channel: AgentChannel) -> Result<(), Error> {
-    let mut client = keepalive::Client::new(channel);
-    debug!("keepalive process started!");
-    loop {
-        tokio::time::sleep(Duration::from_secs(20)).await;
-        debug!("sending keepalive...");
-        client.send_keepalive().await?;
-        debug!("keepalive sent!");
-    }
-}
-
 pub(crate) async fn sync(
     db: &Path,
     host: &str,
@@ -398,34 +377,57 @@ pub(crate) async fn sync(
             Ok(bearer) => {
                 let mut plexer = Plexer::new(bearer);
 
-                let hs_channel = plexer.subscribe_client(PROTOCOL_N2N_HANDSHAKE);
+                let channel = plexer.subscribe_client(PROTOCOL_N2N_HANDSHAKE);
+                let mut handshake = handshake::Client::new(channel);
+
                 let cs_channel = plexer.subscribe_client(PROTOCOL_N2N_CHAIN_SYNC);
+                let bf_channel = plexer.subscribe_client(PROTOCOL_N2N_BLOCK_FETCH);
+                let txsub_channel = plexer.subscribe_client(PROTOCOL_N2N_TX_SUBMISSION);
+
                 let ka_channel = plexer.subscribe_client(PROTOCOL_N2N_KEEP_ALIVE);
+                let keepalive = keepalive::Client::new(ka_channel);
 
-                let running_plexer = plexer.spawn();
+                let plexer = plexer.spawn();
 
-                match do_handshake(hs_channel, network_magic).await {
+                let versions = handshake::n2n::VersionTable::v7_and_above(network_magic);
+                let handshake = handshake.handshake(versions).await;
+
+                match handshake {
                     Ok(confirmation) => match confirmation {
                         Confirmation::Accepted(_, _) => {
+                            let keepalive =
+                                KeepAliveLoop::client(keepalive, Duration::from_secs(DEFAULT_KEEP_ALIVE_INTERVAL_SEC))
+                                    .spawn();
+
+                            let peer = PeerClient {
+                                plexer,
+                                keepalive,
+                                chainsync: chainsync::Client::new(cs_channel),
+                                blockfetch: blockfetch::Client::new(bf_channel),
+                                txsubmission: txsubmission::Client::new(txsub_channel),
+                            };
+
+                            let PeerClient {
+                                plexer,
+                                keepalive: _keepalive,
+                                chainsync,
+                                blockfetch: _blockfetch,
+                                txsubmission: _txsubmission,
+                            } = peer;
+
                             let shelley_genesis_hash = shelley_genesis_hash.to_string();
-                            let cs_handle = tokio::spawn(do_chainsync(
-                                cs_channel,
+                            do_chainsync(
+                                chainsync,
                                 false,
                                 no_service,
                                 Some(chain_blocks),
                                 Some(Box::new(block_store)),
                                 shelley_genesis_hash,
-                            ));
-                            let ka_handle = tokio::spawn(do_keepalive(ka_channel));
-                            let result = tokio::select! {
-                                    cs_result = cs_handle => cs_result,
-                                    ka_result = ka_handle => ka_result,
-                            }
-                            .expect("error joining tokio threads");
-                            if let Err(err) = result {
-                                error!("miniprotocol error: {:?}", err);
-                            }
-                            running_plexer.abort().await;
+                            )
+                            .await
+                            .unwrap();
+
+                            plexer.abort().await;
                         }
                         Confirmation::Rejected(refuse_reason) => {
                             error!("{:?}", refuse_reason);
@@ -478,33 +480,56 @@ pub(crate) async fn sendtip(
             Ok(bearer) => {
                 let mut plexer = Plexer::new(bearer);
 
-                let hs_channel = plexer.subscribe_client(PROTOCOL_N2N_HANDSHAKE);
+                let channel = plexer.subscribe_client(PROTOCOL_N2N_HANDSHAKE);
+                let mut handshake = handshake::Client::new(channel);
+
                 let cs_channel = plexer.subscribe_client(PROTOCOL_N2N_CHAIN_SYNC);
+                let bf_channel = plexer.subscribe_client(PROTOCOL_N2N_BLOCK_FETCH);
+                let txsub_channel = plexer.subscribe_client(PROTOCOL_N2N_TX_SUBMISSION);
+
                 let ka_channel = plexer.subscribe_client(PROTOCOL_N2N_KEEP_ALIVE);
+                let keepalive = keepalive::Client::new(ka_channel);
 
-                let running_plexer = plexer.spawn();
+                let plexer = plexer.spawn();
 
-                match do_handshake(hs_channel, MAINNET_MAGIC).await {
+                let versions = handshake::n2n::VersionTable::v7_and_above(MAINNET_MAGIC);
+                let handshake = handshake.handshake(versions).await;
+
+                match handshake {
                     Ok(confirmation) => match confirmation {
                         Confirmation::Accepted(_, _) => {
-                            let cs_handle = tokio::spawn(do_chainsync(
-                                cs_channel,
-                                true,
+                            let keepalive =
+                                KeepAliveLoop::client(keepalive, Duration::from_secs(DEFAULT_KEEP_ALIVE_INTERVAL_SEC))
+                                    .spawn();
+
+                            let peer = PeerClient {
+                                plexer,
+                                keepalive,
+                                chainsync: chainsync::Client::new(cs_channel),
+                                blockfetch: blockfetch::Client::new(bf_channel),
+                                txsubmission: txsubmission::Client::new(txsub_channel),
+                            };
+
+                            let PeerClient {
+                                plexer,
+                                keepalive: _keepalive,
+                                chainsync,
+                                blockfetch: _blockfetch,
+                                txsubmission: _txsubmission,
+                            } = peer;
+
+                            do_chainsync(
+                                chainsync,
+                                false,
                                 false,
                                 None,
                                 Some(Box::new(pooltool_notifier)),
                                 "1a3be38bcbb7911969283716ad7aa550250226b76a61fc51cc9a9a35d9276d81".to_string(),
-                            ));
-                            let ka_handle = tokio::spawn(do_keepalive(ka_channel));
-                            let result = tokio::select! {
-                                cs_result = cs_handle => cs_result,
-                                ka_result = ka_handle => ka_result,
-                            }
-                            .expect("error joining tokio threads");
-                            if let Err(err) = result {
-                                error!("miniprotocol error: {:?}", err);
-                            }
-                            running_plexer.abort().await;
+                            )
+                            .await
+                            .unwrap();
+
+                            plexer.abort().await;
                         }
                         Confirmation::Rejected(refuse_reason) => {
                             error!("{:?}", refuse_reason);

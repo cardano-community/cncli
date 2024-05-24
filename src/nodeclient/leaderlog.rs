@@ -222,6 +222,10 @@ fn guess_shelley_transition_epoch(network_magic: u32) -> i64 {
             //preview testnet
             0
         }
+        4 => {
+            //sancho
+            0
+        }
         _ => {
             // alonzo, fallback
             1
@@ -462,6 +466,15 @@ fn get_current_slot(byron: &ByronGenesis, shelley: &ShelleyGenesis, shelley_tran
     Ok(byron_slots + trans_slots + ((current_time_sec - trans_time_end) / shelley.slot_length))
 }
 
+fn get_current_epoch(shelley: &ShelleyGenesis) -> i64 {
+    let genesis_start_time_sec = NaiveDateTime::parse_from_str(&shelley.system_start, "%Y-%m-%dT%H:%M:%SZ")
+        .unwrap()
+        .and_utc()
+        .timestamp();
+    let current_time_sec = Utc::now().timestamp();
+    (current_time_sec - genesis_start_time_sec) / shelley.epoch_length
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn calculate_leader_logs(
     db_path: &Path,
@@ -479,6 +492,7 @@ pub(crate) fn calculate_leader_logs(
     consensus: &str,
     shelley_transition_epoch: &i64,
     nonce: &Option<String>,
+    epoch: &Option<i64>,
 ) -> Result<(), Error> {
     let tz: Tz = timezone.parse::<Tz>().unwrap();
 
@@ -510,7 +524,7 @@ pub(crate) fn calculate_leader_logs(
         )));
     }
 
-    if consensus != "praos" && consensus != "tpraos" {
+    if consensus != "praos" && consensus != "tpraos" && consensus != "cpraos" {
         return Err(Error::Leaderlog(format!("Invalid Consensus: --consensus {consensus}")));
     }
 
@@ -538,11 +552,27 @@ pub(crate) fn calculate_leader_logs(
         }
     };
 
+    let current_epoch = get_current_epoch(&shelley);
+
+    let epoch_offset = match epoch {
+        Some(epoch) => {
+            if *epoch > current_epoch || *epoch <= *shelley_transition_epoch {
+                return Err(Error::Leaderlog(format!("Invalid Epoch: --epoch {epoch}")));
+            }
+            current_epoch - *epoch
+        }
+        None => 0,
+    };
+    debug!("epoch_offset: {}", epoch_offset);
+
     // pretend we're on a different slot number if we want to calculate past or future epochs.
-    let additional_slots: i64 = match ledger_set {
-        LedgerSet::Mark => shelley.epoch_length,
-        LedgerSet::Set => 0,
-        LedgerSet::Go => -shelley.epoch_length,
+    let additional_slots: i64 = match epoch_offset {
+        0 => match ledger_set {
+            LedgerSet::Mark => shelley.epoch_length,
+            LedgerSet::Set => 0,
+            LedgerSet::Go => -shelley.epoch_length,
+        },
+        _ => -shelley.epoch_length * epoch_offset,
     };
 
     let (epoch, first_slot_of_epoch) = get_first_slot_of_epoch(
@@ -580,8 +610,13 @@ pub(crate) fn calculate_leader_logs(
             let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
             debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
             debug!("first_slot_of_prev_epoch: {}", first_slot_of_prev_epoch);
-            let stability_window: i64 =
-                ((3 * byron.protocol_consts.k) as f64 / shelley.active_slots_coeff).ceil() as i64;
+            let stability_window_multiplier = match consensus {
+                "cpraos" => 4i64,
+                _ => 3i64,
+            };
+            let stability_window: i64 = ((stability_window_multiplier * byron.protocol_consts.k) as f64
+                / shelley.active_slots_coeff)
+                .ceil() as i64;
             let stability_window_start = first_slot_of_epoch - stability_window;
             debug!("stability_window: {}", stability_window);
             debug!("stability_window_start: {}", stability_window_start);
@@ -677,7 +712,7 @@ pub(crate) fn calculate_leader_logs(
 
     let cert_nat_max: BigDecimal = match consensus {
         "tpraos" => BigDecimal::from_str("13407807929942597099574024998205846127479365820592393377723561443721764030073546976801874298166903427690031858186486050853753882811946569946433649006084096")?, // 2^512
-        "praos" => BigDecimal::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639936")?, // 2^256
+        "praos" | "cpraos" => BigDecimal::from_str("115792089237316195423570985008687907853269984665640564039457584007913129639936")?, // 2^256
         _ => return Err(Error::Leaderlog(format!(
             "Invalid Consensus: --consensus {consensus}"
         )))
@@ -700,7 +735,7 @@ pub(crate) fn calculate_leader_logs(
                     }
                 }
             }
-            "praos" => {
+            "praos" | "cpraos" => {
                 match is_slot_leader_praos(leader_slot, &sigma, &epoch_nonce, &pool_vrf_skey.key, &cert_nat_max, &c) {
                     Ok(true) => Some(leader_slot),
                     Ok(false) => None,

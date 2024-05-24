@@ -287,7 +287,7 @@ This command calculates the epoch nonce value. This command requires that you us
 
 ```bash
 $ cncli nonce --help
-cncli-nonce 6.0.0
+cncli-nonce 6.2.0
 
 USAGE:
     cncli nonce [OPTIONS] --byron-genesis <byron-genesis> --shelley-genesis <shelley-genesis>
@@ -298,7 +298,13 @@ FLAGS:
 
 OPTIONS:
         --byron-genesis <byron-genesis>                          byron genesis json file
+    -c, --consensus <consensus>
+            Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos [default:
+            praos]
     -d, --db <db>                                                sqlite database file [default: ./cncli.db]
+        --epoch <epoch>
+            Provide a specific epoch number to calculate for and ignore --ledger-set option
+
         --extra-entropy <extra-entropy>                          hex string of the extra entropy value
         --ledger-set <ledger-set>
             Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch [default:
@@ -333,7 +339,7 @@ SNAPSHOT=$(/home/westbam/.local/bin/cardano-cli query stake-snapshot --stake-poo
 /home/westbam/.cargo/bin/cncli sync --host 127.0.0.1 --port 6000 --no-service
 POOL_STAKE=$(echo "$SNAPSHOT" | grep -oP '(?<=    "poolStakeMark": )\d+(?=,?)')
 ACTIVE_STAKE=$(echo "$SNAPSHOT" | grep -oP '(?<=    "activeStakeMark": )\d+(?=,?)')
-BCSH=`/home/westbam/.cargo/bin/cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --consensus tpraos --ledger-set next`
+BCSH=`/home/westbam/.cargo/bin/cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --consensus praos --ledger-set next`
 
 EPOCH=`jq .epoch <<< $BCSH`
 echo "\`Epoch $EPOCH\` 🧙🔮:"
@@ -350,7 +356,7 @@ echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
 
 ```bash
 $ cncli leaderlog --help
-cncli-leaderlog 6.0.0
+cncli-leaderlog 6.2.0
 
 USAGE:
     cncli leaderlog [OPTIONS] --active-stake <active-stake> --byron-genesis <byron-genesis> --pool-id <pool-id> --pool-stake <pool-stake> --pool-vrf-skey <pool-vrf-skey> --shelley-genesis <shelley-genesis>
@@ -363,10 +369,13 @@ OPTIONS:
         --active-stake <active-stake>                            total active stake snapshot value in lovelace
         --byron-genesis <byron-genesis>                          byron genesis json file
     -c, --consensus <consensus>
-            Consensus algorithm - Alonzo and earlier uses tpraos, Babbage and later uses praos [default: praos]
-
+            Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos [default:
+            praos]
         --d <d>                                                  decentralization parameter [default: 0]
     -d, --db <db>                                                sqlite database file [default: ./cncli.db]
+        --epoch <epoch>
+            Provide a specific epoch number to calculate for and ignore --ledger-set option
+
         --extra-entropy <extra-entropy>                          hex string of the extra entropy value
         --ledger-set <ledger-set>
             Which ledger data to use. prev - previous epoch, current - current epoch, next - future epoch [default:

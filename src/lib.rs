@@ -132,7 +132,7 @@ pub mod nodeclient {
                 short,
                 long,
                 default_value = "praos",
-                help = "Consensus algorithm - Alonzo and earlier uses tpraos, Babbage and later uses praos"
+                help = "Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos"
             )]
             consensus: String,
             #[structopt(
@@ -147,6 +147,11 @@ pub mod nodeclient {
                 help = "Provide a nonce value in lower-case hex instead of calculating from the db"
             )]
             nonce: Option<String>,
+            #[structopt(
+                long,
+                help = "Provide a specific epoch number to calculate for and ignore --ledger-set option"
+            )]
+            epoch: Option<i64>,
         },
         Sendtip {
             #[structopt(
@@ -242,6 +247,18 @@ pub mod nodeclient {
                 help = "Epoch number where we transition from Byron to Shelley. -1 means guess based on genesis files"
             )]
             shelley_transition_epoch: i64,
+            #[structopt(
+                short,
+                long,
+                default_value = "praos",
+                help = "Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos"
+            )]
+            consensus: String,
+            #[structopt(
+                long,
+                help = "Provide a specific epoch number to calculate for and ignore --ledger-set option"
+            )]
+            epoch: Option<i64>,
         },
         Challenge {
             #[structopt(long, help = "validating domain e.g. pooltool.io")]
@@ -318,6 +335,7 @@ pub mod nodeclient {
                 ref consensus,
                 ref shelley_transition_epoch,
                 ref nonce,
+                ref epoch,
             } => {
                 if let Err(error) = leaderlog::calculate_leader_logs(
                     db,
@@ -335,6 +353,7 @@ pub mod nodeclient {
                     consensus,
                     shelley_transition_epoch,
                     nonce,
+                    epoch,
                 ) {
                     handle_error(error);
                 }
@@ -346,6 +365,8 @@ pub mod nodeclient {
                 ref extra_entropy,
                 ref ledger_set,
                 ref shelley_transition_epoch,
+                ref consensus,
+                ref epoch,
             } => {
                 if let Err(error) = leaderlog::calculate_leader_logs(
                     db,
@@ -360,9 +381,10 @@ pub mod nodeclient {
                     &PathBuf::new(),
                     "America/Los_Angeles",
                     true,
-                    "praos",
+                    consensus,
                     shelley_transition_epoch,
                     &None,
+                    epoch,
                 ) {
                     handle_error(error);
                 }
