@@ -520,7 +520,7 @@ pub(crate) async fn sendtip(
 
                             do_chainsync(
                                 chainsync,
-                                false,
+                                true,
                                 false,
                                 None,
                                 Some(Box::new(pooltool_notifier)),
