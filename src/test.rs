@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use bigdecimal::{BigDecimal, One, Zero};
+use chrono::NaiveDateTime;
 use num_rational::BigRational;
 use regex::Regex;
 
@@ -210,3 +211,24 @@ fn test_leaderlog_math() {
 //
 //     println!("ledger: {:?}", ledger);
 // }
+
+#[test]
+fn test_date_parsing() {
+    let genesis_start_time_sec = NaiveDateTime::parse_from_str("2022-10-25T00:00:00Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+        .unwrap()
+        .and_utc()
+        .timestamp();
+
+    assert_eq!(genesis_start_time_sec, 1666656000);
+}
+
+#[test]
+fn test_date_parsing2() {
+    let genesis_start_time_sec =
+        NaiveDateTime::parse_from_str("2024-05-16T17:18:10.000000000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+            .unwrap()
+            .and_utc()
+            .timestamp();
+
+    assert_eq!(genesis_start_time_sec, 1715879890);
+}

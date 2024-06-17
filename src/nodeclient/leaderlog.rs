@@ -454,7 +454,7 @@ fn get_current_slot(byron: &ByronGenesis, shelley: &ShelleyGenesis, shelley_tran
         _ => *shelley_trans_epoch,
     };
 
-    let genesis_start_time_sec = NaiveDateTime::parse_from_str(&shelley.system_start, "%Y-%m-%dT%H:%M:%SZ")
+    let genesis_start_time_sec = NaiveDateTime::parse_from_str(&shelley.system_start, "%Y-%m-%dT%H:%M:%S%.fZ")
         .unwrap()
         .and_utc()
         .timestamp();
@@ -467,7 +467,7 @@ fn get_current_slot(byron: &ByronGenesis, shelley: &ShelleyGenesis, shelley_tran
 }
 
 fn get_current_epoch(shelley: &ShelleyGenesis) -> i64 {
-    let genesis_start_time_sec = NaiveDateTime::parse_from_str(&shelley.system_start, "%Y-%m-%dT%H:%M:%SZ")
+    let genesis_start_time_sec = NaiveDateTime::parse_from_str(&shelley.system_start, "%Y-%m-%dT%H:%M:%S%.fZ")
         .unwrap()
         .and_utc()
         .timestamp();
