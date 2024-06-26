@@ -88,7 +88,6 @@ struct ShelleyGenesis {
     network_magic: u32,
     slot_length: i64,
     epoch_length: i64,
-    system_start: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -454,25 +453,47 @@ fn get_current_slot(byron: &ByronGenesis, shelley: &ShelleyGenesis, shelley_tran
         _ => *shelley_trans_epoch,
     };
 
-    let genesis_start_time_sec = NaiveDateTime::parse_from_str(&shelley.system_start, "%Y-%m-%dT%H:%M:%S%.fZ")
-        .unwrap()
-        .and_utc()
-        .timestamp();
+    // read byron genesis values
+    let byron_slot_length = byron.block_version_data.slot_duration;
+    let byron_k = byron.protocol_consts.k;
+    let byron_start_time_sec = byron.start_time;
+    let byron_epoch_length = 10 * byron_k;
+    let byron_end_time_sec =
+        byron_start_time_sec + ((shelley_transition_epoch * byron_epoch_length * byron_slot_length) / 1000);
 
-    let trans_time_end = genesis_start_time_sec + (shelley_transition_epoch * shelley.epoch_length);
-    let byron_slots = (genesis_start_time_sec - byron.start_time) / 20;
-    let trans_slots = (shelley_transition_epoch * shelley.epoch_length) / 20;
+    // read shelley genesis values
+    let slot_length = shelley.slot_length;
+
     let current_time_sec = Utc::now().timestamp();
-    Ok(byron_slots + trans_slots + ((current_time_sec - trans_time_end) / shelley.slot_length))
+
+    // Calculate current slot
+    let byron_slots = shelley_transition_epoch * byron_epoch_length;
+    let shelley_slots = (current_time_sec - byron_end_time_sec) / slot_length;
+    Ok(byron_slots + shelley_slots)
 }
 
-fn get_current_epoch(shelley: &ShelleyGenesis) -> i64 {
-    let genesis_start_time_sec = NaiveDateTime::parse_from_str(&shelley.system_start, "%Y-%m-%dT%H:%M:%S%.fZ")
-        .unwrap()
-        .and_utc()
-        .timestamp();
+fn get_current_epoch(byron: &ByronGenesis, shelley: &ShelleyGenesis, shelley_trans_epoch: &i64) -> i64 {
+    let shelley_transition_epoch = match shelley_trans_epoch {
+        -1 => guess_shelley_transition_epoch(shelley.network_magic),
+        _ => *shelley_trans_epoch,
+    };
+
+    // read byron genesis values
+    let byron_slot_length = byron.block_version_data.slot_duration;
+    let byron_k = byron.protocol_consts.k;
+    let byron_start_time_sec = byron.start_time;
+
+    let byron_epoch_length_secs = 10 * byron_k;
+    let byron_end_time_sec =
+        byron_start_time_sec + ((shelley_transition_epoch * byron_epoch_length_secs * byron_slot_length) / 1000);
+
+    // read shelley genesis values
+    let slot_length = shelley.slot_length;
+    let epoch_length = shelley.epoch_length;
+
     let current_time_sec = Utc::now().timestamp();
-    (current_time_sec - genesis_start_time_sec) / shelley.epoch_length
+
+    shelley_transition_epoch + ((current_time_sec - byron_end_time_sec) / slot_length / epoch_length)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -552,12 +573,12 @@ pub(crate) fn calculate_leader_logs(
         }
     };
 
-    let current_epoch = get_current_epoch(&shelley);
+    let current_epoch = get_current_epoch(&byron, &shelley, shelley_transition_epoch);
 
     let epoch_offset = match epoch {
         Some(epoch) => {
             if *epoch > current_epoch || *epoch <= *shelley_transition_epoch {
-                return Err(Error::Leaderlog(format!("Invalid Epoch: --epoch {epoch}")));
+                return Err(Error::Leaderlog(format!("Invalid Epoch: --epoch {epoch}, current_epoch: {current_epoch}, shelley_transition_epoch: {shelley_transition_epoch}")));
             }
             current_epoch - *epoch
         }
