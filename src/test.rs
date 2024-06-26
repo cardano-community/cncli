@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use bigdecimal::{BigDecimal, One, Zero};
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use num_rational::BigRational;
 use regex::Regex;
 
@@ -231,4 +231,31 @@ fn test_date_parsing2() {
             .timestamp();
 
     assert_eq!(genesis_start_time_sec, 1715879890);
+}
+
+#[test]
+fn test_date_parsing3() {
+    let genesis_start_time_sec = NaiveDateTime::parse_from_str("2021-12-09T22:55:22Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+        .unwrap()
+        .and_utc()
+        .timestamp();
+    assert_eq!(genesis_start_time_sec, 1639090522);
+    let current_time_sec = Utc::now().timestamp();
+    println!("current_time_sec: {}", current_time_sec);
+    let current_epoch = (current_time_sec - genesis_start_time_sec) / 3600;
+    println!("current_epoch: {}", current_epoch);
+}
+
+#[test]
+fn test_date_parsing_mainnet() {
+    let genesis_start_time_sec = NaiveDateTime::parse_from_str("2017-09-23T21:44:51Z", "%Y-%m-%dT%H:%M:%S%.fZ")
+        .unwrap()
+        .and_utc()
+        .timestamp();
+
+    assert_eq!(genesis_start_time_sec, 1506203091);
+    let current_time_sec = Utc::now().timestamp();
+    println!("current_time_sec: {}", current_time_sec);
+    let current_epoch = (current_time_sec - genesis_start_time_sec) / 432000;
+    println!("current_epoch: {}", current_epoch);
 }

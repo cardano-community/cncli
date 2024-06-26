@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.2.2"
+version = "6.2.3"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -11,15 +11,15 @@ links = "libsodium"
 [dependencies]
 async-std = "1.12"
 bigdecimal = "0.4"
-num-bigint = "0.4.5"
-num-rational = "0.4.2"
+num-bigint = "0.4"
+num-rational = "0.4"
 blake2b_simd = "1.0"
 byteorder = "1.5"
 #pallas-network = { git = "https://github.com/AndrewWestberg/pallas", rev="35f693c57eec5f70c4f8e2f6a24445b14c6104b9" }
 #pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="35f693c57eec5f70c4f8e2f6a24445b14c6104b9" }
 pallas-network = "0.27"
 pallas-traverse = "0.27"
-chrono = "0.4.38"
+chrono = "0.4"
 chrono-tz = "0.9"
 futures = "0.3"
 hex = "0.4"
