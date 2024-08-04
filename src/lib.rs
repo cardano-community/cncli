@@ -17,6 +17,7 @@ pub mod nodeclient {
     pub mod ping;
     pub mod pooltool;
     pub mod signing;
+    pub mod snapshot;
     pub mod sqlite;
     pub mod sync;
     mod validate;
@@ -287,6 +288,28 @@ pub mod nodeclient {
             #[structopt(long, help = "signature to verify in hex")]
             signature: String,
         },
+        Snapshot {
+            #[structopt(parse(from_os_str), long, help = "cardano-node socket path")]
+            socket_path: PathBuf,
+            #[structopt(long, default_value = "764824073", help = "network magic.")]
+            network_magic: u64,
+            #[structopt(long, default_value = "mark", help = "Snapshot name to retrieve (mark, set, go)")]
+            name: String,
+            #[structopt(
+                long,
+                default_value = "1",
+                help = "The network identifier, (1 for mainnet, 0 for testnet)"
+            )]
+            network_id: u8,
+            #[structopt(
+                long,
+                default_value = "stake",
+                help = "The prefix for stake addresses, (stake for mainnet, stake_test for testnet)"
+            )]
+            stake_prefix: String,
+            #[structopt(long, default_value = "mark.csv", help = "The name of the output file (CSV format)")]
+            output_file: String,
+        },
     }
 
     pub async fn start(cmd: Command) {
@@ -475,6 +498,27 @@ pub mod nodeclient {
                 ref signature,
             } => {
                 signing::verify_challenge(pool_vrf_vkey, pool_vrf_vkey_hash, domain, nonce, signature);
+            }
+            Command::Snapshot {
+                ref socket_path,
+                ref network_magic,
+                ref name,
+                ref network_id,
+                ref stake_prefix,
+                ref output_file,
+            } => {
+                if let Err(error) = snapshot::dump(
+                    socket_path,
+                    *network_magic,
+                    name.as_str(),
+                    *network_id,
+                    stake_prefix.as_str(),
+                    output_file.as_str(),
+                )
+                .await
+                {
+                    handle_error(error);
+                }
             }
         }
     }
