@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.2.3"
+version = "6.3.0"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -10,6 +10,7 @@ links = "libsodium"
 
 [dependencies]
 async-std = "1.12"
+bech32 = "0.11"
 bigdecimal = "0.4"
 num-bigint = "0.4"
 num-rational = "0.4"
@@ -17,16 +18,17 @@ blake2b_simd = "1.0"
 byteorder = "1.5"
 #pallas-network = { git = "https://github.com/AndrewWestberg/pallas", rev="35f693c57eec5f70c4f8e2f6a24445b14c6104b9" }
 #pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="35f693c57eec5f70c4f8e2f6a24445b14c6104b9" }
-pallas-network = "0.27"
-pallas-traverse = "0.27"
+pallas-network = "0.29"
+pallas-traverse = "0.29"
 chrono = "0.4"
 chrono-tz = "0.9"
 futures = "0.3"
 hex = "0.4"
 libc = "0.2"
+minicbor = { version = "0.24", features = ["std"] }
 regex = "1.10"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde-aux = "4.5"
 serde_cbor = "0.11"
