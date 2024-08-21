@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.3.0"
+version = "6.3.1"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2018"
 build = "build.rs"
@@ -18,8 +18,10 @@ blake2b_simd = "1.0"
 byteorder = "1.5"
 #pallas-network = { git = "https://github.com/AndrewWestberg/pallas", rev="35f693c57eec5f70c4f8e2f6a24445b14c6104b9" }
 #pallas-traverse = { git = "https://github.com/AndrewWestberg/pallas", rev="35f693c57eec5f70c4f8e2f6a24445b14c6104b9" }
-pallas-network = "0.29"
-pallas-traverse = "0.29"
+pallas-crypto = { git = "https://github.com/txpipe/pallas", rev = "d3084d6e3209ee0f507a413b1a2491e07abf3756" }
+pallas-network = "0.30"
+pallas-traverse = "0.30"
+#pallas-crypto = "0.30.0"
 chrono = "0.4"
 chrono-tz = "0.9"
 futures = "0.3"
