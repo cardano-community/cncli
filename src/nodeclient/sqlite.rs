@@ -1,10 +1,24 @@
 use std::io;
+use std::path::Path;
 
-use crate::nodeclient::sync::BlockHeader;
 use blake2b_simd::Params;
 use log::{debug, error, info};
-use rusqlite::{named_params, Connection, Error};
-use std::path::Path;
+use pallas_crypto::hash::Hash;
+use pallas_crypto::nonce::NonceGenerator;
+use pallas_crypto::nonce::rolling_nonce::RollingNonceGenerator;
+use rusqlite::{Connection, named_params};
+use thiserror::Error;
+
+use crate::nodeclient::sync::BlockHeader;
+
+#[derive(Error, Debug)]
+pub enum Error {
+    #[error("SQLite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+
+    #[error("Nonce error: {0}")]
+    Nonce(#[from] pallas_crypto::nonce::Error),
+}
 
 pub trait BlockStore {
     fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, shelley_genesis_hash: &str) -> io::Result<()>;
@@ -107,7 +121,7 @@ impl SqLiteBlockStore {
                     let mut stmt = tx.prepare("SELECT DISTINCT node_vkey FROM chain")?;
                     let vkeys = stmt
                         .query_map([], |row| {
-                            let node_vkey_result: Result<String, Error> = row.get(0);
+                            let node_vkey_result: Result<String, rusqlite::Error> = row.get(0);
                             let node_vkey = node_vkey_result?;
                             Ok(node_vkey)
                         })
@@ -172,7 +186,7 @@ impl SqLiteBlockStore {
         let db = &mut self.db;
 
         // get the last block eta_v (nonce) in the db
-        let mut prev_eta_v = {
+        let mut prev_eta_v: Hash<32> = Hash::from(
             hex::decode(
                 match db.query_row(
                     "SELECT eta_v, block_number FROM chain WHERE block_number = ?1 and orphaned = 0",
@@ -188,9 +202,8 @@ impl SqLiteBlockStore {
                         shelley_genesis_hash.to_string()
                     }
                 },
-            )
-            .unwrap()
-        };
+            ).unwrap().as_slice()
+        );
 
         let tx = db.transaction()?;
         {
@@ -251,7 +264,7 @@ impl SqLiteBlockStore {
 
                 if orphan_num > 0 {
                     // get the last block eta_v (nonce) in the db
-                    prev_eta_v = {
+                    prev_eta_v = Hash::from(
                         hex::decode(
                             match tx.query_row(
                                 "SELECT eta_v, block_number FROM chain WHERE block_number = ?1 and orphaned = 0",
@@ -264,27 +277,13 @@ impl SqLiteBlockStore {
                                     shelley_genesis_hash.to_string()
                                 }
                             },
-                        )
-                        .unwrap()
-                    };
+                        ).unwrap().as_slice()
+                    );
                 }
-                // blake2b hash of eta_vrf_0
-                let mut block_eta_v = Params::new()
-                    .hash_length(32)
-                    .to_state()
-                    .update(&block.eta_vrf_0)
-                    .finalize()
-                    .as_bytes()
-                    .to_vec();
-                prev_eta_v.append(&mut block_eta_v);
-                // blake2b hash of prev_eta_v + block_eta_v
-                prev_eta_v = Params::new()
-                    .hash_length(32)
-                    .to_state()
-                    .update(&prev_eta_v)
-                    .finalize()
-                    .as_bytes()
-                    .to_vec();
+                // calculate rolling nonce (eta_v)
+                let mut rolling_nonce_generator = RollingNonceGenerator::new(prev_eta_v);
+                rolling_nonce_generator.apply_block(&block.eta_vrf_0)?;
+                prev_eta_v = rolling_nonce_generator.finalize()?;
 
                 // blake2b 224 of node_vkey is the pool_id
                 let pool_id = Params::new()
@@ -301,7 +300,7 @@ impl SqLiteBlockStore {
                     ":hash" : hex::encode(block.hash),
                     ":prev_hash" : hex::encode(block.prev_hash),
                     ":pool_id" : hex::encode(pool_id),
-                    ":eta_v" : hex::encode(&prev_eta_v),
+                    ":eta_v" : hex::encode(prev_eta_v),
                     ":node_vkey" : hex::encode(block.node_vkey),
                     ":node_vrf_vkey" : hex::encode(block.node_vrf_vkey),
                     ":block_vrf_0": hex::encode(block.block_vrf_0),
@@ -331,7 +330,7 @@ impl BlockStore for SqLiteBlockStore {
     fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, shelley_genesis_hash: &str) -> io::Result<()> {
         match self.sql_save_block(pending_blocks, shelley_genesis_hash) {
             Ok(_) => Ok(()),
-            Err(_) => Err(io::Error::new(io::ErrorKind::Other, "Database error!")),
+            Err(error) => Err(io::Error::new(io::ErrorKind::Other, format!("Database error!: {:?}", error))),
         }
     }
 
@@ -342,8 +341,8 @@ impl BlockStore for SqLiteBlockStore {
             .unwrap();
         let blocks = stmt
             .query_map([], |row| {
-                let slot_result: Result<i64, Error> = row.get(0);
-                let hash_result: Result<String, Error> = row.get(1);
+                let slot_result: Result<i64, rusqlite::Error> = row.get(0);
+                let hash_result: Result<String, rusqlite::Error> = row.get(1);
                 let slot = slot_result?;
                 let hash = hash_result?;
                 Ok((slot, hex::decode(hash).unwrap()))

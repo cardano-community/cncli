@@ -30,16 +30,16 @@ pub enum Error {
     #[error("loggingobserver error occurred")]
     LoggingObserverError(String),
 
-    #[error("pallas_traverse error occurred")]
+    #[error("pallas_traverse error occurred: {0}")]
     PallasTraverseError(#[from] pallas_traverse::Error),
 
-    #[error("io error occurred")]
+    #[error("io error occurred: {0}")]
     IoError(#[from] std::io::Error),
 
-    #[error("keepalive error occurred")]
+    #[error("keepalive error occurred: {0}")]
     KeepAliveError(#[from] keepalive::ClientError),
 
-    #[error("chainsync error occurred")]
+    #[error("chainsync error occurred: {0}")]
     ChainSyncError(#[from] chainsync::ClientError),
 
     #[error("chainsync canceled")]
