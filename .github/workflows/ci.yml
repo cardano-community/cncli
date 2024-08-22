@@ -1,121 +1,99 @@
-on: [push, pull_request]
+# Based on https://github.com/actions-rs/meta/blob/master/recipes/quickstart.md
+
+on:
+  push: { }
+
+name: Validate
 
 jobs:
-
   build:
-    name: ${{ matrix.job.os }} (${{ matrix.job.target }})
-    runs-on: ${{ matrix.job.os }}
-    defaults:
-      run:
-        shell: bash
+    name: Build
     strategy:
       fail-fast: false
       matrix:
         job:
           - { os: ubuntu-22.04, label: ubuntu22, target: x86_64-unknown-linux-gnu }
           - { os: ubuntu-22.04, label: ubuntu22, target: x86_64-unknown-linux-musl, use-cross: true }
-          - { os: macos-latest, label: macos, target: x86_64-apple-darwin }
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          submodules: true # recurse submodules
-      - name: Configure Environment
-        run: |
-          case ${{ matrix.job.target }} in
-            *-pc-windows-gnu)
-             
-              case ${{ matrix.job.target }} in
-                i686*)
-                  MSYSTEM=MINGW32
-                  MSYSTEM_PATH=c:/msys64/mingw32
-                  ;;
-                x86_64*) 
-                  MSYSTEM=MINGW64
-                  MSYSTEM_PATH=c:/msys64/mingw64
-                  ;;
-              esac
+          - { os: macos-latest, label: macos, target: aarch64-apple-darwin }
+          - { os: windows-latest, label: windows, target: x86_64-pc-windows-msvc }
+        rust: [ stable ]
 
-              echo "c:/msys64" >> $GITHUB_PATH                # enable msys2 entrypoint commands (probably not needed)
-              echo "c:/msys64/usr/bin" >> $GITHUB_PATH        # place msys2 environment on system path 
-              echo "${MSYSTEM_PATH}/bin" >> $GITHUB_PATH      # place MinGW environment on system path
-              echo "CHERE_INVOKING=yes" >> $GITHUB_ENV        # maintain directory context
-              echo "MSYSTEM=${MSYSTEM}" >> $GITHUB_ENV        # set msystem version for msys2 shell
-            ;;
-          esac
-      - name: Install Prerequisites
-        run: |
-          case ${{ matrix.job.os }} in
-            windows64*)
-              pacman -S --noconfirm --needed mingw-w64-x86_64-gcc base-devel autoconf
-              ;;
-            windows32*)
-              pacman -S --noconfirm --needed mingw-w64-i686-gcc base-devel autoconf
-              ;;
-            ubuntu*)
-              sudo apt-get -y update
-              sudo apt-get -y install automake build-essential pkg-config libffi-dev libgmp-dev libssl-dev libtinfo-dev libsystemd-dev zlib1g-dev make g++ tmux git jq wget libncursesw5 libtool autoconf musl-tools gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
-              ;;
-            macos*)
-              brew install automake
-              brew install libtool
-              ;;
-          esac
-      - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
+    runs-on: ${{ matrix.job.os }}
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v2
+
+      - name: Install stable toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: ${{ matrix.job.toolchain || 'stable' }}
-          target: ${{ matrix.job.target }}
-          override: true
-          default: true
+          toolchain: ${{ matrix.rust }}
           components: rustfmt, clippy
-      - name: Build Libsodium
-        if: contains(matrix.job.features, 'libsodium-sys')
-        run: autoreconf -vfi && ./configure && make && make install
-        working-directory: contrib/libsodium
-      - name: Format
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
-      - name: Lint (Clippy)
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: --release --features "${{ join(matrix.job.features, ',') }}" --target ${{ matrix.job.target }} -- -D warnings
-      - name: Test
-        if: "${{ ! contains(matrix.job.target, 'aarch64') }}"
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: ${{ matrix.job.use-cross }}
-          command: test
-          args: --release --features "${{ join(matrix.job.features, ',') }}" --target ${{ matrix.job.target }}
-      - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          use-cross: ${{ matrix.job.use-cross }}
-          command: build
-          args: --release --features "${{ join(matrix.job.features, ',') }}" --target ${{ matrix.job.target }} --locked
+
+      - name: Install cross
+        if: ${{ matrix.job.use-cross }}
+        run: cargo install cross
+
+      - name: Run cargo check
+        if: ${{ matrix.job.target == 'x86_64-unknown-linux-gnu' }}
+        run: cargo check
+
+      - name: Run cargo fmt
+        if: ${{ matrix.job.target == 'x86_64-unknown-linux-gnu' }}
+        run: cargo fmt --all -- --check
+
+      - name: Run cargo clippy (cross)
+        if: ${{ matrix.job.use-cross }}
+        run: cross clippy --release --target ${{ matrix.job.target }} -- -D warnings
+
+      - name: Run cargo clippy
+        if: ${{ !matrix.job.use-cross }}
+        run: cargo clippy --release --target ${{ matrix.job.target }} -- -D warnings
+
+      - name: Run cargo test (cross)
+        if: ${{ matrix.job.use-cross }}
+        run: cross test --release --target ${{ matrix.job.target }}
+
+      - name: Run cargo test
+        if: ${{ !matrix.job.use-cross }}
+        run: cargo test --release --target ${{ matrix.job.target }}
+
+      - name: Build Release (cross)
+        if: ${{ matrix.job.use-cross }}
+        run: cross build --release --target ${{ matrix.job.target }} --locked
+
+      - name: Build Release
+        if: ${{ !matrix.job.use-cross }}
+        run: cargo build --release --target ${{ matrix.job.target }} --locked
+
       - name: Package
         id: package
+        shell: bash
         run: |
           PROJECT_NAME=$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.toml)
           PROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
-          PKG_SUFFIX=".tar.gz" ; case ${{ matrix.job.target }} in *-pc-windows-*) PKG_SUFFIX=".zip" ;; esac;
+          if [[ "${{ matrix.job.target }}" == *-pc-windows-* ]]; then
+            PKG_SUFFIX=".zip"
+          else
+            PKG_SUFFIX=".tar.gz"
+          fi
           PKG_NAME=${PROJECT_NAME}-${PROJECT_VERSION}-${{ matrix.job.label }}-${{ matrix.job.target }}${PKG_SUFFIX}
-
-          case ${{ matrix.job.target }} in
-            *-pc-windows-*) 7z -y a "${PKG_NAME}" ./target/${{matrix.job.target}}/release/cncli.exe | tail -2 ;;
-            *) tar -C target/${{matrix.job.target}}/release -czf "${PKG_NAME}" cncli ;;
-          esac;
+          
+          if [[ "${{ matrix.job.target }}" == *-pc-windows-* ]]; then
+            7z -y a "${PKG_NAME}" ./target/${{matrix.job.target}}/release/cncli.exe | tail -2
+          else
+            tar -C target/${{matrix.job.target}}/release -czf "${PKG_NAME}" cncli
+          fi
 
           echo ::set-output name=PKG_NAME::${PKG_NAME}
           echo ::set-output name=PKG_PATH::${PKG_NAME}
+
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.package.outputs.PKG_NAME }}
           path: ${{ steps.package.outputs.PKG_PATH }}
+
       - name: Release
         uses: softprops/action-gh-release@v1
         if: startsWith(github.ref, 'refs/tags/v')

@@ -2,12 +2,12 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use bech32::{Bech32, Hrp};
-use log::debug;
 use minicbor::data::Type;
 use pallas_network::facades::NodeClient;
 use pallas_network::miniprotocols::localstate::queries_v16::BlockQuery;
 use pallas_network::miniprotocols::localstate::{queries_v16, ClientError};
 use thiserror::Error;
+use tracing::debug;
 
 use crate::nodeclient::snapshot::Error::UnexpectedCborType;
 
@@ -22,23 +22,20 @@ pub enum Error {
     #[error("Unexpected array length: expected {expected}, got {actual}")]
     UnexpectedArrayLength { expected: u64, actual: u64 },
 
-    #[error("Unexpected map length: expected {expected}, got {actual}")]
-    UnexpectedMapLength { expected: u64, actual: u64 },
-
     #[error("Unexpected Cbor Type: {value:?}")]
     UnexpectedCborType { value: Type },
 
     #[error(transparent)]
-    Bech32Error(#[from] bech32::primitives::hrp::Error),
+    Bech32(#[from] bech32::primitives::hrp::Error),
 
     #[error(transparent)]
-    Bech32EncodingError(#[from] bech32::EncodeError),
+    Bech32Encoding(#[from] bech32::EncodeError),
 
     #[error(transparent)]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
 
     #[error("Snapshot error: {0}")]
-    SnapshotError(String),
+    Snapshot(String),
 }
 
 #[derive(Debug)]
@@ -63,7 +60,7 @@ pub(crate) async fn dump(
         "mark" => Snapshot::Mark,
         "set" => Snapshot::Set,
         "go" => Snapshot::Go,
-        _ => return Err(Error::SnapshotError(format!("Unknown snapshot name: {}", name))),
+        _ => return Err(Error::Snapshot(format!("Unknown snapshot name: {}", name))),
     };
 
     let client = client.statequery();
@@ -160,7 +157,7 @@ pub(crate) async fn dump(
                 let stake_key_prefix = [match address_type {
                     0 => 0xe0u8, // key-based stake address
                     1 => 0xf0u8, // script-based stake address
-                    _ => return Err(Error::SnapshotError(format!("Unknown address type: {}", address_type))),
+                    _ => return Err(Error::Snapshot(format!("Unknown address type: {}", address_type))),
                 } | network_id];
                 let stake_key_bytes = decoder.bytes()?;
                 let stake_key_bytes = [&stake_key_prefix, stake_key_bytes].concat();

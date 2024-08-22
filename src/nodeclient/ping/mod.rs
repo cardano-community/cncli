@@ -127,3 +127,73 @@ fn ping_json_error<W: Write>(out: &mut W, message: String, host: &str, port: u16
     )
     .unwrap();
 }
+
+#[cfg(not(target_os = "windows"))]
+#[cfg(test)]
+mod tests {
+    use crate::nodeclient::ping;
+    use regex::Regex;
+
+    #[tokio::test]
+    async fn test_ping() {
+        let host = "preprod-node.play.dev.cardano.org".to_string();
+        let port = 30000;
+        let network_magic = 1;
+        let mut stdout: Vec<u8> = Vec::new();
+
+        ping::ping(&mut stdout, &host, port, network_magic, 2).await;
+
+        assert_eq!(
+            &std::str::from_utf8(&stdout).unwrap()[..85],
+            "{\n  \"status\": \"ok\",\n  \"host\": \"preprod-node.play.dev.cardano.org\",\n  \"port\": 30000,\n "
+        );
+    }
+
+    #[tokio::test]
+    async fn test_ping_failure_address() {
+        let host = "murrika.relays-new.cardano-testnet.iohkdev.io".to_string();
+        let port = 30000;
+        let network_magic = 1;
+        let mut stdout: Vec<u8> = Vec::new();
+
+        ping::ping(&mut stdout, &host, port, network_magic, 2).await;
+
+        let regex_str = ".*failed to lookup address information: .*";
+        let regex = Regex::new(regex_str);
+        let ping_result = std::str::from_utf8(&stdout).unwrap();
+        // println!("ping_result: {}", ping_result);
+        assert_eq!(regex.unwrap().is_match(ping_result), true);
+    }
+
+    #[tokio::test]
+    async fn test_ping_failure_bad_port() {
+        let host = "preprod-node.play.dev.cardano.org".to_string();
+        let port = 3992;
+        let network_magic = 1;
+        let mut stdout: Vec<u8> = Vec::new();
+
+        ping::ping(&mut stdout, &host, port, network_magic, 2).await;
+
+        let regex_str = ".*connect(ion)? time(out)?.*";
+        let regex = Regex::new(regex_str);
+        let ping_result = std::str::from_utf8(&stdout).unwrap();
+        println!("ping_result: {}", ping_result);
+        assert_eq!(regex.unwrap().is_match(ping_result), true);
+    }
+
+    #[tokio::test]
+    async fn test_ping_failure_bad_magic() {
+        let host = "preview-node.play.dev.cardano.org".to_string();
+        let port = 3001;
+        let network_magic = 111111;
+        let mut stdout: Vec<u8> = Vec::new();
+
+        ping::ping(&mut stdout, &host, port, network_magic, 2).await;
+
+        let regex_str = ".*\"Refused\\(\\d+, \\\\\"version data mismatch.*";
+        let regex = Regex::new(regex_str);
+        let ping_result = std::str::from_utf8(&stdout).unwrap();
+        // println!("ping_result: {}", ping_result);
+        assert!(regex.unwrap().is_match(ping_result));
+    }
+}
