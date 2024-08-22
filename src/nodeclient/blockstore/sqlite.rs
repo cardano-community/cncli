@@ -1,28 +1,21 @@
-use std::io;
-use std::path::Path;
-
-use blake2b_simd::Params;
-use log::{debug, error, info};
-use pallas_crypto::hash::Hash;
-use pallas_crypto::nonce::NonceGenerator;
-use pallas_crypto::nonce::rolling_nonce::RollingNonceGenerator;
-use rusqlite::{Connection, named_params};
-use thiserror::Error;
-
+use crate::nodeclient::blockstore;
+use crate::nodeclient::blockstore::{Block, BlockStore};
 use crate::nodeclient::sync::BlockHeader;
+use pallas_crypto::hash::{Hash, Hasher};
+use pallas_crypto::nonce::generate_rolling_nonce;
+use rusqlite::{named_params, Connection, OptionalExtension};
+use std::path::Path;
+use std::str::FromStr;
+use thiserror::Error;
+use tracing::{debug, error, info};
 
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("SQLite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
 
-    #[error("Nonce error: {0}")]
-    Nonce(#[from] pallas_crypto::nonce::Error),
-}
-
-pub trait BlockStore {
-    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, shelley_genesis_hash: &str) -> io::Result<()>;
-    fn load_blocks(&mut self) -> Option<Vec<(i64, Vec<u8>)>>;
+    #[error("FromHex error: {0}")]
+    FromHex(#[from] hex::FromHexError),
 }
 
 pub struct SqLiteBlockStore {
@@ -130,16 +123,9 @@ impl SqLiteBlockStore {
 
                     info!("{} pool id records to process. Please be patient...", &count);
                     for (i, node_vkey) in vkeys.into_iter().enumerate() {
-                        let vkey = node_vkey.unwrap();
-                        let node_vkey_bytes = hex::decode(&vkey).unwrap();
-                        let pool_id = hex::encode(
-                            Params::new()
-                                .hash_length(28)
-                                .to_state()
-                                .update(&node_vkey_bytes)
-                                .finalize()
-                                .as_bytes(),
-                        );
+                        let vkey = node_vkey?;
+                        let node_vkey_bytes = hex::decode(&vkey)?;
+                        let pool_id = hex::encode(Hasher::<224>::hash(&node_vkey_bytes));
 
                         tx.execute(
                             "UPDATE chain SET pool_id=:pool_id WHERE node_vkey=:node_vkey",
@@ -202,7 +188,9 @@ impl SqLiteBlockStore {
                         shelley_genesis_hash.to_string()
                     }
                 },
-            ).unwrap().as_slice()
+            )
+            .unwrap()
+            .as_slice(),
         );
 
         let tx = db.transaction()?;
@@ -277,22 +265,16 @@ impl SqLiteBlockStore {
                                     shelley_genesis_hash.to_string()
                                 }
                             },
-                        ).unwrap().as_slice()
+                        )
+                        .unwrap()
+                        .as_slice(),
                     );
                 }
                 // calculate rolling nonce (eta_v)
-                let mut rolling_nonce_generator = RollingNonceGenerator::new(prev_eta_v);
-                rolling_nonce_generator.apply_block(&block.eta_vrf_0)?;
-                prev_eta_v = rolling_nonce_generator.finalize()?;
+                let eta_v = generate_rolling_nonce(prev_eta_v, &block.eta_vrf_0);
 
                 // blake2b 224 of node_vkey is the pool_id
-                let pool_id = Params::new()
-                    .hash_length(28)
-                    .to_state()
-                    .update(&block.node_vkey)
-                    .finalize()
-                    .as_bytes()
-                    .to_vec();
+                let pool_id = hex::encode(Hasher::<224>::hash(&block.node_vkey));
 
                 insert_stmt.execute(named_params! {
                     ":block_number" : block.block_number,
@@ -300,7 +282,7 @@ impl SqLiteBlockStore {
                     ":hash" : hex::encode(block.hash),
                     ":prev_hash" : hex::encode(block.prev_hash),
                     ":pool_id" : hex::encode(pool_id),
-                    ":eta_v" : hex::encode(prev_eta_v),
+                    ":eta_v" : hex::encode(eta_v),
                     ":node_vkey" : hex::encode(block.node_vkey),
                     ":node_vrf_vkey" : hex::encode(block.node_vrf_vkey),
                     ":block_vrf_0": hex::encode(block.block_vrf_0),
@@ -318,36 +300,180 @@ impl SqLiteBlockStore {
                     ":protocol_major_version" : block.protocol_major_version,
                     ":protocol_minor_version" : block.protocol_minor_version,
                 })?;
+
+                prev_eta_v = eta_v;
             }
         }
 
         tx.commit()?;
         Ok(())
     }
+
+    fn sql_load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error> {
+        let db = &self.db;
+        let mut stmt = db
+            .prepare("SELECT slot_number, hash FROM (SELECT slot_number, hash, orphaned FROM chain ORDER BY slot_number DESC LIMIT 100) WHERE orphaned = 0 ORDER BY slot_number DESC LIMIT 33;")?;
+        let blocks = stmt.query_map([], |row| {
+            let slot_result: Result<u64, rusqlite::Error> = row.get(0);
+            let hash_result: Result<String, rusqlite::Error> = row.get(1);
+            let slot = slot_result?;
+            let hash = hash_result?;
+            Ok((slot, hex::decode(hash).unwrap()))
+        })?;
+        Ok(blocks.map(|item| item.unwrap()).collect())
+    }
+
+    fn sql_find_block_by_hash(&mut self, hash_start: &str) -> Result<Option<Block>, Error> {
+        let db = &self.db;
+        let like = format!("{hash_start}%");
+        Ok(db.query_row(
+            "SELECT block_number,slot_number,hash,prev_hash,pool_id,leader_vrf_0,orphaned FROM chain WHERE hash LIKE ? ORDER BY orphaned ASC",
+            [&like],
+            |row| {
+                Ok(Some(Block {
+                    block_number: row.get(0)?,
+                    slot_number: row.get(1)?,
+                    hash: row.get(2)?,
+                    prev_hash: row.get(3)?,
+                    pool_id: row.get(4)?,
+                    leader_vrf: row.get(5)?,
+                    orphaned: row.get(6)?,
+                }))
+            },
+        )?)
+    }
+
+    fn sql_get_tip_slot_number(&mut self) -> Result<u64, Error> {
+        let db = &self.db;
+        let tip_slot_number: u64 = db.query_row("SELECT MAX(slot_number) FROM chain", [], |row| row.get(0))?;
+        Ok(tip_slot_number)
+    }
+
+    fn sql_get_eta_v_before_slot(&mut self, slot_number: u64) -> Result<Hash<32>, Error> {
+        let db = &self.db;
+        let eta_v_hex: String = db.query_row(
+            "SELECT eta_v FROM chain WHERE orphaned = 0 AND slot_number < ?1 ORDER BY slot_number DESC LIMIT 1",
+            [&slot_number],
+            |row| row.get(0),
+        )?;
+        let eta_v: Hash<32> = Hash::from_str(&eta_v_hex)?;
+        Ok(eta_v)
+    }
+
+    fn sql_get_prev_hash_before_slot(&mut self, slot_number: u64) -> Result<Hash<32>, Error> {
+        let db = &self.db;
+        let prev_hash_hex: String = db.query_row(
+            "SELECT prev_hash FROM chain WHERE orphaned = 0 AND slot_number < ?1 ORDER BY slot_number DESC LIMIT 1",
+            [&slot_number],
+            |row| row.get(0),
+        )?;
+        let prev_hash: Hash<32> = Hash::from_str(&prev_hash_hex)?;
+        Ok(prev_hash)
+    }
+
+    fn sql_save_slots(
+        &mut self,
+        epoch: u64,
+        pool_id: &str,
+        slot_qty: u64,
+        slots: &str,
+        hash: &str,
+    ) -> Result<(), Error> {
+        let db = &mut self.db;
+        let tx = db.transaction()?;
+        {
+            let mut stmt = tx.prepare("INSERT INTO slots (epoch, pool_id, slot_qty, slots, hash) VALUES (:epoch, :pool_id, :slot_qty, :slots, :hash) ON CONFLICT (epoch,pool_id) DO UPDATE SET slot_qty=excluded.slot_qty, slots=excluded.slots, hash=excluded.hash")?;
+            stmt.execute(named_params! {
+                ":epoch" : epoch,
+                ":pool_id" : pool_id,
+                ":slot_qty" : slot_qty,
+                ":slots" : slots,
+                ":hash" : hash,
+            })?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn sql_get_current_slots(&mut self, epoch: u64, pool_id: &str) -> Result<(u64, String), Error> {
+        let db = &self.db;
+        let mut stmt = db.prepare("SELECT slot_qty, hash FROM slots WHERE epoch = :epoch AND pool_id = :pool_id")?;
+        Ok(stmt.query_row(
+            named_params! {
+                ":epoch" : epoch,
+                ":pool_id" : pool_id,
+            },
+            |row| {
+                let slot_qty: u64 = row.get(0)?;
+                let hash: String = row.get(1)?;
+                Ok((slot_qty, hash))
+            },
+        )?)
+    }
+
+    fn sql_get_previous_slots(&mut self, epoch: u64, pool_id: &str) -> Result<Option<String>, Error> {
+        let db = &self.db;
+        let mut stmt = db.prepare("SELECT slots FROM slots WHERE epoch = :epoch AND pool_id = :pool_id")?;
+        Ok(stmt
+            .query_row(
+                named_params! {
+                    ":epoch" : epoch,
+                    ":pool_id" : pool_id,
+                },
+                |row| {
+                    let slots: String = row.get(0)?;
+                    Ok(slots)
+                },
+            )
+            .optional()?)
+    }
 }
 
 impl BlockStore for SqLiteBlockStore {
-    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, shelley_genesis_hash: &str) -> io::Result<()> {
-        match self.sql_save_block(pending_blocks, shelley_genesis_hash) {
-            Ok(_) => Ok(()),
-            Err(error) => Err(io::Error::new(io::ErrorKind::Other, format!("Database error!: {:?}", error))),
-        }
+    fn save_block(
+        &mut self,
+        pending_blocks: &mut Vec<BlockHeader>,
+        shelley_genesis_hash: &str,
+    ) -> Result<(), blockstore::Error> {
+        Ok(self.sql_save_block(pending_blocks, shelley_genesis_hash)?)
     }
 
-    fn load_blocks(&mut self) -> Option<Vec<(i64, Vec<u8>)>> {
-        let db = &self.db;
-        let mut stmt = db
-            .prepare("SELECT slot_number, hash FROM (SELECT slot_number, hash, orphaned FROM chain ORDER BY slot_number DESC LIMIT 100) WHERE orphaned = 0 ORDER BY slot_number DESC LIMIT 33;")
-            .unwrap();
-        let blocks = stmt
-            .query_map([], |row| {
-                let slot_result: Result<i64, rusqlite::Error> = row.get(0);
-                let hash_result: Result<String, rusqlite::Error> = row.get(1);
-                let slot = slot_result?;
-                let hash = hash_result?;
-                Ok((slot, hex::decode(hash).unwrap()))
-            })
-            .ok()?;
-        Some(blocks.map(|item| item.unwrap()).collect())
+    fn load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, blockstore::Error> {
+        Ok(self.sql_load_blocks()?)
+    }
+
+    fn find_block_by_hash(&mut self, hash_start: &str) -> Result<Option<Block>, blockstore::Error> {
+        Ok(self.sql_find_block_by_hash(hash_start)?)
+    }
+
+    fn get_tip_slot_number(&mut self) -> Result<u64, blockstore::Error> {
+        Ok(self.sql_get_tip_slot_number()?)
+    }
+
+    fn get_eta_v_before_slot(&mut self, slot_number: u64) -> Result<Hash<32>, blockstore::Error> {
+        Ok(self.sql_get_eta_v_before_slot(slot_number)?)
+    }
+
+    fn get_prev_hash_before_slot(&mut self, slot_number: u64) -> Result<Hash<32>, blockstore::Error> {
+        Ok(self.sql_get_prev_hash_before_slot(slot_number)?)
+    }
+
+    fn save_slots(
+        &mut self,
+        epoch: u64,
+        pool_id: &str,
+        slot_qty: u64,
+        slots: &str,
+        hash: &str,
+    ) -> Result<(), blockstore::Error> {
+        Ok(self.sql_save_slots(epoch, pool_id, slot_qty, slots, hash)?)
+    }
+
+    fn get_current_slots(&mut self, epoch: u64, pool_id: &str) -> Result<(u64, String), blockstore::Error> {
+        Ok(self.sql_get_current_slots(epoch, pool_id)?)
+    }
+
+    fn get_previous_slots(&mut self, epoch: u64, pool_id: &str) -> Result<Option<String>, blockstore::Error> {
+        Ok(self.sql_get_previous_slots(epoch, pool_id)?)
     }
 }

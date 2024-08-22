@@ -1,16 +1,38 @@
+use std::fs::File;
+use std::io::BufReader;
 use std::ops::Sub;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use chrono::{SecondsFormat, Utc};
-use log::{error, info};
-use regex::Regex;
-use serde::Serialize;
-
-use crate::nodeclient::sqlite::BlockStore;
+use crate::nodeclient::blockstore;
+use crate::nodeclient::blockstore::{Block, BlockStore, Error};
 use crate::nodeclient::sync::BlockHeader;
-use crate::nodeclient::APP_USER_AGENT;
+use crate::APP_USER_AGENT;
+use chrono::{SecondsFormat, Utc};
+use pallas_crypto::hash::Hash;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use tracing::{error, info};
+
+pub(crate) fn get_pooltool_config(config: &Path) -> PooltoolConfig {
+    let buf = BufReader::new(File::open(config).unwrap());
+    serde_json::from_reader(buf).unwrap()
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct PooltoolConfig {
+    pub(crate) api_key: String,
+    pub(crate) pools: Vec<Pool>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct Pool {
+    pub(crate) name: String,
+    pub(crate) pool_id: String,
+    pub(crate) host: String,
+    pub(crate) port: u16,
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -26,15 +48,15 @@ struct PooltoolData0 {
     node_id: String,
     version: String,
     at: String,
-    block_no: i64,
-    slot_no: i64,
+    block_no: u64,
+    slot_no: u64,
     block_hash: String,
     parent_hash: String,
     leader_vrf: String,
     leader_vrf_proof: String,
     node_v_key: String,
-    protocol_major_version: i64,
-    protocol_minor_version: i64,
+    protocol_major_version: u64,
+    protocol_minor_version: u64,
     platform: String,
 }
 
@@ -52,16 +74,16 @@ struct PooltoolData1 {
     node_id: String,
     version: String,
     at: String,
-    block_no: i64,
-    slot_no: i64,
+    block_no: u64,
+    slot_no: u64,
     block_hash: String,
     parent_hash: String,
     leader_vrf: String,
     block_vrf: String,
     block_vrf_proof: String,
     node_v_key: String,
-    protocol_major_version: i64,
-    protocol_minor_version: i64,
+    protocol_major_version: u64,
+    protocol_minor_version: u64,
     platform: String,
 }
 
@@ -207,12 +229,47 @@ impl BlockStore for PoolToolNotifier {
         &mut self,
         pending_blocks: &mut Vec<BlockHeader>,
         _shelley_genesis_hash: &str,
-    ) -> std::io::Result<()> {
+    ) -> Result<(), blockstore::Error> {
         self.send_to_pooltool(pending_blocks.last().unwrap());
         Ok(())
     }
 
-    fn load_blocks(&mut self) -> Option<Vec<(i64, Vec<u8>)>> {
-        None
+    fn load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error> {
+        Err(Error::Blockstore("Not implemented".to_string()))
+    }
+
+    fn find_block_by_hash(&mut self, _hash_start: &str) -> Result<Option<Block>, Error> {
+        Err(Error::Blockstore("Not implemented".to_string()))
+    }
+
+    fn get_tip_slot_number(&mut self) -> Result<u64, Error> {
+        Err(Error::Blockstore("Not implemented".to_string()))
+    }
+
+    fn get_eta_v_before_slot(&mut self, _slot_number: u64) -> Result<Hash<32>, Error> {
+        Err(Error::Blockstore("Not implemented".to_string()))
+    }
+
+    fn get_prev_hash_before_slot(&mut self, _slot_number: u64) -> Result<Hash<32>, Error> {
+        Err(Error::Blockstore("Not implemented".to_string()))
+    }
+
+    fn save_slots(
+        &mut self,
+        _epoch: u64,
+        _pool_id: &str,
+        _slot_qty: u64,
+        _slots: &str,
+        _hash: &str,
+    ) -> Result<(), Error> {
+        Err(Error::Blockstore("Not implemented".to_string()))
+    }
+
+    fn get_current_slots(&mut self, _epoch: u64, _pool_id: &str) -> Result<(u64, String), Error> {
+        Err(Error::Blockstore("Not implemented".to_string()))
+    }
+
+    fn get_previous_slots(&mut self, _epoch: u64, _pool_id: &str) -> Result<Option<String>, Error> {
+        Err(Error::Blockstore("Not implemented".to_string()))
     }
 }

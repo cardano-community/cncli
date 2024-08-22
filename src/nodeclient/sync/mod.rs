@@ -4,9 +4,6 @@ use std::ops::Sub;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use thiserror::Error;
-
-use log::{debug, error, info, warn};
 use pallas_network::facades::{KeepAliveLoop, PeerClient, DEFAULT_KEEP_ALIVE_INTERVAL_SEC};
 use pallas_network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
 use pallas_network::miniprotocols::handshake::Confirmation;
@@ -16,40 +13,40 @@ use pallas_network::miniprotocols::{
 };
 use pallas_network::multiplexer::{Bearer, Plexer};
 use pallas_traverse::MultiEraHeader;
+use thiserror::Error;
+use tracing::{debug, error, info, warn};
 
-use crate::nodeclient::pooltool;
-use crate::nodeclient::sqlite;
-use crate::nodeclient::sqlite::BlockStore;
+use crate::nodeclient::blockstore;
+use crate::nodeclient::blockstore::redb::RedbBlockStore;
+use crate::nodeclient::blockstore::sqlite::SqLiteBlockStore;
+use crate::nodeclient::blockstore::BlockStore;
 
-use super::sqlite::SqLiteBlockStore;
+pub(crate) mod pooltool;
 
 const FIVE_SECS: Duration = Duration::from_secs(5);
 
 #[derive(Error, Debug)]
 pub enum Error {
-    #[error("loggingobserver error occurred")]
-    LoggingObserverError(String),
-
     #[error("pallas_traverse error occurred: {0}")]
-    PallasTraverseError(#[from] pallas_traverse::Error),
+    PallasTraverse(#[from] pallas_traverse::Error),
 
     #[error("io error occurred: {0}")]
-    IoError(#[from] std::io::Error),
+    Io(#[from] std::io::Error),
 
     #[error("keepalive error occurred: {0}")]
-    KeepAliveError(#[from] keepalive::ClientError),
+    KeepAlive(#[from] keepalive::ClientError),
 
     #[error("chainsync error occurred: {0}")]
-    ChainSyncError(#[from] chainsync::ClientError),
+    ChainSync(#[from] chainsync::ClientError),
 
-    #[error("chainsync canceled")]
-    ChainSyncCanceled,
+    #[error("blockstore error occurred: {0}")]
+    BlockStore(#[from] blockstore::Error),
 }
 
 #[derive(Debug, Clone)]
-pub struct BlockHeader {
-    pub block_number: i64,
-    pub slot_number: i64,
+pub(crate) struct BlockHeader {
+    pub block_number: u64,
+    pub slot_number: u64,
     pub hash: Vec<u8>,
     pub prev_hash: Vec<u8>,
     pub node_vkey: Vec<u8>,
@@ -60,14 +57,14 @@ pub struct BlockHeader {
     pub eta_vrf_1: Vec<u8>,
     pub leader_vrf_0: Vec<u8>,
     pub leader_vrf_1: Vec<u8>,
-    pub block_size: i64,
+    pub block_size: u64,
     pub block_body_hash: Vec<u8>,
     pub pool_opcert: Vec<u8>,
-    pub unknown_0: i64,
-    pub unknown_1: i64,
+    pub unknown_0: u64,
+    pub unknown_1: u64,
     pub unknown_2: Vec<u8>,
-    pub protocol_major_version: i64,
-    pub protocol_minor_version: i64,
+    pub protocol_major_version: u64,
+    pub protocol_minor_version: u64,
 }
 
 struct LoggingObserver {
@@ -123,8 +120,8 @@ impl Observer<HeaderContent> for LoggingObserver {
                             MultiEraHeader::ShelleyCompatible(header) => {
                                 //sqlite only handles signed values so some casting is done here
                                 self.pending_blocks.push(BlockHeader {
-                                    block_number: header.header_body.block_number as i64,
-                                    slot_number: slot as i64,
+                                    block_number: header.header_body.block_number,
+                                    slot_number: slot,
                                     hash: hash.to_vec(),
                                     prev_hash: match header.header_body.prev_hash {
                                         None => vec![],
@@ -138,14 +135,14 @@ impl Observer<HeaderContent> for LoggingObserver {
                                     eta_vrf_1: header.header_body.nonce_vrf.1.to_vec(),
                                     leader_vrf_0: leader_vrf_output,
                                     leader_vrf_1: header.header_body.leader_vrf.1.to_vec(),
-                                    block_size: header.header_body.block_body_size as i64,
+                                    block_size: header.header_body.block_body_size,
                                     block_body_hash: header.header_body.block_body_hash.to_vec(),
                                     pool_opcert: header.header_body.operational_cert_hot_vkey.to_vec(),
-                                    unknown_0: header.header_body.operational_cert_sequence_number as i64,
-                                    unknown_1: header.header_body.operational_cert_kes_period as i64,
+                                    unknown_0: header.header_body.operational_cert_sequence_number,
+                                    unknown_1: header.header_body.operational_cert_kes_period,
                                     unknown_2: header.header_body.operational_cert_sigma.to_vec(),
-                                    protocol_major_version: header.header_body.protocol_major as i64,
-                                    protocol_minor_version: header.header_body.protocol_minor as i64,
+                                    protocol_major_version: header.header_body.protocol_major,
+                                    protocol_minor_version: header.header_body.protocol_minor,
                                 });
                                 let block_number: f64 = header.header_body.block_number as f64;
                                 let tip_block_number: f64 = tip.1 as f64;
@@ -174,8 +171,8 @@ impl Observer<HeaderContent> for LoggingObserver {
                             MultiEraHeader::BabbageCompatible(header) => {
                                 //sqlite only handles signed values so some casting is done here
                                 self.pending_blocks.push(BlockHeader {
-                                    block_number: header.header_body.block_number as i64,
-                                    slot_number: slot as i64,
+                                    block_number: header.header_body.block_number,
+                                    slot_number: slot,
                                     hash: hash.to_vec(),
                                     prev_hash: match header.header_body.prev_hash {
                                         None => vec![],
@@ -189,15 +186,14 @@ impl Observer<HeaderContent> for LoggingObserver {
                                     eta_vrf_1: vec![],
                                     leader_vrf_0: leader_vrf_output,
                                     leader_vrf_1: vec![],
-                                    block_size: header.header_body.block_body_size as i64,
+                                    block_size: header.header_body.block_body_size,
                                     block_body_hash: header.header_body.block_body_hash.to_vec(),
                                     pool_opcert: header.header_body.operational_cert.operational_cert_hot_vkey.to_vec(),
-                                    unknown_0: header.header_body.operational_cert.operational_cert_sequence_number
-                                        as i64,
-                                    unknown_1: header.header_body.operational_cert.operational_cert_kes_period as i64,
+                                    unknown_0: header.header_body.operational_cert.operational_cert_sequence_number,
+                                    unknown_1: header.header_body.operational_cert.operational_cert_kes_period,
                                     unknown_2: header.header_body.operational_cert.operational_cert_sigma.to_vec(),
-                                    protocol_major_version: header.header_body.protocol_version.0 as i64,
-                                    protocol_minor_version: header.header_body.protocol_version.1 as i64,
+                                    protocol_major_version: header.header_body.protocol_version.0,
+                                    protocol_minor_version: header.header_body.protocol_version.1,
                                 });
                                 let block_number: f64 = header.header_body.block_number as f64;
                                 let tip_block_number = max(header.header_body.block_number, tip.1);
@@ -257,24 +253,20 @@ impl Observer<HeaderContent> for LoggingObserver {
     }
 }
 
-fn get_intersect_blocks(block_store: &mut SqLiteBlockStore) -> Result<Vec<Point>, Error> {
+fn get_intersect_blocks(block_store: &mut Box<dyn BlockStore + Send>) -> Result<Vec<Point>, Error> {
     let start = Instant::now();
     debug!("get_intersect_blocks");
 
     let mut chain_blocks: Vec<Point> = vec![];
 
     /* Classic sync: Use blocks from store if available. */
-    match block_store.load_blocks() {
-        None => {}
-        Some(blocks) => {
-            for (i, block) in blocks.iter().enumerate() {
-                // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
-                if (i == 0) || ((i > 1) && (i & (i - 1) == 0)) {
-                    chain_blocks.push(Point::Specific(block.0 as u64, block.1.clone()));
-                }
-            }
+    let blocks = block_store.load_blocks()?;
+    for (i, (slot, hash)) in blocks.iter().enumerate() {
+        // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
+        if (i == 0) || ((i > 1) && (i & (i - 1) == 0)) {
+            chain_blocks.push(Point::Specific(*slot, hash.clone()));
         }
-    };
+    }
 
     // add known points
     chain_blocks.push(
@@ -363,10 +355,15 @@ pub(crate) async fn sync(
     network_magic: u64,
     shelley_genesis_hash: &str,
     no_service: bool,
+    use_redb: bool,
 ) {
     loop {
         // Retry to establish connection forever
-        let mut block_store = sqlite::SqLiteBlockStore::new(db).unwrap();
+        let mut block_store: Box<dyn BlockStore + Send> = if use_redb {
+            Box::new(RedbBlockStore::new(db).unwrap())
+        } else {
+            Box::new(SqLiteBlockStore::new(db).unwrap())
+        };
         let chain_blocks = get_intersect_blocks(&mut block_store).unwrap();
         match Bearer::connect_tcp_timeout(
             &format!("{host}:{port}").to_socket_addrs().unwrap().next().unwrap(),
@@ -421,7 +418,7 @@ pub(crate) async fn sync(
                                 false,
                                 no_service,
                                 Some(chain_blocks),
-                                Some(Box::new(block_store)),
+                                Some(block_store),
                                 shelley_genesis_hash,
                             )
                             .await

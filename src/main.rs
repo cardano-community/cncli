@@ -5,7 +5,7 @@ use std::{panic, process};
 
 use structopt::StructOpt;
 
-use cncli::nodeclient::{self, Command};
+use cncli::Command;
 
 pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
@@ -21,7 +21,9 @@ pub mod built_info {
 }
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "cncli", about = "A community-built cardano-node CLI", version = built_info::version())]
+#[structopt(
+    name = "cncli", about = "A community-built cardano-node CLI", version = built_info::version()
+)]
 struct Cli {
     #[structopt(subcommand)]
     cmd: Command,
@@ -36,8 +38,6 @@ async fn main() {
             set_var("RUST_LOG", "info");
         }
     }
-    pretty_env_logger::init_timed();
-
     let tracing_filter = match var("RUST_LOG") {
         Ok(level) => match level.to_lowercase().as_str() {
             "error" => tracing::Level::ERROR,
@@ -66,8 +66,5 @@ async fn main() {
     }));
 
     let args = Cli::from_args();
-    nodeclient::start(args.cmd).await;
+    cncli::start(args.cmd).await;
 }
-
-#[cfg(test)]
-mod test;

@@ -1,6 +1,7 @@
 /target
 .idea
 *.db*
+*.redb*
 *.skey
 *.vkey
 pooltool.json
