@@ -752,17 +752,17 @@ pub(crate) fn status(db_path: &Path, byron_genesis: &Path, shelley_genesis: &Pat
             match read_shelley_genesis(shelley_genesis) {
                 Ok(shelley) => {
                     debug!("{:?}", shelley);
+                    let shelley_trans_epoch = match *shelley_trans_epoch {
+                        None => guess_shelley_transition_epoch(shelley.network_magic),
+                        Some(value) => value,
+                    };
                     match block_store.get_tip_slot_number() {
                         Ok(tip_slot_number) => {
                             debug!("tip_slot_number: {}", tip_slot_number);
-                            let tip_time = slot_to_naivedatetime(
-                                &byron,
-                                &shelley,
-                                tip_slot_number,
-                                shelley_trans_epoch.expect("infallible"),
-                            )
-                            .and_utc()
-                            .timestamp();
+                            let tip_time =
+                                slot_to_naivedatetime(&byron, &shelley, tip_slot_number, shelley_trans_epoch)
+                                    .and_utc()
+                                    .timestamp();
                             let system_time = Utc::now().timestamp();
                             if system_time - tip_time < 120 {
                                 print_status_synced();
@@ -810,22 +810,18 @@ pub(crate) fn send_slots(
                     match block_store.get_tip_slot_number() {
                         Ok(tip_slot_number) => {
                             debug!("tip_slot_number: {}", tip_slot_number);
-                            let tip_time = slot_to_naivedatetime(
-                                &byron,
-                                &shelley,
-                                tip_slot_number,
-                                shelley_trans_epoch.expect("infallible"),
-                            )
-                            .and_utc()
-                            .timestamp();
+                            let shelley_trans_epoch = match *shelley_trans_epoch {
+                                None => guess_shelley_transition_epoch(shelley.network_magic),
+                                Some(value) => value,
+                            };
+                            let tip_time =
+                                slot_to_naivedatetime(&byron, &shelley, tip_slot_number, shelley_trans_epoch)
+                                    .and_utc()
+                                    .timestamp();
                             let system_time = Utc::now().timestamp();
                             if system_time - tip_time < 120 {
-                                let (epoch, _) = get_first_slot_of_epoch(
-                                    &byron,
-                                    &shelley,
-                                    tip_slot_number,
-                                    shelley_trans_epoch.expect("infallible"),
-                                );
+                                let (epoch, _) =
+                                    get_first_slot_of_epoch(&byron, &shelley, tip_slot_number, shelley_trans_epoch);
                                 debug!("epoch: {}", epoch);
                                 for pool in pooltool_config.pools.iter() {
                                     match block_store.get_current_slots(epoch, &pool.pool_id) {
