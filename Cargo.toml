@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.4.0"
+version = "6.4.1"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2021"
 build = "build.rs"
