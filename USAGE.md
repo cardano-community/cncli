@@ -666,3 +666,27 @@ OPTIONS:
         --stake-prefix <stake-prefix>      The prefix for stake addresses, (stake for mainnet, stake_test for testnet)
                                            [default: stake]
 ```
+
+### Pool-Stake Command
+
+This command retrieves the pool stake distribution snapshot for the current epoch. The snapshot is saved to a CSV file. Each epoch has three snapshots: mark, set, and go. The mark snapshot is taken at the beginning of the epoch, the set snapshot is one epoch ago, and the go snapshot is two epochs ago.
+
+#### Retrieve the Pool Stake Distribution Snapshot
+```bash
+$ cncli pool-stake --help       
+cncli-pool-stake 6.5.0
+
+USAGE:
+    cncli pool-stake [OPTIONS] --socket-path <socket-path>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+        --name <name>                      PoolStake snapshot name to retrieve (mark, set, go) [default: mark]
+        --network-id <network-id>          The network identifier, (1 for mainnet, 0 for testnet) [default: 1]
+        --network-magic <network-magic>    network magic. [default: 764824073]
+        --output-file <output-file>        The name of the output file (CSV format) [default: mark.csv]
+        --socket-path <socket-path>        cardano-node socket path
+```

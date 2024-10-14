@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.4.1"
+version = "6.5.0"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2021"
 build = "build.rs"
@@ -12,10 +12,10 @@ async-std = "1.13"
 bech32 = "0.11"
 bincode = "1.3.3"
 byteorder = "1.5"
-pallas-crypto = { git = "https://github.com/txpipe/pallas", rev = "de88df1986dc1487452075dd29cec0996a46e3c3" }
-pallas-math = { git = "https://github.com/txpipe/pallas", rev = "de88df1986dc1487452075dd29cec0996a46e3c3" }
-pallas-network = { git = "https://github.com/txpipe/pallas", rev = "de88df1986dc1487452075dd29cec0996a46e3c3" }
-pallas-traverse = { git = "https://github.com/txpipe/pallas", rev = "de88df1986dc1487452075dd29cec0996a46e3c3" }
+pallas-crypto = { git = "https://github.com/txpipe/pallas", rev = "7f988a16d412d4891408f99785372a4ef617984d" }
+pallas-math = { git = "https://github.com/txpipe/pallas", rev = "7f988a16d412d4891408f99785372a4ef617984d" }
+pallas-network = { git = "https://github.com/txpipe/pallas", rev = "7f988a16d412d4891408f99785372a4ef617984d" }
+pallas-traverse = { git = "https://github.com/txpipe/pallas", rev = "7f988a16d412d4891408f99785372a4ef617984d" }
 #pallas-crypto = "0.30"
 #pallas-math = "0.30"
 #pallas-network = "0.30"
