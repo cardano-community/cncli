@@ -300,6 +300,26 @@ pub enum Command {
         #[structopt(long, default_value = "mark.csv", help = "The name of the output file (CSV format)")]
         output_file: String,
     },
+    PoolStake {
+        #[structopt(parse(from_os_str), long, help = "cardano-node socket path")]
+        socket_path: PathBuf,
+        #[structopt(long, default_value = "764824073", help = "network magic.")]
+        network_magic: u64,
+        #[structopt(
+            long,
+            default_value = "mark",
+            help = "PoolStake snapshot name to retrieve (mark, set, go)"
+        )]
+        name: String,
+        #[structopt(
+            long,
+            default_value = "1",
+            help = "The network identifier, (1 for mainnet, 0 for testnet)"
+        )]
+        network_id: u8,
+        #[structopt(long, default_value = "mark.csv", help = "The name of the output file (CSV format)")]
+        output_file: String,
+    },
 }
 
 pub async fn start(cmd: Command) {
@@ -505,6 +525,25 @@ pub async fn start(cmd: Command) {
                 name.as_str(),
                 *network_id,
                 stake_prefix.as_str(),
+                output_file.as_str(),
+            )
+            .await
+            {
+                handle_error(error);
+            }
+        }
+        Command::PoolStake {
+            ref socket_path,
+            ref network_magic,
+            ref name,
+            ref network_id,
+            ref output_file,
+        } => {
+            if let Err(error) = snapshot::pool_stake_dump(
+                socket_path,
+                *network_magic,
+                name.as_str(),
+                *network_id,
                 output_file.as_str(),
             )
             .await
