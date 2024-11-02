@@ -274,7 +274,7 @@ impl SqLiteBlockStore {
                 let eta_v = generate_rolling_nonce(prev_eta_v, &block.eta_vrf_0);
 
                 // blake2b 224 of node_vkey is the pool_id
-                let pool_id = hex::encode(Hasher::<224>::hash(&block.node_vkey));
+                let pool_id = Hasher::<224>::hash(&block.node_vkey);
 
                 insert_stmt.execute(named_params! {
                     ":block_number" : block.block_number,
