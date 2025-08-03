@@ -1,9 +1,3 @@
-use std::fmt::Display;
-use std::fs::File;
-use std::io::{stdout, BufReader};
-use std::path::Path;
-use std::str::FromStr;
-
 use crate::nodeclient::blockstore;
 use crate::nodeclient::blockstore::redb::{is_redb_database, RedbBlockStore};
 use crate::nodeclient::blockstore::sqlite::SqLiteBlockStore;
@@ -11,16 +5,22 @@ use crate::nodeclient::blockstore::BlockStore;
 use crate::nodeclient::leaderlog::deserialize::cbor_hex;
 use crate::nodeclient::leaderlog::ledgerstate::calculate_ledger_state_sigma_d_and_extra_entropy;
 use crate::{LedgerSet, PooltoolConfig};
+use amaru_ouroboros::vrf::{Input, Proof, SecretKey};
+use amaru_ouroboros::Hash;
 use chrono::{DateTime, NaiveDateTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use itertools::sorted;
-use pallas_crypto::hash::{Hash, Hasher};
+use pallas_crypto::hash::Hasher;
 use pallas_crypto::nonce::generate_epoch_nonce;
-use pallas_crypto::vrf::{VrfSecretKey, VRF_SECRET_KEY_SIZE};
 use pallas_math::math::{ExpOrdering, FixedDecimal, FixedPrecision, DEFAULT_PRECISION};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
+use std::fmt::Display;
+use std::fs::File;
+use std::io::{stdout, BufReader};
+use std::path::Path;
+use std::str::FromStr;
 use thiserror::Error;
 use tracing::{debug, error, info, span, trace, Level};
 
@@ -48,16 +48,28 @@ pub enum Error {
     Leaderlog(String),
 
     #[error("Blockstore error: {0}")]
-    Blockstore(#[from] blockstore::Error),
+    Blockstore(Box<blockstore::Error>),
 
     #[error("Redb error: {0}")]
-    Redb(#[from] blockstore::redb::Error),
+    Redb(Box<blockstore::redb::Error>),
 
     #[error("Sqlite error: {0}")]
     Sqlite(#[from] blockstore::sqlite::Error),
 
     #[error("ParseFloat error: {0}")]
     ParseFloat(#[from] std::num::ParseFloatError),
+}
+
+impl From<blockstore::Error> for Error {
+    fn from(err: blockstore::Error) -> Self {
+        Error::Blockstore(Box::new(err))
+    }
+}
+
+impl From<blockstore::redb::Error> for Error {
+    fn from(err: blockstore::redb::Error) -> Self {
+        Error::Redb(Box::new(err))
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -293,10 +305,12 @@ fn mk_input_vrf(slot: u64, eta0: &[u8]) -> Vec<u8> {
 }
 
 fn vrf_eval_certified(seed: &[u8], pool_vrf_skey: &[u8]) -> Result<Hash<64>, Error> {
-    let vrf_skey: [u8; VRF_SECRET_KEY_SIZE] = pool_vrf_skey[..VRF_SECRET_KEY_SIZE].try_into().expect("Infallible");
-    let vrf_skey: VrfSecretKey = VrfSecretKey::from(&vrf_skey);
-    let certified_proof = vrf_skey.prove(seed);
-    let certified_proof_hash = certified_proof.to_hash();
+    let vrf_skey: &[u8; SecretKey::SIZE] = pool_vrf_skey[..SecretKey::SIZE].try_into().expect("Infallible");
+    let vrf_skey = SecretKey::from(vrf_skey);
+    let input_bytes: &[u8; Input::SIZE] = seed[..Input::SIZE].try_into().expect("Infallible");
+    let input: Input = Input::from(input_bytes);
+    let certified_proof: Proof = vrf_skey.prove(&input);
+    let certified_proof_hash: Hash<{ Proof::HASH_SIZE }> = Hash::<{ Proof::HASH_SIZE }>::from(&certified_proof);
     trace!("certified_proof_hash: {}", hex::encode(certified_proof_hash));
     Ok(certified_proof_hash)
 }
@@ -578,10 +592,10 @@ pub(crate) fn calculate_leader_logs(
                 )));
             }
 
-            let nc: Hash<32> = block_store.get_eta_v_before_slot(stability_window_start)?;
+            let nc = block_store.get_eta_v_before_slot(stability_window_start)?;
             debug!("nc: {}", nc);
 
-            let nh: Hash<32> = block_store.get_prev_hash_before_slot(first_slot_of_prev_epoch)?;
+            let nh = block_store.get_prev_hash_before_slot(first_slot_of_prev_epoch)?;
             debug!("nh: {}", nh);
 
             debug!("extra_entropy: {:?}", &ledger_info.extra_entropy);

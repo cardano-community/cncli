@@ -40,7 +40,13 @@ pub enum Error {
     ChainSync(#[from] chainsync::ClientError),
 
     #[error("blockstore error occurred: {0}")]
-    BlockStore(#[from] blockstore::Error),
+    BlockStore(Box<blockstore::Error>),
+}
+
+impl From<blockstore::Error> for Error {
+    fn from(err: blockstore::Error) -> Self {
+        Error::BlockStore(Box::new(err))
+    }
 }
 
 #[derive(Debug, Clone)]

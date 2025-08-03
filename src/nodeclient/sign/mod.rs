@@ -1,8 +1,6 @@
+use amaru_ouroboros::vrf::{Input, Proof, PublicKey, SecretKey};
 use pallas_crypto::hash::{Hash, Hasher};
-use pallas_crypto::vrf::{
-    VrfProof, VrfPublicKey, VrfSecretKey, VRF_PROOF_SIZE, VRF_PUBLIC_KEY_SIZE, VRF_SECRET_KEY_SIZE,
-};
-use rand::{thread_rng, Rng};
+use rand::{rng, Rng};
 use serde::Serialize;
 use std::fmt::Display;
 use std::io::stdout;
@@ -41,7 +39,7 @@ struct VerifySuccess {
 
 pub(crate) fn create_challenge(domain: &str) -> Option<Hash<32>> {
     let mut nonce_seed = [0u8; 64];
-    thread_rng().fill(&mut nonce_seed);
+    rng().fill(&mut nonce_seed);
     let nonce = hex::encode(nonce_seed);
     match hex::decode(hex::encode("cip-0022".as_bytes()) + &*hex::encode(domain.as_bytes()) + &*nonce) {
         Ok(challenge_seed) => {
@@ -78,12 +76,14 @@ pub(crate) fn sign_challenge(pool_vrf_skey: &Path, domain: &str, nonce: &str) {
                         return;
                     }
 
-                    let vrf_skey: &[u8; VRF_SECRET_KEY_SIZE] = vrf_skey.key[0..VRF_SECRET_KEY_SIZE]
+                    let vrf_skey: &[u8; SecretKey::SIZE] = vrf_skey.key[0..SecretKey::SIZE]
                         .try_into()
                         .expect("Invalid VRF signing key length");
-                    let vrf_skey = VrfSecretKey::from(vrf_skey);
-                    let vrf_proof = vrf_skey.prove(challenge_bytes.as_slice());
-                    let signature = vrf_proof.signature();
+                    let vrf_skey = SecretKey::from(vrf_skey);
+                    let vrf_challenge_input: Input =
+                        Input::try_from(challenge_bytes.as_ref()).expect("Failed to convert challenge bytes to Input");
+                    let vrf_proof = vrf_skey.prove(&vrf_challenge_input);
+                    let signature: Hash<{ Proof::HASH_SIZE }> = Hash::from(&vrf_proof);
                     debug!("signature: {}", hex::encode(signature));
                     serde_json::ser::to_writer_pretty(
                         &mut stdout(),
@@ -120,7 +120,7 @@ pub(crate) fn verify_challenge(
                         return;
                     }
                     // Verify that the vkey the client supplied is the same as the one on-chain
-                    let vkey_hash_verify = hex::encode(Hasher::<224>::hash(&vrf_vkey.key[0..VRF_SECRET_KEY_SIZE]));
+                    let vkey_hash_verify = hex::encode(Hasher::<224>::hash(&vrf_vkey.key[0..SecretKey::SIZE]));
                     debug!("vkey_hash_verify: {}", &vkey_hash_verify);
 
                     if pool_vrf_vkey_hash != vkey_hash_verify {
@@ -130,30 +130,33 @@ pub(crate) fn verify_challenge(
                         return;
                     }
 
-                    let vrf_public_key_bytes: [u8; VRF_PUBLIC_KEY_SIZE] =
-                        match vrf_vkey.key[0..VRF_PUBLIC_KEY_SIZE].try_into() {
-                            Ok(slice) => slice,
-                            Err(_) => {
-                                handle_error("Invalid VRF public key length");
-                                return;
-                            }
-                        };
+                    let vrf_public_key_bytes: [u8; PublicKey::SIZE] = match vrf_vkey.key[0..PublicKey::SIZE].try_into()
+                    {
+                        Ok(slice) => slice,
+                        Err(_) => {
+                            handle_error("Invalid VRF public key length");
+                            return;
+                        }
+                    };
 
                     // Verify that the signature is a valid format. This will fail if the signature is mal-formed
                     match hex::decode(signature) {
                         Ok(signature_bytes) => {
-                            let signature_slice: [u8; VRF_PROOF_SIZE] = match signature_bytes.as_slice().try_into() {
+                            let signature_slice: [u8; Proof::SIZE] = match signature_bytes.as_slice().try_into() {
                                 Ok(slice) => slice,
                                 Err(_) => {
                                     handle_error("Invalid signature length");
                                     return;
                                 }
                             };
-                            let vrf_public_key = VrfPublicKey::from(&vrf_public_key_bytes);
-                            let vrf_proof: VrfProof = VrfProof::from(&signature_slice);
-                            let signature_hash = vrf_proof.to_hash();
+                            let vrf_public_key = PublicKey::from(&vrf_public_key_bytes);
+                            let vrf_proof: Proof =
+                                Proof::try_from(&signature_slice).expect("Failed to convert signature bytes to Proof");
+                            let signature_hash: Hash<{ Proof::HASH_SIZE }> = Hash::from(&vrf_proof);
                             debug!("signature_hash: {}", hex::encode(signature_hash));
-                            match vrf_proof.verify(&vrf_public_key, challenge_bytes.as_slice()) {
+                            let vrf_challenge_input: Input = Input::try_from(challenge_bytes.as_ref())
+                                .expect("Failed to convert challenge bytes to Input");
+                            match vrf_proof.verify(&vrf_public_key, &vrf_challenge_input) {
                                 Ok(verification) => {
                                     debug!("verification: {}", hex::encode(verification));
                                     if verification != signature_hash {
@@ -211,20 +214,22 @@ mod tests {
         //    "description": "VRF Signing Key",
         //    "cborHex": "5840adb9c97bec60189aa90d01d113e3ef405f03477d82a94f81da926c90cd46a374e0ff2371508ac339431b50af7d69cde0f120d952bb876806d3136f9a7fda4381"
         // }
-        let vrf_skey_bytes: [u8; VRF_SECRET_KEY_SIZE] = hex::decode("adb9c97bec60189aa90d01d113e3ef405f03477d82a94f81da926c90cd46a374e0ff2371508ac339431b50af7d69cde0f120d952bb876806d3136f9a7fda4381").unwrap().as_slice()[0..VRF_SECRET_KEY_SIZE].try_into().unwrap();
-        let vrf_skey: VrfSecretKey = VrfSecretKey::from(&vrf_skey_bytes);
-        let vrf_vkey_bytes: [u8; VRF_PUBLIC_KEY_SIZE] =
+        let vrf_skey_bytes: [u8; SecretKey::SIZE] = hex::decode("adb9c97bec60189aa90d01d113e3ef405f03477d82a94f81da926c90cd46a374e0ff2371508ac339431b50af7d69cde0f120d952bb876806d3136f9a7fda4381").unwrap().as_slice()[0..SecretKey::SIZE].try_into().unwrap();
+        let vrf_skey: SecretKey = SecretKey::from(&vrf_skey_bytes);
+        let vrf_vkey_bytes: [u8; PublicKey::SIZE] =
             hex::decode("e0ff2371508ac339431b50af7d69cde0f120d952bb876806d3136f9a7fda4381")
                 .unwrap()
-                .as_slice()[0..VRF_PUBLIC_KEY_SIZE]
+                .as_slice()[0..PublicKey::SIZE]
                 .try_into()
                 .unwrap();
-        let vrf_vkey: VrfPublicKey = VrfPublicKey::from(&vrf_vkey_bytes);
+        let vrf_vkey: PublicKey = PublicKey::from(&vrf_vkey_bytes);
 
         let challenge = create_challenge("pooltool.io").unwrap();
-        let proof = vrf_skey.prove(challenge.as_slice());
-        let proof_signature_hash = proof.to_hash();
-        let verification_signature_hash = proof.verify(&vrf_vkey, challenge.as_slice()).unwrap();
+        let challenge_input: Input =
+            Input::try_from(challenge.as_ref()).expect("Failed to convert challenge bytes to Input");
+        let proof = vrf_skey.prove(&challenge_input);
+        let proof_signature_hash: Hash<{ Proof::HASH_SIZE }> = Hash::from(&proof);
+        let verification_signature_hash = proof.verify(&vrf_vkey, &challenge_input).unwrap();
 
         assert_eq!(proof_signature_hash, verification_signature_hash);
     }

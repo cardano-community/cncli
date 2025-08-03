@@ -6,19 +6,31 @@ use crate::nodeclient::blockstore::redb::{is_redb_database, RedbBlockStore};
 use crate::nodeclient::blockstore::sqlite::SqLiteBlockStore;
 use crate::nodeclient::blockstore::{Block, BlockStore};
 
-#[derive(Debug, Error)]
+#[derive(Error, Debug)]
 pub enum Error {
     #[error("Invalid path: {0}")]
     InvalidPath(std::path::PathBuf),
 
     #[error("Redb error: {0}")]
-    Redb(#[from] crate::nodeclient::blockstore::redb::Error),
+    Redb(Box<crate::nodeclient::blockstore::redb::Error>),
 
     #[error("Sqlite error: {0}")]
     Sqlite(#[from] crate::nodeclient::blockstore::sqlite::Error),
 
     #[error("Blockstore error: {0}")]
-    Blockstore(#[from] crate::nodeclient::blockstore::Error),
+    Blockstore(Box<crate::nodeclient::blockstore::Error>),
+}
+
+impl From<crate::nodeclient::blockstore::redb::Error> for Error {
+    fn from(err: crate::nodeclient::blockstore::redb::Error) -> Self {
+        Error::Redb(Box::new(err))
+    }
+}
+
+impl From<crate::nodeclient::blockstore::Error> for Error {
+    fn from(err: crate::nodeclient::blockstore::Error) -> Self {
+        Error::Blockstore(Box::new(err))
+    }
 }
 
 pub fn validate_block(db_path: &Path, hash: &str) {
