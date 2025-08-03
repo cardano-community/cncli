@@ -162,7 +162,7 @@ mod tests {
         let regex = Regex::new(regex_str);
         let ping_result = std::str::from_utf8(&stdout).unwrap();
         // println!("ping_result: {}", ping_result);
-        assert_eq!(regex.unwrap().is_match(ping_result), true);
+        assert!(regex.unwrap().is_match(ping_result));
     }
 
     #[tokio::test]
@@ -178,7 +178,7 @@ mod tests {
         let regex = Regex::new(regex_str);
         let ping_result = std::str::from_utf8(&stdout).unwrap();
         println!("ping_result: {}", ping_result);
-        assert_eq!(regex.unwrap().is_match(ping_result), true);
+        assert!(regex.unwrap().is_match(ping_result));
     }
 
     #[tokio::test]

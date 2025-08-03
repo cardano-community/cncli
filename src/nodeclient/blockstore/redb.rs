@@ -20,22 +20,22 @@ pub enum Error {
     Io(#[from] std::io::Error),
 
     #[error("Redb error: {0}")]
-    Redb(#[from] redb::Error),
+    Redb(Box<redb::Error>),
 
     #[error("Redb db error: {0}")]
-    RedbDb(#[from] redb::DatabaseError),
+    RedbDb(Box<redb::DatabaseError>),
 
     #[error("Redb commit error: {0}")]
-    RedbCommit(#[from] redb::CommitError),
+    RedbCommit(Box<redb::CommitError>),
 
     #[error("Redb transaction error: {0}")]
-    RedbTransaction(#[from] redb::TransactionError),
+    RedbTransaction(Box<redb::TransactionError>),
 
     #[error("Redb table error: {0}")]
-    RedbTable(#[from] redb::TableError),
+    RedbTable(Box<redb::TableError>),
 
     #[error("Redb storage error: {0}")]
-    RedbStorage(#[from] redb::StorageError),
+    RedbStorage(Box<redb::StorageError>),
 
     #[error("FromHex error: {0}")]
     FromHex(#[from] hex::FromHexError),
@@ -44,7 +44,43 @@ pub enum Error {
     DataNotFound,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl From<redb::Error> for Error {
+    fn from(err: redb::Error) -> Self {
+        Error::Redb(Box::new(err))
+    }
+}
+
+impl From<redb::DatabaseError> for Error {
+    fn from(err: redb::DatabaseError) -> Self {
+        Error::RedbDb(Box::new(err))
+    }
+}
+
+impl From<redb::CommitError> for Error {
+    fn from(err: redb::CommitError) -> Self {
+        Error::RedbCommit(Box::new(err))
+    }
+}
+
+impl From<redb::TransactionError> for Error {
+    fn from(err: redb::TransactionError) -> Self {
+        Error::RedbTransaction(Box::new(err))
+    }
+}
+
+impl From<redb::TableError> for Error {
+    fn from(err: redb::TableError) -> Self {
+        Error::RedbTable(Box::new(err))
+    }
+}
+
+impl From<redb::StorageError> for Error {
+    fn from(err: redb::StorageError) -> Self {
+        Error::RedbStorage(Box::new(err))
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
 struct ChainRecord {
     block_number: u64,
     slot_number: u64,
@@ -73,7 +109,8 @@ struct ChainRecord {
 
 impl Value for ChainRecord {
     type SelfType<'a> = Self;
-    type AsBytes<'a> = Vec<u8>
+    type AsBytes<'a>
+        = Vec<u8>
     where
         Self: 'a;
 
@@ -86,7 +123,7 @@ impl Value for ChainRecord {
     where
         Self: 'a,
     {
-        bincode::deserialize(data).unwrap()
+        bincode::decode_from_slice(data, bincode::config::legacy()).unwrap().0
     }
 
     fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
@@ -94,7 +131,7 @@ impl Value for ChainRecord {
         Self: 'a,
         Self: 'b,
     {
-        bincode::serialize(value).unwrap()
+        bincode::encode_to_vec(value, bincode::config::legacy()).unwrap()
     }
 
     fn type_name() -> TypeName {
@@ -102,7 +139,7 @@ impl Value for ChainRecord {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, bincode::Encode, bincode::Decode)]
 struct SlotsRecord {
     epoch: u64,
     pool_id: Vec<u8>,
@@ -113,7 +150,8 @@ struct SlotsRecord {
 
 impl Value for SlotsRecord {
     type SelfType<'a> = Self;
-    type AsBytes<'a> = Vec<u8>
+    type AsBytes<'a>
+        = Vec<u8>
     where
         Self: 'a;
 
@@ -126,7 +164,7 @@ impl Value for SlotsRecord {
     where
         Self: 'a,
     {
-        bincode::deserialize(data).unwrap()
+        bincode::decode_from_slice(data, bincode::config::legacy()).unwrap().0
     }
 
     fn as_bytes<'a, 'b: 'a>(value: &'a Self::SelfType<'b>) -> Self::AsBytes<'a>
@@ -134,7 +172,7 @@ impl Value for SlotsRecord {
         Self: 'a,
         Self: 'b,
     {
-        bincode::serialize(value).unwrap()
+        bincode::encode_to_vec(value, bincode::config::legacy()).unwrap()
     }
 
     fn type_name() -> TypeName {

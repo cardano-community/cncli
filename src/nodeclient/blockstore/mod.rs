@@ -9,7 +9,7 @@ pub(crate) mod sqlite;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Redb error: {0}")]
-    Redb(#[from] redb::Error),
+    Redb(Box<redb::Error>),
 
     #[error("Sqlite error: {0}")]
     Sqlite(#[from] sqlite::Error),
@@ -19,6 +19,12 @@ pub enum Error {
 
     #[error("Blockstore error: {0}")]
     Blockstore(String),
+}
+
+impl From<redb::Error> for Error {
+    fn from(err: redb::Error) -> Self {
+        Error::Redb(Box::new(err))
+    }
 }
 
 pub(crate) struct Block {
