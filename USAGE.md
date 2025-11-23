@@ -690,3 +690,28 @@ OPTIONS:
         --output-file <output-file>        The name of the output file (CSV format) [default: mark.csv]
         --socket-path <socket-path>        cardano-node socket path
 ```
+
+### Dump Block Command
+
+This command dump the raw cbor hex of a block given the previous block's hash and slot number.
+
+#### Retrieve the raw cbor hex of a block
+
+```bash
+$ cncli dump-block --help
+cncli-dump-block 6.7.0
+
+USAGE:
+    cncli dump-block [OPTIONS] --host <host> --intersect-hash <intersect-hash> --intersect-slot <intersect-slot>
+
+FLAGS:
+        --help       Prints help information
+    -V, --version    Prints version information
+
+OPTIONS:
+    -h, --host <host>                        cardano-node hostname to connect to
+        --intersect-hash <intersect-hash>    Block hash of the intersect point (hex)
+        --intersect-slot <intersect-slot>    Slot number of the intersect point
+        --network-magic <network-magic>      network magic. [default: 764824073]
+    -p, --port <port>
+```

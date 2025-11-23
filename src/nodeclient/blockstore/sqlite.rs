@@ -312,7 +312,7 @@ impl SqLiteBlockStore {
     fn sql_load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error> {
         let db = &self.db;
         let mut stmt = db
-            .prepare("SELECT slot_number, hash FROM (SELECT slot_number, hash, orphaned FROM chain ORDER BY slot_number DESC LIMIT 100) WHERE orphaned = 0 ORDER BY slot_number DESC LIMIT 33;")?;
+            .prepare("SELECT slot_number, hash FROM (SELECT slot_number, hash, orphaned FROM chain ORDER BY slot_number DESC LIMIT 524289) WHERE orphaned = 0 ORDER BY slot_number DESC LIMIT 262145;")?;
         let blocks = stmt.query_map([], |row| {
             let slot_result: Result<u64, rusqlite::Error> = row.get(0);
             let hash_result: Result<String, rusqlite::Error> = row.get(1);

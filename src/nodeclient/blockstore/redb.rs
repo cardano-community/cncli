@@ -348,7 +348,7 @@ impl RedbBlockStore {
     fn redb_load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error> {
         let read_tx = self.db.begin_read()?;
         // get slot_number and hash from chain table ordering by slot_number descending where orphaned is false
-        // limit the result to 33 records
+        // limit the result to 262145 records
         let chain_table = read_tx.open_table(CHAIN_TABLE)?;
         let mut chain_iter = chain_table.iter()?;
         let mut blocks: Vec<(u64, Vec<u8>)> = Vec::new();
@@ -361,7 +361,7 @@ impl RedbBlockStore {
             let slot_number = chain_record.slot_number;
             let hash = chain_record.hash.clone();
             blocks.push((slot_number, hash));
-            if blocks.len() >= 33 {
+            if blocks.len() >= 262145 {
                 break;
             }
         }

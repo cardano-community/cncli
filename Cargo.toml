@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.6.0"
+version = "6.7.0"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2021"
 build = "build.rs"
@@ -16,19 +16,19 @@ byteorder = "1.5"
 #pallas-math = { git = "https://github.com/txpipe/pallas", rev = "b641c4e6862be447336429878f4e0a57a2281588" }
 #pallas-network = { git = "https://github.com/txpipe/pallas", rev = "b641c4e6862be447336429878f4e0a57a2281588" }
 #pallas-traverse = { git = "https://github.com/txpipe/pallas", rev = "b641c4e6862be447336429878f4e0a57a2281588" }
-pallas-crypto = "0.32.1"
-pallas-math = "0.32.1"
-pallas-network = "0.32.1"
-pallas-traverse = "0.32.1"
-amaru-ouroboros = { git = "https://github.com/pragma-org/amaru", rev = "981381fb6bb980f27c244e9f80765f0d653bb212" }
+pallas-crypto = "0.33.0"
+pallas-math = "0.33.0"
+pallas-network = "0.33.0"
+pallas-traverse = "0.33.0"
+amaru-ouroboros = { git = "https://github.com/pragma-org/amaru", rev = "8a4f994" }
 chrono = "0.4"
 chrono-tz = "0.10"
 futures = "0.3"
 hex = "0.4"
 #malachite-base = "0.4.16"
 #malachite = "0.4.16"
-minicbor = { version = "0.26", features = ["std"] }
-redb = "2.6.1"
+minicbor = { version = "0.25.1", features = ["std", "half", "derive"] }
+redb = "2.6.3"
 regex = "1.11"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
 rusqlite = { version = "0.37", features = ["bundled"] }

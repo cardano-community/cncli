@@ -7,6 +7,7 @@ use std::thread::JoinHandle;
 
 use structopt::StructOpt;
 
+use crate::nodeclient::dumpblock;
 use crate::nodeclient::leaderlog::handle_error;
 use crate::nodeclient::sync::pooltool;
 use crate::nodeclient::sync::pooltool::PooltoolConfig;
@@ -58,6 +59,18 @@ pub enum Command {
             help = "sqlite database file"
         )]
         db: PathBuf,
+    },
+    DumpBlock {
+        #[structopt(long, help = "Slot number of the intersect point")]
+        intersect_slot: u64,
+        #[structopt(long, help = "Block hash of the intersect point (hex)")]
+        intersect_hash: String,
+        #[structopt(short, long, help = "cardano-node hostname to connect to")]
+        host: String,
+        #[structopt(short, long, default_value = "3001", help = "cardano-node port")]
+        port: u16,
+        #[structopt(long, default_value = "764824073", help = "network magic.")]
+        network_magic: u64,
     },
     Sync {
         #[structopt(
@@ -334,6 +347,25 @@ pub async fn start(cmd: Command) {
         }
         Command::Validate { ref db, ref hash } => {
             validate::validate_block(db, hash.as_str());
+        }
+        Command::DumpBlock {
+            ref intersect_slot,
+            ref intersect_hash,
+            ref host,
+            ref port,
+            ref network_magic,
+        } => {
+            if let Err(error) = dumpblock::run(nodeclient::dumpblock::Args {
+                intersect_slot: *intersect_slot,
+                intersect_hash: intersect_hash.clone(),
+                host: host.clone(),
+                port: *port,
+                network_magic: *network_magic,
+            })
+            .await
+            {
+                handle_error(error);
+            }
         }
         Command::Sync {
             ref db,
