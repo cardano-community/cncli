@@ -268,7 +268,7 @@ fn get_intersect_blocks(block_store: &mut Box<dyn BlockStore + Send>) -> Result<
     /* Classic sync: Use blocks from store if available. */
     let blocks = block_store.load_blocks()?;
     for (i, (slot, hash)) in blocks.iter().enumerate() {
-        // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32
+        // all powers of 2 including 0th element 0, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144
         if (i == 0) || ((i > 1) && (i & (i - 1) == 0)) {
             chain_blocks.push(Point::Specific(*slot, hash.clone()));
         }
