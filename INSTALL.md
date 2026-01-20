@@ -254,7 +254,7 @@ CNCLI ```sync```, ```sendtip``` and ```leaderlog``` can be easily enabled as ```
 - ```sendtip``` will continuously send your stake pool ```tip``` to PoolTool.
 - ```leaderlog``` will run twice per day and can be configured to run all or any of the following tasks:
   - on beginning of the epoch send the assigned slots for the current and previous epoch to PoolTool and
-  - on day 4 of the epoch calculate the leaderlog for the next epoch, mail it and/or write a slots.csv file.
+  - on day 4 of the epoch calculate the leaderlog for the next epoch, mail it and/or write a slots.csv, write a Prometheus file with total number of slots and/or store your leaderlog (with or without slots) in a PostgreSQL table.
 
 To set up ```systemd```:
 
@@ -350,6 +350,20 @@ sudo systemctl start cncli-sendtip.service
 
 ```bash
 sudo systemctl enable cncli-leaderlog.timer --now
+```
+
+### PostgreSQL
+If you would like to store your leaderlog to Postgres you can do so by creating the following table and setting your connection details in `cncli-leaderlog.sh`. You can store slots with or without assigned slot time. For security reasons it's recommended to store the leaderlog without the assigned slot time (`saveToPostgres=secure`).
+
+```
+create table leaderlog (
+    id bigserial primary key,
+    epoch smallint not null,
+    nr smallint not null,
+    slot bigint default null unique,
+    scheduled_at timestamp with time zone default null,
+    created_at timestamp not null default now()
+);
 ```
 
 ### Helper Scripts
