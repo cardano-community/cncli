@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Send slots to PoolTool, write slots.csv and mail leaderlog
+# Send slots to PoolTool, mail leaderlog, store slots as CSV or in PostgreSQL.
 #
 # Depending on the day of the epoch we are in (1 to 5) this script will run one
 # or more of the tasks above.
@@ -8,9 +8,9 @@
 # On epoch day 4: calculate next epoch leaderlog, mail it and/or write slots.csv.
 #
 # Usage:
-#   Via systemd timer or ./cncli-leaderlog.sh [--test] [--force-email] [--csv PATH]
+#   Via systemd timer or ./cncli-leaderlog.sh [--test] [--force-email] [--csv PATH] [--postgres]
 #
-# Original Author: Leon • HAPPY Staking Pool
+# Original Author: Leon • HAPPY Staking
 # Improvements by Rick • RCADA Pool:    safer strict mode, logging, timeouts, VRF check, test mode, CSV atomic write
 
 # ------------------------------------------------------------------------------
@@ -23,8 +23,12 @@ timezone="Etc/UTC"                             # REQUIRED: set correct timezone 
 hexStakePool=""                                # REQUIRED: pool id in hex
 jsonPoolTool="/usr/local/etc/pooltool.json"    # optional: path to PoolTool json (leave empty to skip)
 slotsCsvFile="/var/local/cncli/slots.csv"      # optional: path to write assigned slots CSV (leave empty to skip)
+leaderPromFile=""                              # optional: write assigned slot count in Prometheus format (leave empty to skip)
 mailLeaderLogTo=""                             # optional: email address to send leaderlog (leave empty to skip)
+saveToPostgres=none                            # REQUIRED: Choose one of 'none', 'secure', 'past' or 'all'.
+useScriptLogging=true                          # REQUIRED: handles logging and locking through this script
 
+consensusMode="cpraos"                         # optional: Consensus mode for leader schedule calculation [cpraos | praos]
 vrfSigningKeyFile="/etc/cardano/mainnet/keys/vrf.skey"             # REQUIRED
 shelleyGenesisFile="/etc/cardano/mainnet/shelley-genesis.json"     # REQUIRED
 byronGenesisFile="/etc/cardano/mainnet/byron-genesis.json"         # REQUIRED
@@ -33,8 +37,13 @@ binCardanoCli=""                               # optional: (override with ex. /u
 binCnCli=""                                    # optional: (override with ex. /usr/local/bin/cncli if needed; defaults to $PATH)
 binPython3=""                                  # optional: (override with ex. /usr/bin/python3 if needed; defaults to $PATH)
 
-# Consensus mode for leader schedule calc: cpraos | praos (leave empty to omit --consensus flag)
-consensus_mode=""
+# ------------------------------------------------------------------------------
+# PostgreSQL connection (EDIT THESE)
+# ------------------------------------------------------------------------------
+export PGUSER=
+export PGHOST=
+export PGDATABASE=
+export PGPASSFILE=
 
 # ------------------------------------------------------------------------------
 # Binaries (override via environment if needed; default to PATH)
@@ -52,23 +61,29 @@ binPython3="${binPython3:-python3}"
 LOG_DIR="${LOG_DIR:-$HOME/.cncli-leaderlog}"
 LOG_FILE="${LOG_DIR}/cncli-leaderlog.log"
 LOCK_FILE="${LOG_DIR}/cncli-leaderlog.lock"
-CMD_TIMEOUT="${CMD_TIMEOUT:-120s}"             # default timeout for long ops
+CMD_TIMEOUT="${CMD_TIMEOUT:-300s}"             # default timeout for long ops
 DEBUG="${DEBUG:-0}"                            # set DEBUG=1 to enable bash -x
 
 # --- CLI flags (optional) ---
 TEST="${TEST:-0}"
 FORCE_EMAIL="${FORCE_EMAIL:-0}"
 CSV_OVERRIDE="${CSV_OVERRIDE:-}"
+POSTGRES=${POSTGRES:-0}
+CURRENT=${CURRENT:-0}
+NEXT=${NEXT:-0}
 
 usage() {
   cat <<EOF
-Usage: $0 [--test] [--force-email] [--csv /path/to/slots.csv]
+Usage: $0 [--test] [--force-email] [--csv /path/to/slots.csv] [--postgres]
   --test           Run leaderlog for CURRENT epoch now, write CSV, optionally email.
   --force-email    Force email send during --test (ignores timing windows).
   --csv PATH       Override CSV output path for this run only.
+  --postgres       Test connection to PostgreSQL. Returns connection info on success.
+  --current        Force calculation and processing of the current and previous epoch.
+  --next           Force calculation and processing of the next epoch.
 
 Environment equivalents:
-  TEST=1 FORCE_EMAIL=1 CSV_OVERRIDE=/tmp/slots.csv $0
+  TEST=1 FORCE_EMAIL=1 CSV_OVERRIDE=/tmp/slots.csv POSTGRES=1 CURRENT=1 NEXT=1 $0
 EOF
 }
 
@@ -77,9 +92,12 @@ while [[ $# -gt 0 ]]; do
     --test) TEST=1; shift ;;
     --force-email) FORCE_EMAIL=1; shift ;;
     --csv) CSV_OVERRIDE="$2"; shift 2 ;;
+    --postgres) TEST=1; POSTGRES=1; shift ;;
+    --current) CURRENT=1; shift ;;
+    --next) NEXT=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown flag: $1"; usage; exit 1 ;;
-  endcase
+  esac
 done 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
@@ -87,12 +105,16 @@ done 2>/dev/null || true
 # ------------------------------------------------------------------------------
 set -Eeuo pipefail
 if [[ "${DEBUG}" == "1" ]]; then set -x; fi
-
-mkdir -p "${LOG_DIR}"
+if [[ "$useScriptLogging" == "1" || "${useScriptLogging,,}" == "true" ]]; then mkdir -p "${LOG_DIR}"; fi
 
 log() {
   # usage: log "message"
-  printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*" | tee -a "${LOG_FILE}"
+  if [[ "$useScriptLogging" == "1" || "${useScriptLogging,,}" == "true" ]];
+  then
+    printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*" | tee -a "${LOG_FILE}"
+  else
+    printf '%s %s\n' "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" "$*"
+  fi
 }
 
 die() {
@@ -110,8 +132,11 @@ on_err() {
 trap on_err ERR
 
 # Concurrency lock
-exec {lock_fd}>"${LOCK_FILE}" || die "Cannot open lock ${LOCK_FILE}"
-flock -n "${lock_fd}" || die "Another instance is running (lock: ${LOCK_FILE})"
+if [[ "$useScriptLogging" == "1" || "${useScriptLogging,,}" == "true" ]];
+then
+  exec {lock_fd}>"${LOCK_FILE}" || die "Cannot open lock ${LOCK_FILE}"
+  flock -n "${lock_fd}" || die "Another instance is running (lock: ${LOCK_FILE})"
+fi
 
 # ------------------------------------------------------------------------------
 # Validate environment / inputs
@@ -148,7 +173,8 @@ log "cardano-cli: $(${binCardanoCli} --version | head -n1)"
 log "cncli:       $(${binCnCli} --version 2>/dev/null || echo 'unknown')"
 log "jq:          $(${binJq} --version)"
 log "timeout:     $(${binTimeout} --version | head -n1)"
-log "timezone=${timezone} pool=${hexStakePool:0:8}…"
+log "timezone:    ${timezone}"
+log "pool:        ${hexStakePool}"
 
 # ------------------------------------------------------------------------------
 # Script internal variables (epoch math)
@@ -171,8 +197,8 @@ else
 fi
 
 # Temp file handling
-LEADERLOG_JSON="$(mktemp /tmp/leaderlog.XXXXXXXX.json)"
-cleanup() { rm -f "${LEADERLOG_JSON}" 2>/dev/null || true; }
+leaderlogJsonFile="$(mktemp /tmp/leaderlog.XXXXXXXX.json)"
+cleanup() { shred -uz "${leaderlogJsonFile}" 2>/dev/null || true; }
 trap cleanup EXIT
 
 run_timeout() {
@@ -215,23 +241,23 @@ calculateLeaderLog () {
 
   # Optional consensus flag (only if set)
   local consensus_args=()
-  [[ -n "${consensus_mode}" ]] && consensus_args+=(--consensus "${consensus_mode}")
+  [[ -n "${consensusMode}" ]] && consensus_args+=(--consensus "${consensusMode}")
 
   if ! run_timeout nice -n19 "${binCnCli}" leaderlog \
       --db "${dbCnCli}" --pool-id "${hexStakePool}" --pool-vrf-skey "${vrfSigningKeyFile}" \
       --byron-genesis "${byronGenesisFile}" --shelley-genesis "${shelleyGenesisFile}" \
       --pool-stake "${poolTotalStake}" --active-stake "${poolActiveStake}" \
       "${consensus_args[@]}" \
-      --tz "${timezone}" --ledger-set "${1}" > "${LEADERLOG_JSON}"; then
+      --tz "${timezone}" --ledger-set "${1}" > "${leaderlogJsonFile}"; then
     die "cncli leaderlog failed"
   fi
 
   # Validate JSON status
   local status
-  status="$(${binJq} -r '.status // empty' < "${LEADERLOG_JSON}" || true)"
+  status="$(${binJq} -r '.status // empty' < "${leaderlogJsonFile}" || true)"
   if [[ "${status}" != "ok" ]]; then
     log "Leaderlog status not ok. Full JSON follows:"
-    cat "${LEADERLOG_JSON}" | tee -a "${LOG_FILE}"
+    cat "${leaderlogJsonFile}" | tee -a "${LOG_FILE}"
     die "Leaderlog status='${status}'"
   fi
   log "Leaderlog calculation done (status=ok)"
@@ -239,10 +265,10 @@ calculateLeaderLog () {
 
 mailLeaderLog () {
   # $1 ledger-set, $2 epoch-number
-  if [[ -n "${mailLeaderLogTo}" && -r "${LEADERLOG_JSON}" ]]; then
+  if [[ -n "${mailLeaderLogTo}" && -r "${leaderlogJsonFile}" ]]; then
     if command -v "${binMail}" >/dev/null 2>&1; then
       log "Mailing leaderlog to ${mailLeaderLogTo}…"
-      if ! { ${binJq} . < "${LEADERLOG_JSON}" | "${binMail}" -s "Leaderlog for $1 epoch (${2})" -- "${mailLeaderLogTo}"; }; then
+      if ! { ${binJq} . < "${leaderlogJsonFile}" | "${binMail}" -s "Leaderlog for $1 epoch (${2})" -- "${mailLeaderLogTo}"; }; then
         die "Mail delivery failed"
       fi
       log "Mail sent"
@@ -302,10 +328,10 @@ writeLeaderSlots () {
   mkdir -p "$(dirname "${outCsv}")" || die "Cannot create CSV dir: $(dirname "${outCsv}")"
 
   local status
-  status="$(${binJq} -r '.status // empty' < "${LEADERLOG_JSON}" || true)"
+  status="$(${binJq} -r '.status // empty' < "${leaderlogJsonFile}" || true)"
   if [[ "${status}" == "ok" ]]; then
     log "Writing leaderlog CSV to ${outCsv}…"
-    if ! ${binJq} -r '.assignedSlots[] | (.at|tostring) + "," + (.slot|tostring) + "," + (.no|tostring)' < "${LEADERLOG_JSON}" > "${outCsv}.tmp"; then
+    if ! ${binJq} -r '.assignedSlots[] | (.at|tostring) + "," + (.slot|tostring) + "," + (.no|tostring)' < "${leaderlogJsonFile}" > "${outCsv}.tmp"; then
       die "jq extraction failed for CSV"
     fi
     mv -f "${outCsv}.tmp" "${outCsv}"
@@ -315,13 +341,66 @@ writeLeaderSlots () {
   fi
 }
 
+writeLeaderProm ()
+{
+  if [[ "${leaderPromFile}" != "" && -w `dirname "${leaderPromFile}"` && `jq -r '.status' <<< "$(cat ${leaderlogJsonFile})"` == "ok" ]];
+  then
+    log "Writing total slot count to Prometheus file ${leaderPromFile}…"
+    printf "assigned_blocks_epoch %d\n" `cat ${leaderlogJsonFile} | jq -r '.epochSlots'` > ${leaderPromFile}
+    if [[ $? -eq 0 ]]; then log "Wrote total slot count to ${leaderPromFile}."; else log "Failed to write to ${leaderPromFile}"; fi
+  else
+    log "Not writing total slot count to Prometheus file"
+  fi
+}
+
+saveToPostgres()
+{
+  if [[ "${saveToPostgres}" != 'none' ]];
+  then
+    i=0
+    epoch=$(cat "${leaderlogJsonFile}" | jq -r '.epoch')
+    totalSlots=$(cat "${leaderlogJsonFile}" | jq -r '.epochSlots')
+    log "Saving '${saveToPostgres}' slots to PostgreSQL... "
+    psql -qc "delete from leaderlog where epoch=${epoch} and slot is null"
+
+    while read -r row;
+    do
+      no=$(echo "$row" | jq -r '.no')
+      slot=$(echo "$row" | jq -r '.slot')
+      at=$(echo "$row" | jq -r '.at')
+      ts=$(date -d "$at" +%s)
+
+      if [[ "${saveToPostgres}" == "all" || ( "${saveToPostgres}" == "past" && $ts -lt $secondsNow ) ]];
+      then
+        psql -qc "insert into leaderlog (nr, slot, epoch, scheduled_at) values (${no}, ${slot}, ${epoch}, '${at}')
+                  on conflict (slot) do update set nr=${no}, epoch=${epoch}, scheduled_at='${at}'"
+      else
+        psql -qc "insert into leaderlog (nr, epoch) values (${no}, ${epoch})"
+      fi
+      i=$((i + 1))
+    done <<< "$(cat "${leaderlogJsonFile}" | jq -c '.assignedSlots[]')"
+
+    log "Saved $i of $totalSlots slots to PostgreSQL."
+  else
+    log "Not saving any slots to PostgreSQL."
+  fi
+}
+
 # ------------------------------------------------------------------------------
 # Test mode: run immediately for CURRENT epoch to validate CSV + email
 # ------------------------------------------------------------------------------
 if [[ "${TEST}" == "1" ]]; then
+  if [[ -n "${POSTGRES:-}" ]]; then
+  log "TEST mode: checking connection to PostgeSQL only..."
+    psql -c '\conninfo'
+    exit 0
+  fi
+
   log "TEST mode: generating leaderlog for CURRENT epoch (${currentEpoch})"
   calculateLeaderLog current "${currentEpoch}" stakeSet
   writeLeaderSlots
+  writeLeaderProm
+  saveToPostgres
 
   if [[ "${FORCE_EMAIL}" == "1" ]]; then
     log "TEST mode: force emailing leaderlog"
@@ -338,17 +417,21 @@ fi
 # Scheduler logic
 # ------------------------------------------------------------------------------
 # Run within 10 minutes of epoch start
-if [[ $dayOfEpoch -eq 0 && $secondsLeftInEpoch -lt 432000 && $secondsLeftInEpoch -gt 431400 ]]; then
+if [[ ( $dayOfEpoch -eq 0 && $secondsLeftInEpoch -lt 432000 && $secondsLeftInEpoch -gt 431400 ) || $CURRENT -eq 1 ]]; then
   calculateLeaderLog prev $((currentEpoch-1)) stakeGo
-  calculateLeaderLog current "${currentEpoch}"  stakeSet
+  saveToPostgres
+  calculateLeaderLog current "${currentEpoch}" stakeSet
   sendPoolToolSlots
+  writeLeaderProm
+  saveToPostgres
 fi
 
 # Run as soon as the leaderlog is available (day 4, ~1.5 days left)
-if [[ $dayOfEpoch -eq 4 && $secondsLeftInEpoch -le 129600 && $secondsLeftInEpoch -gt 129000 ]]; then
+if [[ ( $dayOfEpoch -eq 4 && $secondsLeftInEpoch -le 129600 && $secondsLeftInEpoch -gt 129000 ) || $NEXT -eq 1 ]]; then
   calculateLeaderLog next $((currentEpoch+1)) stakeMark
   mailLeaderLog next $((currentEpoch+1))
   writeLeaderSlots
+  saveToPostgres
 fi
 
 log "Completed cncli-leaderlog run"
