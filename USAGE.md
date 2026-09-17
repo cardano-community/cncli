@@ -565,7 +565,7 @@ $ cncli sendslots --byron-genesis ~/haskell/local/byron-genesis.json --shelley-g
 
 ### Sign Command
 
-This command signs an arbitrary message string with the pool's vrf.skey. The output signature can be used to verify that the message came from the pool operator.
+This command signs a CIP-0022 challenge built from a domain and nonce with the pool's vrf.skey.
 
 #### Show Sign Help
 
@@ -574,21 +574,22 @@ $ cncli sign --help
 cncli-sign 6.0.0
 
 USAGE:
-    cncli sign --message <message> --pool-vrf-skey <pool-vrf-skey>
+    cncli sign --domain <domain> --nonce <nonce> --pool-vrf-skey <pool-vrf-skey>
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-        --message <message>                text message to sign
-        --pool-vrf-skey <pool-vrf-skey>    pool's vrf.skey file
+        --domain <domain>                    validating domain e.g. pooltool.io
+        --nonce <nonce>                      nonce value in lower-case hex
+        --pool-vrf-skey <pool-vrf-skey>      pool's vrf.skey file
 ```
 
-#### Sign a message
+#### Sign a challenge
 
 ```bash
-$ cncli sign --message "pooltool.io" --pool-vrf-skey pool.vrf.skey
+$ cncli sign --domain pooltool.io --nonce "$NONCE" --pool-vrf-skey pool.vrf.skey
 ```
 
 ##### Sign Result
@@ -602,7 +603,7 @@ $ cncli sign --message "pooltool.io" --pool-vrf-skey pool.vrf.skey
 
 ### Verify Command
 
-This command verifies the signature that was used to sign an arbitrary message string with the pool's vrf.skey. This command validates that the message came from the pool operator.
+This command verifies a CIP-0022 proof for a domain and nonce against the pool's vrf.vkey and on-chain verification-key hash.
 
 #### Show Verify Help
 
@@ -611,25 +612,26 @@ $ cncli verify --help
 cncli-verify 6.0.0
 
 USAGE:
-    cncli verify --message <message> --pool-vrf-vkey <pool-vrf-vkey> --pool-vrf-vkey-hash <pool-vrf-vkey-hash> --signature <signature>
+    cncli verify --domain <domain> --nonce <nonce> --pool-vrf-vkey <pool-vrf-vkey> --pool-vrf-vkey-hash <pool-vrf-vkey-hash> --signature <signature>
 
 FLAGS:
     -h, --help       Prints help information
     -V, --version    Prints version information
 
 OPTIONS:
-        --message <message>                          text message to verify
-        --pool-vrf-vkey <pool-vrf-vkey>              pool's vrf.vkey file
+        --domain <domain>                              validating domain e.g. pooltool.io
+        --nonce <nonce>                                nonce value in lower-case hex
+        --pool-vrf-vkey <pool-vrf-vkey>                pool's vrf.vkey file
         --pool-vrf-vkey-hash <pool-vrf-vkey-hash>
             pool's vrf hash in hex retrieved from 'cardano-cli query pool-params...'
 
-        --signature <signature>                      signature to verify in hex
+        --signature <signature>                        signature to verify in hex
 ```
 
-#### Verify a message
+#### Verify a challenge
 
 ```bash
-$ cncli verify --message "pooltool.io" --pool-vrf-vkey pool.vrf.vkey --pool-vrf-vkey-hash f58bf0111f8e9b233c2dcbb72b5ad400330cf260c6fb556eb30cefd387e5364c --signature 8aff63e961aad02852dbb7905f9215d7b1d4ff63f734f7f1b82184004112cca798719941ccf54beca360f844632c2c070e6f8ef11ca177efa240c712ef3d7e9f283db68278088acbe1af381cc9673e08
+$ cncli verify --domain pooltool.io --nonce "$NONCE" --pool-vrf-vkey pool.vrf.vkey --pool-vrf-vkey-hash f58bf0111f8e9b233c2dcbb72b5ad400330cf260c6fb556eb30cefd387e5364c --signature 8aff63e961aad02852dbb7905f9215d7b1d4ff63f734f7f1b82184004112cca798719941ccf54beca360f844632c2c070e6f8ef11ca177efa240c712ef3d7e9f283db68278088acbe1af381cc9673e08
 ```
 
 ##### Verify Result
