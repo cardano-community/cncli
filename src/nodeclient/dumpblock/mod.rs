@@ -2,8 +2,9 @@ use hex::ToHex;
 use pallas_network::facades::{KeepAliveLoop, PeerClient, DEFAULT_KEEP_ALIVE_INTERVAL_SEC};
 use pallas_network::miniprotocols::chainsync::{HeaderContent, NextResponse};
 use pallas_network::miniprotocols::{
-    blockfetch, chainsync, handshake, keepalive, txsubmission, Point, PROTOCOL_N2N_BLOCK_FETCH,
-    PROTOCOL_N2N_CHAIN_SYNC, PROTOCOL_N2N_HANDSHAKE, PROTOCOL_N2N_KEEP_ALIVE, PROTOCOL_N2N_TX_SUBMISSION,
+    blockfetch, chainsync, handshake, keepalive, peersharing, txsubmission, Point, PROTOCOL_N2N_BLOCK_FETCH,
+    PROTOCOL_N2N_CHAIN_SYNC, PROTOCOL_N2N_HANDSHAKE, PROTOCOL_N2N_KEEP_ALIVE, PROTOCOL_N2N_PEER_SHARING,
+    PROTOCOL_N2N_TX_SUBMISSION,
 };
 use pallas_network::multiplexer::{Bearer, Plexer};
 use std::io;
@@ -80,6 +81,7 @@ pub async fn run(args: Args) -> Result<(), DumpBlockError> {
     let bf_channel = plexer.subscribe_client(PROTOCOL_N2N_BLOCK_FETCH);
     let ka_channel = plexer.subscribe_client(PROTOCOL_N2N_KEEP_ALIVE);
     let txsub_channel = plexer.subscribe_client(PROTOCOL_N2N_TX_SUBMISSION);
+    let peersharing_channel = plexer.subscribe_client(PROTOCOL_N2N_PEER_SHARING);
 
     let keepalive = keepalive::Client::new(ka_channel);
 
@@ -102,6 +104,7 @@ pub async fn run(args: Args) -> Result<(), DumpBlockError> {
                 chainsync: chainsync::Client::new(cs_channel),
                 blockfetch: blockfetch::Client::new(bf_channel),
                 txsubmission: txsubmission::Client::new(txsub_channel),
+                peersharing: peersharing::Client::new(peersharing_channel),
             };
             let PeerClient {
                 mut chainsync,
@@ -109,6 +112,7 @@ pub async fn run(args: Args) -> Result<(), DumpBlockError> {
                 plexer,
                 keepalive: _keepalive,
                 txsubmission: _txsubmission,
+                peersharing: _peersharing,
             } = peer;
             let res = fetch_block(&mut chainsync, &mut blockfetch, point).await;
             plexer.abort().await;

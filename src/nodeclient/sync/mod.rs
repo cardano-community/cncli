@@ -8,8 +8,9 @@ use pallas_network::facades::{KeepAliveLoop, PeerClient, DEFAULT_KEEP_ALIVE_INTE
 use pallas_network::miniprotocols::chainsync::{HeaderContent, NextResponse, Tip};
 use pallas_network::miniprotocols::handshake::Confirmation;
 use pallas_network::miniprotocols::{
-    blockfetch, chainsync, handshake, keepalive, txsubmission, Point, MAINNET_MAGIC, PROTOCOL_N2N_BLOCK_FETCH,
-    PROTOCOL_N2N_CHAIN_SYNC, PROTOCOL_N2N_HANDSHAKE, PROTOCOL_N2N_KEEP_ALIVE, PROTOCOL_N2N_TX_SUBMISSION,
+    blockfetch, chainsync, handshake, keepalive, peersharing, txsubmission, Point, MAINNET_MAGIC,
+    PROTOCOL_N2N_BLOCK_FETCH, PROTOCOL_N2N_CHAIN_SYNC, PROTOCOL_N2N_HANDSHAKE, PROTOCOL_N2N_KEEP_ALIVE,
+    PROTOCOL_N2N_PEER_SHARING, PROTOCOL_N2N_TX_SUBMISSION,
 };
 use pallas_network::multiplexer::{Bearer, Plexer};
 use pallas_traverse::MultiEraHeader;
@@ -386,6 +387,7 @@ pub(crate) async fn sync(
                 let cs_channel = plexer.subscribe_client(PROTOCOL_N2N_CHAIN_SYNC);
                 let bf_channel = plexer.subscribe_client(PROTOCOL_N2N_BLOCK_FETCH);
                 let txsub_channel = plexer.subscribe_client(PROTOCOL_N2N_TX_SUBMISSION);
+                let peersharing_channel = plexer.subscribe_client(PROTOCOL_N2N_PEER_SHARING);
 
                 let ka_channel = plexer.subscribe_client(PROTOCOL_N2N_KEEP_ALIVE);
                 let keepalive = keepalive::Client::new(ka_channel);
@@ -408,6 +410,7 @@ pub(crate) async fn sync(
                                 chainsync: chainsync::Client::new(cs_channel),
                                 blockfetch: blockfetch::Client::new(bf_channel),
                                 txsubmission: txsubmission::Client::new(txsub_channel),
+                                peersharing: peersharing::Client::new(peersharing_channel),
                             };
 
                             let PeerClient {
@@ -416,6 +419,7 @@ pub(crate) async fn sync(
                                 chainsync,
                                 blockfetch: _blockfetch,
                                 txsubmission: _txsubmission,
+                                peersharing: _peersharing,
                             } = peer;
 
                             let shelley_genesis_hash = shelley_genesis_hash.to_string();
@@ -489,6 +493,7 @@ pub(crate) async fn sendtip(
                 let cs_channel = plexer.subscribe_client(PROTOCOL_N2N_CHAIN_SYNC);
                 let bf_channel = plexer.subscribe_client(PROTOCOL_N2N_BLOCK_FETCH);
                 let txsub_channel = plexer.subscribe_client(PROTOCOL_N2N_TX_SUBMISSION);
+                let peersharing_channel = plexer.subscribe_client(PROTOCOL_N2N_PEER_SHARING);
 
                 let ka_channel = plexer.subscribe_client(PROTOCOL_N2N_KEEP_ALIVE);
                 let keepalive = keepalive::Client::new(ka_channel);
@@ -511,6 +516,7 @@ pub(crate) async fn sendtip(
                                 chainsync: chainsync::Client::new(cs_channel),
                                 blockfetch: blockfetch::Client::new(bf_channel),
                                 txsubmission: txsubmission::Client::new(txsub_channel),
+                                peersharing: peersharing::Client::new(peersharing_channel),
                             };
 
                             let PeerClient {
@@ -519,6 +525,7 @@ pub(crate) async fn sendtip(
                                 chainsync,
                                 blockfetch: _blockfetch,
                                 txsubmission: _txsubmission,
+                                peersharing: _peersharing,
                             } = peer;
 
                             do_chainsync(
