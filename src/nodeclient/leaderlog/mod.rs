@@ -5,12 +5,12 @@ use crate::nodeclient::blockstore::BlockStore;
 use crate::nodeclient::leaderlog::deserialize::cbor_hex;
 use crate::nodeclient::leaderlog::ledgerstate::calculate_ledger_state_sigma_d_and_extra_entropy;
 use crate::{LedgerSet, PooltoolConfig};
-use amaru_ouroboros::vrf::{Input, Proof, SecretKey};
-use amaru_ouroboros::Hash;
 use chrono::{DateTime, NaiveDateTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
 use itertools::sorted;
-use pallas_crypto::hash::Hasher;
+use pallas_crypto::hash::{Hash, Hasher};
+use vrf_dalek::vrf03::{PublicKey03, SecretKey03, VrfProof03};
+
 use pallas_crypto::nonce::generate_epoch_nonce;
 use pallas_math::math::{ExpOrdering, FixedDecimal, FixedPrecision, DEFAULT_PRECISION};
 use rayon::prelude::*;
@@ -305,12 +305,11 @@ fn mk_input_vrf(slot: u64, eta0: &[u8]) -> Vec<u8> {
 }
 
 fn vrf_eval_certified(seed: &[u8], pool_vrf_skey: &[u8]) -> Result<Hash<64>, Error> {
-    let vrf_skey: &[u8; SecretKey::SIZE] = pool_vrf_skey[..SecretKey::SIZE].try_into().expect("Infallible");
-    let vrf_skey = SecretKey::from(vrf_skey);
-    let input_bytes: &[u8; Input::SIZE] = seed[..Input::SIZE].try_into().expect("Infallible");
-    let input: Input = Input::from(input_bytes);
-    let certified_proof: Proof = vrf_skey.prove(&input);
-    let certified_proof_hash: Hash<{ Proof::HASH_SIZE }> = Hash::<{ Proof::HASH_SIZE }>::from(&certified_proof);
+    let vrf_skey: &[u8; 32] = pool_vrf_skey[..32].try_into().expect("Infallible");
+    let vrf_skey = SecretKey03::from_bytes(vrf_skey);
+    let vrf_public_key = PublicKey03::from(&vrf_skey);
+    let certified_proof = VrfProof03::generate(&vrf_public_key, &vrf_skey, &seed[..32]);
+    let certified_proof_hash = Hash::<64>::from(certified_proof.proof_to_hash());
     trace!("certified_proof_hash: {}", hex::encode(certified_proof_hash));
     Ok(certified_proof_hash)
 }
@@ -926,8 +925,16 @@ pub fn handle_error<T: Display>(error_message: T) {
 
 #[cfg(test)]
 mod tests {
-    use crate::nodeclient::leaderlog::is_overlay_slot;
+    use crate::nodeclient::leaderlog::{is_overlay_slot, vrf_eval_certified};
     use chrono::{NaiveDateTime, Utc};
+
+    #[test]
+    fn test_vrf_eval_certified_compatibility() {
+        assert_eq!(
+            hex::encode(vrf_eval_certified(&[0u8; 32], &[0u8; 32]).unwrap()),
+            "2f9e929479cb32192477b6908a57e6ad748f13a96152ebd67cb6345b2c66b5377ebe42828160bd98d29a710f4b4efe3d7a6a1ed49ae9433f5b06c172c11d04a0"
+        );
+    }
 
     #[test]
     fn test_is_overlay_slot() {

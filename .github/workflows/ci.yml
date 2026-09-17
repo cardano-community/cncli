@@ -22,7 +22,7 @@ jobs:
 
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v2
+        uses: actions/checkout@v7
 
       - name: Install nightly toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -89,13 +89,13 @@ jobs:
           echo ::set-output name=PKG_PATH::${PKG_NAME}
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.package.outputs.PKG_NAME }}
           path: ${{ steps.package.outputs.PKG_PATH }}
 
       - name: Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/v')
         with:
           prerelease: "${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}"

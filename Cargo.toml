@@ -1,6 +1,6 @@
 [package]
 name = "cncli"
-version = "6.7.0"
+version = "6.8.0"
 authors = ["Andrew Westberg <andrewwestberg@gmail.com>"]
 edition = "2021"
 build = "build.rs"
@@ -8,45 +8,34 @@ build = "build.rs"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-std = "1.13"
-bech32 = "0.11"
+bech32 = "0.12.0"
 bincode = "2"
-byteorder = "1.5"
-#pallas-crypto = { git = "https://github.com/txpipe/pallas", rev = "b641c4e6862be447336429878f4e0a57a2281588" }
-#pallas-math = { git = "https://github.com/txpipe/pallas", rev = "b641c4e6862be447336429878f4e0a57a2281588" }
-#pallas-network = { git = "https://github.com/txpipe/pallas", rev = "b641c4e6862be447336429878f4e0a57a2281588" }
-#pallas-traverse = { git = "https://github.com/txpipe/pallas", rev = "b641c4e6862be447336429878f4e0a57a2281588" }
-pallas-crypto = "0.33.0"
-pallas-math = "0.33.0"
-pallas-network = "0.33.0"
-pallas-traverse = "0.33.0"
-amaru-ouroboros = { git = "https://github.com/pragma-org/amaru", rev = "8a4f994" }
-chrono = "0.4"
+pallas-crypto = "1.2"
+pallas-math = "1.2"
+pallas-network = "1.2"
+pallas-traverse = "1.2"
+vrf_dalek = { git = "https://github.com/txpipe/vrf", rev = "044b45a1a919ba9d9c2471fc5c4d441f13086676" }
+chrono = "0.4.45"
 chrono-tz = "0.10"
-futures = "0.3"
 hex = "0.4"
-#malachite-base = "0.4.16"
-#malachite = "0.4.16"
-minicbor = { version = "0.25.1", features = ["std", "half", "derive"] }
+minicbor = { version = "0.26.5", features = ["std", "half", "derive"] }
 redb = "2.6.3"
-regex = "1.11"
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
-rusqlite = { version = "0.37", features = ["bundled"] }
-serde = { version = "1.0", features = ["derive"] }
+regex = "1.13.1"
+reqwest = { version = "0.12.28", default-features = false, features = ["blocking", "rustls-tls-webpki-roots", "rustls-tls", "json", "gzip", "deflate"] }
+rusqlite = { version = "0.40.2", features = ["bundled", "fallible_uint"] }
+serde = { version = "1.0.229", features = ["derive"] }
 serde-aux = "4.5"
 serde_cbor = "0.11"
-serde_json = "1.0"
-socket2 = "0.6"
+serde_json = "1.0.151"
 structopt = "0.3"
-rand = "0.9"
-rayon = "1.10"
-itertools = "0.14"
-tokio = { version = "1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
-thiserror = "2.0"
-tracing = "0.1"
-tracing-subscriber = "0.3"
-uuid = { version = "1", features = ["v7"] }
-log = "0.4"
+rand = "0.10.2"
+rayon = "1.12.0"
+itertools = "0.15.0"
+tokio = { version = "1.53.1", features = ["rt", "rt-multi-thread", "net", "io-util", "time", "sync", "macros"] }
+thiserror = "2.0.20"
+tracing = "0.1.44"
+tracing-subscriber = "0.3.23"
+uuid = { version = "1.26.1", features = ["v7"] }
 
 [build-dependencies]
-built = { version = "0.8", features = ["git2"] }
+built = { version = "0.8.1", features = ["git2"] }
