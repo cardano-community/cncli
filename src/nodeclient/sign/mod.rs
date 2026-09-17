@@ -76,11 +76,18 @@ pub(crate) fn sign_challenge(pool_vrf_skey: &Path, domain: &str, nonce: &str) {
                         return;
                     }
 
-                    let vrf_skey: &[u8; 32] = vrf_skey.key[0..32].try_into().expect("Invalid VRF signing key length");
+                    let Some(vrf_skey) = vrf_skey
+                        .key
+                        .get(..32)
+                        .and_then(|bytes| <&[u8; 32]>::try_from(bytes).ok())
+                    else {
+                        handle_error("Invalid VRF signing key length");
+                        return;
+                    };
                     let vrf_skey = SecretKey03::from_bytes(vrf_skey);
                     let vrf_public_key = PublicKey03::from(&vrf_skey);
                     let vrf_proof = VrfProof03::generate(&vrf_public_key, &vrf_skey, challenge_bytes.as_ref());
-                    let signature = Hash::<64>::from(vrf_proof.proof_to_hash());
+                    let signature = vrf_proof.to_bytes();
                     debug!("signature: {}", hex::encode(signature));
                     serde_json::ser::to_writer_pretty(
                         &mut stdout(),
@@ -116,8 +123,16 @@ pub(crate) fn verify_challenge(
                         handle_error("Pool VRF Vkey must be of type: VrfVerificationKey_PraosVRF");
                         return;
                     }
+                    let Some(vrf_public_key_bytes) = vrf_vkey
+                        .key
+                        .get(..32)
+                        .and_then(|bytes| <&[u8; 32]>::try_from(bytes).ok())
+                    else {
+                        handle_error("Invalid VRF public key length");
+                        return;
+                    };
                     // Verify that the vkey the client supplied is the same as the one on-chain
-                    let vkey_hash_verify = hex::encode(Hasher::<224>::hash(&vrf_vkey.key[0..32]));
+                    let vkey_hash_verify = hex::encode(Hasher::<256>::hash(vrf_public_key_bytes));
                     debug!("vkey_hash_verify: {}", &vkey_hash_verify);
 
                     if pool_vrf_vkey_hash != vkey_hash_verify {
@@ -126,14 +141,6 @@ pub(crate) fn verify_challenge(
                         ));
                         return;
                     }
-
-                    let vrf_public_key_bytes: [u8; 32] = match vrf_vkey.key[0..32].try_into() {
-                        Ok(slice) => slice,
-                        Err(_) => {
-                            handle_error("Invalid VRF public key length");
-                            return;
-                        }
-                    };
 
                     // Verify that the signature is a valid format. This will fail if the signature is mal-formed
                     match hex::decode(signature) {
@@ -145,9 +152,14 @@ pub(crate) fn verify_challenge(
                                     return;
                                 }
                             };
-                            let vrf_public_key = PublicKey03::from_bytes(&vrf_public_key_bytes);
-                            let vrf_proof = VrfProof03::from_bytes(&signature_slice)
-                                .expect("Failed to convert signature bytes to Proof");
+                            let vrf_public_key = PublicKey03::from_bytes(vrf_public_key_bytes);
+                            let vrf_proof = match VrfProof03::from_bytes(&signature_slice) {
+                                Ok(proof) => proof,
+                                Err(error) => {
+                                    handle_error(format!("VRF proof decoding failed: {error:?}"));
+                                    return;
+                                }
+                            };
                             let signature_hash = Hash::<64>::from(vrf_proof.proof_to_hash());
                             debug!("signature_hash: {}", hex::encode(signature_hash));
                             match vrf_proof.verify(&vrf_public_key, challenge_bytes.as_ref()) {
