@@ -6,19 +6,18 @@ use crate::nodeclient::sync::BlockHeader;
 pub(crate) mod redb;
 pub(crate) mod sqlite;
 
+#[cfg(test)]
+pub(crate) mod tests;
 #[derive(Error, Debug)]
 pub enum Error {
     #[error("Redb error: {0}")]
-    Redb(Box<redb::Error>),
+    Redb(#[source] Box<redb::Error>),
 
     #[error("Sqlite error: {0}")]
     Sqlite(#[from] sqlite::Error),
 
     #[error("rusqlite error: {0}")]
     Rusqlite(#[from] rusqlite::Error),
-
-    #[error("Blockstore error: {0}")]
-    Blockstore(String),
 }
 
 impl From<redb::Error> for Error {
@@ -38,7 +37,8 @@ pub(crate) struct Block {
 }
 
 pub(crate) trait BlockStore {
-    fn save_block(&mut self, pending_blocks: &mut Vec<BlockHeader>, shelley_genesis_hash: &str) -> Result<(), Error>;
+    fn save_block(&mut self, pending_blocks: &[BlockHeader], shelley_genesis_hash: &str) -> Result<(), Error>;
+    fn rollback_to(&mut self, point: &pallas_network::miniprotocols::Point) -> Result<(), Error>;
     fn load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error>;
     fn find_block_by_hash(&mut self, hash_start: &str) -> Result<Option<Block>, Error>;
     fn get_tip_slot_number(&mut self) -> Result<u64, Error>;

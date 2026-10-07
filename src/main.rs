@@ -1,7 +1,8 @@
 extern crate chrono_tz;
 
 use std::env::{set_var, var};
-use std::{panic, process};
+use std::io::Write;
+use std::process;
 
 use structopt::StructOpt;
 
@@ -53,18 +54,31 @@ async fn main() {
     tracing::subscriber::set_global_default(
         tracing_subscriber::FmtSubscriber::builder()
             .with_max_level(tracing_filter)
+            .with_writer(std::io::stderr)
             .finish(),
     )
     .unwrap();
 
-    // take_hook() returns the default hook in case when a custom one is not set
-    let orig_hook = panic::take_hook();
-    panic::set_hook(Box::new(move |panic_info| {
-        // invoke the default handler and exit the process
-        orig_hook(panic_info);
-        process::exit(1);
-    }));
-
     let args = Cli::from_args();
-    cncli::start(args.cmd).await;
+    if let Err(error) = cncli::start(&args.cmd).await {
+        if cncli::is_output_error(error.as_ref()) {
+            let _ = writeln!(std::io::stderr().lock(), "Unable to write command result: {error}");
+        } else {
+            let mut body = serde_json::json!({"status": "error", "errorMessage": error.to_string()});
+            if let Command::Ping { host, port, .. } = &args.cmd {
+                body["host"] = serde_json::json!(host);
+                body["port"] = serde_json::json!(port);
+            }
+            let mut out = std::io::stdout().lock();
+            let result = serde_json::to_writer_pretty(&mut out, &body)
+                .map_err(std::io::Error::other)
+                .and_then(|_| out.write_all(b"\n"))
+                .and_then(|_| out.flush());
+            if let Err(write_error) = result {
+                let _ = writeln!(std::io::stderr().lock(), "Unable to write command error: {write_error}");
+            }
+        }
+        // Do not wait for uncancellable resolver work during Tokio runtime destruction.
+        process::exit(1);
+    }
 }

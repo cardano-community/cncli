@@ -26,6 +26,15 @@ pub enum DumpBlockError {
     #[error("IO error: {0}")]
     Io(#[from] io::Error),
 
+    #[error("Output error: {0}")]
+    Output(#[from] crate::OutputError),
+
+    #[error("Peer error: {0}")]
+    Peer(#[from] pallas_network::facades::Error),
+
+    #[error("Task error: {0}")]
+    Task(#[from] tokio::task::JoinError),
+
     #[error("Unable to resolve host")]
     UnableToResolveHost,
 
@@ -89,10 +98,13 @@ pub async fn run(args: Args) -> Result<(), DumpBlockError> {
 
     let mut handshake = handshake::Client::new(hs_channel);
     let versions = handshake::n2n::VersionTable::v7_and_above(args.network_magic);
-    let confirmation = handshake
-        .handshake(versions)
-        .await
-        .map_err(|e| DumpBlockError::Handshake(format!("{e:?}")))?;
+    let confirmation = match handshake.handshake(versions).await {
+        Ok(confirmation) => confirmation,
+        Err(error) => {
+            plexer.abort().await;
+            return Err(DumpBlockError::Handshake(format!("{error:?}")));
+        }
+    };
 
     let block_hex = match confirmation {
         handshake::Confirmation::Accepted(_, _) => {
@@ -110,23 +122,33 @@ pub async fn run(args: Args) -> Result<(), DumpBlockError> {
                 mut chainsync,
                 mut blockfetch,
                 plexer,
-                keepalive: _keepalive,
+                keepalive,
                 txsubmission: _txsubmission,
                 peersharing: _peersharing,
             } = peer;
             let res = fetch_block(&mut chainsync, &mut blockfetch, point).await;
+            keepalive.abort();
+            let stopped = keepalive.await;
             plexer.abort().await;
+            match stopped {
+                Err(error) if error.is_cancelled() => {}
+                Err(error) => return Err(error.into()),
+                Ok(Err(error)) => return Err(error.into()),
+                Ok(Ok(())) => return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "keepalive ended").into()),
+            }
             res
         }
         handshake::Confirmation::Rejected(reason) => {
+            plexer.abort().await;
             return Err(DumpBlockError::HandshakeRejected(format!("{reason:?}")));
         }
         handshake::Confirmation::QueryReply(_) => {
+            plexer.abort().await;
             return Err(DumpBlockError::HandshakeRejected("Unexpected QueryReply".to_string()));
         }
     }?;
 
-    println!("{block_hex}");
+    crate::write_line(&mut io::stdout().lock(), &block_hex)?;
     Ok(())
 }
 

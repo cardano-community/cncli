@@ -1,25 +1,35 @@
-#!/bin/bash
-export CARDANO_NODE_SOCKET_PATH=/home/westbam/haskell/local/db/socket
+#!/usr/bin/env bash
+set -Eeuo pipefail
+: "${CNCLI_POOL_ID:?Set your pool ID}"
+: "${CNCLI_VRF_SKEY:?Set your VRF signing key path}"
+: "${CNCLI_BYRON_GENESIS:?Set your Byron genesis path}"
+: "${CNCLI_SHELLEY_GENESIS:?Set your Shelley genesis path}"
+: "${CARDANO_NODE_SOCKET_PATH:?Set your node socket path}"
+export CARDANO_NODE_SOCKET_PATH
+CNCLI_BIN="${CNCLI_BIN:-/usr/local/bin/cncli}"
+CARDANO_CLI_BIN="${CARDANO_CLI_BIN:-/usr/local/bin/cardano-cli}"
+JQ_BIN="${JQ_BIN:-jq}"
+CNCLI_DB="${CNCLI_DB:-/var/lib/cncli/cncli.db}"
+CNCLI_NODE_HOST="${CNCLI_NODE_HOST:-127.0.0.1}"
+CNCLI_NODE_PORT="${CNCLI_NODE_PORT:-3000}"
 
 echo "BCSH"
-SNAPSHOT=$(/home/westbam/.local/bin/cardano-cli query stake-snapshot --stake-pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --mainnet)
-/home/westbam/.cargo/bin/cncli sync --host 127.0.0.1 --port 6000 --no-service
-echo $SNAPSHOT | grep -q "pools"
-if [ $? -eq 0 ]; then
-	STAKES=$(echo "$SNAPSHOT" | grep -oP '(?<=    "stakeMark": )\d+(?=,?)')
-	POOL_STAKE=$(echo $STAKES | cut -d' ' -f1)
-	ACTIVE_STAKE=$(echo $STAKES | cut -d' ' -f2)
+SNAPSHOT=$("$CARDANO_CLI_BIN" query stake-snapshot --stake-pool-id "$CNCLI_POOL_ID" --mainnet)
+"$CNCLI_BIN" sync --db "$CNCLI_DB" --host "$CNCLI_NODE_HOST" --port "$CNCLI_NODE_PORT" --no-service
+if grep -q '"pools"' <<<"$SNAPSHOT"; then
+    STAKES=$(grep -oP '(?<=    "stakeMark": )\d+(?=,?)' <<<"$SNAPSHOT" | tr '\n' ' ')
+    read -r POOL_STAKE ACTIVE_STAKE REST <<<"$STAKES"
 else
-	POOL_STAKE=$(echo "$SNAPSHOT" | grep -oP '(?<=    "poolStakeMark": )\d+(?=,?)')
-	ACTIVE_STAKE=$(echo "$SNAPSHOT" | grep -oP '(?<=    "activeStakeMark": )\d+(?=,?)')
+    POOL_STAKE=$(grep -oP '(?<=    "poolStakeMark": )\d+(?=,?)' <<<"$SNAPSHOT")
+    ACTIVE_STAKE=$(grep -oP '(?<=    "activeStakeMark": )\d+(?=,?)' <<<"$SNAPSHOT")
 fi
-BCSH=`/home/westbam/.cargo/bin/cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --consensus praos --ledger-set next`
-echo $BCSH | jq .
-
-EPOCH=`echo $BCSH | jq .epoch`
+[[ "$POOL_STAKE" =~ ^[0-9]+$ && "$ACTIVE_STAKE" =~ ^[0-9]+$ ]] || { echo "Invalid snapshot stake amounts" >&2; exit 1; }
+BCSH=$("$CNCLI_BIN" leaderlog --db "$CNCLI_DB" --pool-id "$CNCLI_POOL_ID" --pool-vrf-skey "$CNCLI_VRF_SKEY" --byron-genesis "$CNCLI_BYRON_GENESIS" --shelley-genesis "$CNCLI_SHELLEY_GENESIS" --pool-stake "$POOL_STAKE" --active-stake "$ACTIVE_STAKE" --consensus praos --ledger-set next)
+"$JQ_BIN" -e '.status == "ok"' <<<"$BCSH" >/dev/null
+"$JQ_BIN" . <<<"$BCSH"
+EPOCH=$("$JQ_BIN" -er '.epoch' <<<"$BCSH")
 echo "\`Epoch $EPOCH\` 🧙🔮:"
-
-SLOTS=`echo $BCSH | jq .epochSlots`
-IDEAL=`echo $BCSH | jq .epochSlotsIdeal`
-PERFORMANCE=`echo $BCSH | jq .maxPerformance`
+SLOTS=$("$JQ_BIN" -er '.epochSlots' <<<"$BCSH")
+IDEAL=$("$JQ_BIN" -er '.epochSlotsIdeal' <<<"$BCSH")
+PERFORMANCE=$("$JQ_BIN" -er '.maxPerformance' <<<"$BCSH")
 echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
