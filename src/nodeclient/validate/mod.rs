@@ -12,13 +12,22 @@ pub enum Error {
     InvalidPath(std::path::PathBuf),
 
     #[error("Redb error: {0}")]
-    Redb(Box<crate::nodeclient::blockstore::redb::Error>),
+    Redb(#[source] Box<crate::nodeclient::blockstore::redb::Error>),
 
     #[error("Sqlite error: {0}")]
     Sqlite(#[from] crate::nodeclient::blockstore::sqlite::Error),
 
     #[error("Blockstore error: {0}")]
-    Blockstore(Box<crate::nodeclient::blockstore::Error>),
+    Blockstore(#[source] Box<crate::nodeclient::blockstore::Error>),
+
+    #[error("JSON error: {0}")]
+    Json(#[from] serde_json::Error),
+
+    #[error("Output error: {0}")]
+    Output(#[from] crate::OutputError),
+
+    #[error("Block not found")]
+    BlockNotFound,
 }
 
 impl From<crate::nodeclient::blockstore::redb::Error> for Error {
@@ -33,51 +42,24 @@ impl From<crate::nodeclient::blockstore::Error> for Error {
     }
 }
 
-pub fn validate_block(db_path: &Path, hash: &str) {
-    let like = format!("{hash}%");
-    match query_block(db_path, like) {
-        Ok(block) => match block {
-            Some(block) => {
-                println!(
-                    "{{\n\
-                    \x20\"status\": \"{}\",\n\
-                    \x20\"block_number\": \"{}\",\n\
-                    \x20\"slot_number\": \"{}\",\n\
-                    \x20\"pool_id\": \"{}\",\n\
-                    \x20\"hash\": \"{}\",\n\
-                    \x20\"prev_hash\": \"{}\",\n\
-                    \x20\"leader_vrf\": \"{}\"\n\
-                    }}",
-                    if block.orphaned { "orphaned" } else { "ok" },
-                    block.block_number,
-                    block.slot_number,
-                    block.pool_id,
-                    block.hash,
-                    block.prev_hash,
-                    block.leader_vrf,
-                );
-            }
-            None => {
-                println!(
-                    "{{\n\
-                    \x20\"status\": \"error\",\n\
-                    \x20\"errorMessage\": \"Block not found\"\n\
-                    }}"
-                );
-            }
-        },
-        Err(error) => {
-            println!(
-                "{{\n\
-            \x20\"status\": \"error\",\n\
-            \x20\"errorMessage\": \"{error}\"\n\
-            }}"
-            );
-        }
-    }
+pub fn validate_block(db_path: &Path, hash: &str) -> Result<(), Error> {
+    let block = query_block(db_path, hash)?.ok_or(Error::BlockNotFound)?;
+    crate::write_json(
+        &mut std::io::stdout().lock(),
+        &serde_json::json!({
+            "status": if block.orphaned { "orphaned" } else { "ok" },
+            "block_number": block.block_number.to_string(),
+            "slot_number": block.slot_number.to_string(),
+            "pool_id": block.pool_id,
+            "hash": block.hash,
+            "prev_hash": block.prev_hash,
+            "leader_vrf": block.leader_vrf,
+        }),
+    )?;
+    Ok(())
 }
 
-fn query_block(db_path: &Path, hash_start: String) -> Result<Option<Block>, Error> {
+fn query_block(db_path: &Path, hash_start: &str) -> Result<Option<Block>, Error> {
     if !db_path.exists() {
         return Err(Error::InvalidPath(db_path.to_path_buf()));
     }
@@ -90,5 +72,5 @@ fn query_block(db_path: &Path, hash_start: String) -> Result<Option<Block>, Erro
         Box::new(SqLiteBlockStore::new(db_path)?)
     };
 
-    Ok(block_store.find_block_by_hash(&hash_start)?)
+    Ok(block_store.find_block_by_hash(hash_start)?)
 }

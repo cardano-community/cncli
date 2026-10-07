@@ -6,15 +6,39 @@ You can install CNCLI using either the release binaries or compiling the Rust co
 
 ### Install the binary release
 
-To install CNCLI from a binary release, download the [latest release](https://github.com/cardano-community/cncli/releases) and extract it in the ```/usr/local/bin/``` directory of the ```block producing node``` server of your stake pool. Adjust the ```<latest_release_version>``` variable in the command to the latest release available:
+Choose an explicit reviewed release version and matching target from [releases](https://github.com/cardano-community/cncli/releases). Do not extract a download directly into `/usr/local/bin`. Install `gh` and authenticate as needed for attestation verification.
 
 ```bash
-$ curl -sLJ https://github.com/cardano-community/cncli/releases/download/v<latest_release_version>/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz -o /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz
+set -euo pipefail
+version='REPLACE_WITH_RELEASE_VERSION' # without the leading v
+target=x86_64-unknown-linux-gnu
+archive="cncli-${version}-ubuntu22-${target}.tar.gz"
+stage=$(mktemp -d)
+cd "$stage"
+curl --fail --location --remote-name "https://github.com/cardano-community/cncli/releases/download/v${version}/${archive}"
+curl --fail --location --remote-name "https://github.com/cardano-community/cncli/releases/download/v${version}/${archive}.sha256"
+sha256sum --check "${archive}.sha256"
+gh attestation verify "$archive" --repo cardano-community/cncli
+mkdir unpacked
+tar xzf "$archive" -C unpacked
+./unpacked/cncli --version
+./unpacked/cncli --help
 ```
 
+Before replacement, preserve the previous binary and a backend-consistent database backup. Stop the services during backup/replacement: for SQLite, use its backup API or copy all database state only after every writer has stopped; for redb, stop all users before copying. Never copy/unlock a live redb file. Review storage/nonce changes and rehearse backup/restore on disposable data first.
+
 ```bash
-$ tar xzvf /tmp/cncli-<latest_release_version>-x86_64-unknown-linux-gnu.tar.gz -C /usr/local/bin/
+sudo systemctl stop cncli-leaderlog.timer cncli-leaderlog.service cncli-sync.service cncli-sendtip.service
+# Perform and verify the backend-consistent backup here, while all writers are stopped.
+if test -e /usr/local/bin/cncli; then
+  sudo cp -p /usr/local/bin/cncli "/usr/local/bin/cncli.previous.${version}"
+fi
+sudo install -o root -g root -m 0755 ./unpacked/cncli /usr/local/bin/cncli.new
+sudo mv /usr/local/bin/cncli.new /usr/local/bin/cncli
+sudo systemctl start cncli-sync.service cncli-sendtip.service cncli-leaderlog.timer
 ```
+
+For a first install, create the units below before starting them; omit the stop step if they do not exist. No command here automatically migrates or restores production data. A verified attestation identifies build provenance, not source correctness or bit-reproducibility. Older releases without attestations do not satisfy this staged verification procedure.
 
 ### Compile from source
 
@@ -46,21 +70,7 @@ $ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 $ source $HOME/.cargo/env
 ```
 
-```bash
-$ rustup install stable
-```
-
-```bash
-$ rustup default stable
-```
-
-```bash
-$ rustup update
-```
-
-```bash
-$ rustup component add clippy rustfmt
-```
+The checked-out release's `rust-toolchain.toml` selects its pinned toolchain and components; let rustup install that toolchain when building. Do not substitute a floating stable/nightly or run an unreviewed toolchain update during deployment.
 
 (Only if you want to build for the musl target)
 ```bash
@@ -92,16 +102,18 @@ $ git checkout <latest_tag_name>
 ```
 
 ```bash
-$ cargo install --path . --force
+$ cargo build --locked --release --target x86_64-unknown-linux-gnu
 ```
 or
 ```bash
-$ cargo install --path . --force --target x86_64-unknown-linux-musl
+$ cargo build --locked --release --target x86_64-unknown-linux-musl
 ```
 
 ```bash
-$ cncli --version
+$ target/x86_64-unknown-linux-gnu/release/cncli --version
 ```
+
+Also run the staged binary's `--help` and required tests before using the same stop/backup/root-owned atomic replacement sequence above. A locally built artifact does not acquire release provenance just by being built.
 
 ### Checking that cncli is properly installed
 
@@ -117,9 +129,7 @@ It should return ```/usr/local/bin/cncli```.
 
 Adjust the ```<latest_tag_name>``` variable in the command to the latest tag available:
 
-```bash
-$ rustup update
-```
+Use the checked-out release's pinned toolchain, not a floating `rustup update`.
 
 ```bash
 $ cd cncli
@@ -134,16 +144,18 @@ $ git checkout <latest_tag_name>
 ```
 
 ```bash
-$ cargo install --path . --force
+$ cargo build --locked --release --target x86_64-unknown-linux-gnu
 ```
 or
 ```bash
-$ cargo install --path . --force --target x86_64-unknown-linux-musl
+$ cargo build --locked --release --target x86_64-unknown-linux-musl
 ```
 
 ```bash
-$ cncli --version
+$ target/x86_64-unknown-linux-gnu/release/cncli --version
 ```
+
+Run staged `--help`, preserve the previous binary and a backend-consistent backup, then use the operator-controlled stop/atomic replacement/restart sequence above. Never overwrite the running executable with `cargo install --force`.
 
 ## Cross Platform build with Nix + Flakes
 
@@ -204,75 +216,111 @@ Have a look [over here](https://github.com/AndrewWestberg/cncli/issues/83#issuec
 
 ## Automation
 
-This automation section of the guide assumes:
+Use three dedicated system identities, not root. The examples assume TCP node port 3000, root-owned executables under `/usr/local/bin`, and an operator-provided node socket outside protected homes (for example `/run/cardano-node/node.socket`).
 
-1. that you have installed ```cardano-node``` and ```cardano-cli``` in the standard path ```/usr/local/bin/```
-2. that you have installed ```cncli``` in the standard path ```/usr/local/bin/```
-3. that your block producing node port is ```3000```
-4. that you sync the ```cncli.db``` in ```/root/scripts/```
-5. that you dump the ```ledger-state.json``` in ```/root/scripts/```
-6. that you have placed and are running the helper scripts as ```root``` from ```/root/scripts/```
-7. that you setup the ```cronjobs``` in the ```crontab``` of user ```root```
-8. that you have placed your pool ```pooltool.json``` file in ```/root/scripts/```
-9. that your ```cardano-node``` user home is ```/home/cardano-node/```
-10. that your ```/home/cardano-node/``` directory contains all ```cardano-node``` directories (```config```, ```db```, ```keys``` and ```socket```)
-11. that your socket is ```/home/cardano-node/socket/node.socket```
+SQLite is the concurrent sync + leaderlog default. Leaderlog needs database **write** access: it opens read/write stores and saves slot assignments. Redb is supported for serialized/offline operations, not shared live writers; schedule it with sync stopped and a backend-consistent disposable copy, never forced unlocking or copying a live file.
 
-**Note**: should you need to adjust paths, please do so after downloading the scripts and before configuring the services.
+### Accounts and directories
 
-### Dependencies
-
-The helper scripts rely on ```jq```, please install it with:
+Run these deployment commands only on your intended deployment host after review; verification uses a disposable environment. They do not move existing keys or databases.
 
 ```bash
+sudo groupadd --system cncli-db
+sudo groupadd --system cncli-pooltool
+sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin cncli-sync
+sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin cncli-sendtip
+sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin cncli-leaderlog
+sudo usermod -a -G cncli-db cncli-sync
+sudo usermod -a -G cncli-pooltool cncli-sendtip
+sudo usermod -a -G cncli-db,cncli-pooltool cncli-leaderlog
+sudo install -d -o cncli-sync -g cncli-db -m 2770 /var/lib/cncli
+sudo install -d -o root -g root -m 0755 /etc/cncli
+sudo install -d -o cncli-leaderlog -g cncli-leaderlog -m 0700 /var/lib/cncli-leaderlog /var/log/cncli-leaderlog
 sudo apt-get install -y jq
+sudo install -o root -g root -m 0755 scripts/cncli-leaderlog.sh scripts/cncli-sendslots.sh /usr/local/bin/
 ```
 
-### PoolTool Integration
+Install your operator-owned inputs (substitute real source paths; do not place credentials on the command line). Executables, including `cardano-node` and `cardano-cli`, remain root:root 0755. Existing database files and SQLite sidecars must be cncli-sync:cncli-db and 0660, changed only while writers are stopped.
 
-CNCLI can send your tip and block slots to [PoolTool](https://pooltool.io/). To do this, it requires that you set up a ```pooltool.json``` file containing your PoolTool API key and stake pool details. Your PoolTool API key can be found on your pooltool profile page. Here's an example ```pooltool.json``` file. Please update with your pool information:
+```bash
+# Only after stopping every database writer; applies to an existing default database:
+sudo find /var/lib/cncli -maxdepth 1 -type f -name 'cncli.db*' -exec chown cncli-sync:cncli-db '{}' + -exec chmod 0660 '{}' +
+```
+
+```bash
+sudo install -o root -g cncli-pooltool -m 0640 /operator/source/pooltool.json /etc/cncli/pooltool.json
+sudo install -o root -g cncli-leaderlog -m 0640 /operator/source/vrf.skey /etc/cncli/vrf.skey
+sudo install -o root -g cncli-leaderlog -m 0640 /operator/source/leaderlog.env /etc/cncli/leaderlog.env
+sudo install -o root -g root -m 0644 /operator/source/mainnet-byron-genesis.json /etc/cncli/mainnet-byron-genesis.json
+sudo install -o root -g root -m 0644 /operator/source/mainnet-shelley-genesis.json /etc/cncli/mainnet-shelley-genesis.json
+```
+
+### PoolTool and helper configuration
+
+`/etc/cncli/pooltool.json` contains your own API key and nonempty pool list. Blank API keys/pool IDs and empty pools are rejected before reporting/sending. Replace the placeholders; never commit the real file:
 
 ```json
 {
-    "api_key": "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX",
-    "pools": [
-        {
-            "name": "BCSH2",
-            "pool_id": "00beef284975ef87856c1343f6bf50172253177fdebc756524d43fc1",
-            "host" : "127.0.0.1",
-            "port": 3000
-        }
-    ]
+  "api_key": "YOUR_POOLTOOL_API_KEY",
+  "pools": [
+    {
+      "name": "YOUR_POOL_NAME",
+      "pool_id": "YOUR_POOL_ID",
+      "host": "127.0.0.1",
+      "port": 3000
+    }
+  ]
 }
 ```
 
-### Systemd Services
-
-CNCLI ```sync```, ```sendtip``` and ```leaderlog``` can be easily enabled as ```systemd``` services. When enabled as ```systemd``` services:
-
-- ```sync``` will continuously keep the ```cncli.db``` database synchronized.
-- ```sendtip``` will continuously send your stake pool ```tip``` to PoolTool.
-- ```leaderlog``` will run twice per day and can be configured to run all or any of the following tasks:
-  - on beginning of the epoch send the assigned slots for the current and previous epoch to PoolTool and
-  - on day 4 of the epoch calculate the leaderlog for the next epoch, mail it and/or write a slots.csv, write a Prometheus file with total number of slots and/or store your leaderlog (with or without slots) in a PostgreSQL table.
-
-To set up ```systemd```:
-
-- Copy the following to ```/etc/systemd/system/cncli-sync.service```
+Example `/etc/cncli/leaderlog.env` (systemd environment syntax, no `export`). Set `hexStakePool` to your actual pool ID. Supply the actual socket path and group; grant only socket access, not membership in a blanket Cardano home/key-directory group:
 
 ```text
+CARDANO_NODE_SOCKET_PATH=/run/cardano-node/node.socket
+hexStakePool=REPLACE_WITH_YOUR_POOL_ID
+timezone=Etc/UTC
+consensusMode=cpraos
+jsonPoolTool=/etc/cncli/pooltool.json
+slotsCsvFile=/var/lib/cncli-leaderlog/slots.csv
+vrfSigningKeyFile=/etc/cncli/vrf.skey
+shelleyGenesisFile=/etc/cncli/mainnet-shelley-genesis.json
+byronGenesisFile=/etc/cncli/mainnet-byron-genesis.json
+dbCnCli=/var/lib/cncli/cncli.db
+binCardanoCli=/usr/local/bin/cardano-cli
+binCnCli=/usr/local/bin/cncli
+LOG_DIR=/var/log/cncli-leaderlog
+```
+
+### Systemd services
+
+Copy each example into its named `/etc/systemd/system/` file. Replace `OPERATOR_SOCKET_GROUP` in leaderlog's unit with the node socket's actual access group (it must already exist). Configure the node to create a socket accessible to that group outside protected homes.
+
+`cncli-sync.service`:
+
+```ini
 [Unit]
 Description=CNCLI Sync
-After=multi-user.target
+After=network-online.target
 
 [Service]
 Type=simple
-Restart=always
+User=cncli-sync
+Group=cncli-sync
+SupplementaryGroups=cncli-db
+UMask=0007
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/lib/cncli
+InaccessiblePaths=-/etc/cncli/vrf.skey -/etc/cncli/pooltool.json
+Restart=on-failure
 RestartSec=5
 LimitNOFILE=131072
-ExecStart=/usr/local/bin/cncli sync --host 127.0.0.1 --port 3000 --db /root/scripts/cncli.db
+ExecStart=/usr/local/bin/cncli sync --host 127.0.0.1 --port 3000 --db /var/lib/cncli/cncli.db
 KillSignal=SIGINT
-SuccessExitStatus=143
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=cncli-sync
@@ -281,21 +329,31 @@ SyslogIdentifier=cncli-sync
 WantedBy=multi-user.target
 ```
 
-- Copy the following to ```/etc/systemd/system/cncli-sendtip.service```
+`cncli-sendtip.service`:
 
-```text
+```ini
 [Unit]
 Description=CNCLI Sendtip
-After=multi-user.target
+After=network-online.target
 
 [Service]
 Type=simple
-Restart=always
+User=cncli-sendtip
+Group=cncli-sendtip
+SupplementaryGroups=cncli-pooltool
+UMask=0007
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+InaccessiblePaths=-/etc/cncli/vrf.skey
+Restart=on-failure
 RestartSec=5
 LimitNOFILE=131072
-ExecStart=/usr/local/bin/cncli sendtip --cardano-node /usr/local/bin/cardano-node --config /root/scripts/pooltool.json
+ExecStart=/usr/local/bin/cncli sendtip --cardano-node /usr/local/bin/cardano-node --config /etc/cncli/pooltool.json
 KillSignal=SIGINT
-SuccessExitStatus=143
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=cncli-sendtip
@@ -304,23 +362,35 @@ SyslogIdentifier=cncli-sendtip
 WantedBy=multi-user.target
 ```
 
-- Copy the following to ```/etc/systemd/system/cncli-leaderlog.service```
+`cncli-leaderlog.service`:
 
-```text
+```ini
 [Unit]
 Description=CNCLI Leaderlog
 
 [Service]
 Type=oneshot
+User=cncli-leaderlog
+Group=cncli-leaderlog
+SupplementaryGroups=cncli-db cncli-pooltool OPERATOR_SOCKET_GROUP
+UMask=0007
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+ReadWritePaths=/var/lib/cncli /var/lib/cncli-leaderlog /var/log/cncli-leaderlog
+EnvironmentFile=/etc/cncli/leaderlog.env
 ExecStart=/usr/local/bin/cncli-leaderlog.sh
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-- Copy the following to ```/etc/systemd/system/cncli-leaderlog.timer```
+`cncli-leaderlog.timer` (preserves the twice-daily schedule):
 
-```text
+```ini
 [Unit]
 Description=CNCLI Leaderlog
 
@@ -332,25 +402,16 @@ Unit=cncli-leaderlog.service
 WantedBy=timers.target
 ```
 
-- Copy ```scripts/cncli-leaderlog.sh``` to ```/usr/local/bin/cncli-leaderlog.sh```, make sure it's executable and configure the variables in the script to fit your environment.
-
-- To enable and run the above services, run:
+On a new installation, install the units and run `sudo systemctl daemon-reload`, then start only `cncli-sync.service`. Once it creates `/var/lib/cncli/cncli.db`, stop it and apply the ownership/permission command above before enabling the leaderlog timer. SQLite can create the database as 0640 despite `UMask=0007`; the umask alone does not grant group write.
 
 ```bash
+sudo systemd-analyze verify /etc/systemd/system/cncli-{sync,sendtip,leaderlog}.service /etc/systemd/system/cncli-leaderlog.timer
 sudo systemctl daemon-reload
+sudo systemctl enable --now cncli-sync.service cncli-sendtip.service cncli-leaderlog.timer
 ```
 
-```bash
-sudo systemctl start cncli-sync.service
-```
+Validate isolation in a disposable systemd environment before deployment: sync/sendtip cannot read the VRF key, sync cannot read PoolTool configuration, none can write `/usr/local/bin`, and leaderlog can read its key and write slot assignments/outputs. These templates are not a claim that isolation has already been verified on your host.
 
-```bash
-sudo systemctl start cncli-sendtip.service
-```
-
-```bash
-sudo systemctl enable cncli-leaderlog.timer --now
-```
 
 ### PostgreSQL
 If you would like to store your leaderlog to Postgres you can do so by creating the following table and setting your connection details in `cncli-leaderlog.sh`. You can store slots with or without assigned slot time. For security reasons it's recommended to store the leaderlog without the assigned slot time (`saveToPostgres=secure`).
@@ -366,50 +427,12 @@ create table leaderlog (
 );
 ```
 
-### Helper Scripts
+### Helper scripts
 
-Besides setting up the ```systemd``` services, there are a couple of more automation that CNCLI can help you with. We have devised a few scripts that will be invoked daily with ```crontab``` and that will take care of:
+The primary helper retains environment-overridable variable names shown above, plus optional `leaderPromFile`, `mailLeaderLogTo`, PostgreSQL variables and binary overrides. Empty `jsonPoolTool`/`slotsCsvFile` disables that optional output. Flags are `--current`, `--next`, `--test`, `--force-email`, `--csv PATH`, and `--postgres`; missing CSV paths and command failures exit nonzero. Keep the timer rather than running duplicate root cron jobs.
 
-1. calculating the ```next``` epoch assigned slots (with ```cncli leaderlog```)
-2. send the ```previous``` and ```current``` assigned slots to PoolTool (with ```cncli sendslots```).
-3. optionally: query the ```ledger-state``` and save it to a ```ledger-state.json``` file.
+For manual use, load your reviewed environment and run as the dedicated leaderlog account; do not run as root. The primary helper preserves timeout/locking and replaces CSV only after successful leaderlog/JSON extraction.
 
-Although, by default, the ```cncli-leaderlog.sh``` script will calculate the ```next``` epoch ```leaderlog```, it can also be run manually to also calculate the ```previous``` and ```current``` epoch slots (adjust the time zone to better suit your location):
+`cncli-sendslots.sh` accepts `CNCLI_BIN`, `CNCLI_DB`, `CNCLI_BYRON_GENESIS`, `CNCLI_SHELLEY_GENESIS`, `CNCLI_POOLTOOL_CONFIG`, `CNCLI_LOG_DIR`, `CNCLI_LOCK_FILE`, and `JQ_BIN`. Defaults match the paths above, with log directory `/var/log/cncli-leaderlog`, lock `$CNCLI_LOG_DIR/sendslots.lock` and jq `jq`. Data/config/log/lock paths must be absolute. It checks a successful database status before sending and checks sendslots' exit status, not text content. Failed sends retain `sendslots.failed.<UTC timestamp>.<unique suffix>.log` and preserve the previous `sendslots.log`; successful sends rotate it and replace it. Only successful rotations older than 15 days are pruned inside that absolute log directory. Failure logs are never pruned automatically.
 
-```bash
-bash /root/scripts/cncli-leaderlog.sh previous UTC
-```
-
-```bash
-bash /root/scripts/cncli-leaderlog.sh current UTC
-```
-
-```bash
-bash /root/scripts/cncli-leaderlog.sh next UTC
-```
-
-#### Download the scripts
-
-You can get the scripts from [here](scripts). Place them under ```/root/scripts/``` of the block producing node server of your pool. If you don't have that directory, create it by running the following command as ```root```:
-
-```bash
-mkdir /root/scripts/
-```
-
-**Important**: at the very least, remember to change the pool id in the ```cncli-leaderlog.sh``` script to match your pool.
-
-#### Crontab
-
-To set up the ```cronjobs```, run ```crontab -e``` as ```root``` and paste the following into it and save.
-
-Please note it will set timezone for your user's crontab to UTC. If you have other cronjobs running that require a different timezone, you should place a new script in `/etc/cron.d` with these these cronjobs.
-
-```text
-# set timezone to UTC for these cronjobs to correctly time epoch start
-CRON_TZ="UTC"
-
-# calculate slots assignment for the next epoch
-15 21 * * * /root/scripts/cncli-fivedays.sh && /root/scripts/cncli-leaderlog.sh
-# send previous and current epochs slots to pooltool
-15 22 * * * /root/scripts/cncli-fivedays.sh && /root/scripts/cncli-sendslots.sh
-```
+The tracked current/next/prev wrappers retain ledger selection and presentation. Configure `CNCLI_POOL_ID`, `CNCLI_VRF_SKEY`, `CNCLI_BYRON_GENESIS`, `CNCLI_SHELLEY_GENESIS`, and `CARDANO_NODE_SOCKET_PATH` with operator values. Overrides are `CNCLI_BIN`, `CARDANO_CLI_BIN`, `JQ_BIN`, `CNCLI_DB`, `CNCLI_NODE_HOST`, and `CNCLI_NODE_PORT`. They stop on snapshot, sync or leaderlog failure; they do not turn a failed command into a plausible schedule.

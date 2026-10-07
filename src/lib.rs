@@ -2,20 +2,50 @@ use std::io::stdout;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::string::ParseError;
-use std::thread;
-use std::thread::JoinHandle;
 
 use structopt::StructOpt;
 
 use crate::nodeclient::dumpblock;
-use crate::nodeclient::leaderlog::handle_error;
 use crate::nodeclient::sync::pooltool;
-use crate::nodeclient::sync::pooltool::PooltoolConfig;
 use crate::nodeclient::{leaderlog, ping, sign, snapshot, sync, validate};
 
 pub(crate) mod nodeclient;
 
 pub static APP_USER_AGENT: &str = concat!(env!("CARGO_PKG_NAME"), "/", env!("CARGO_PKG_VERSION"),);
+
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum OutputError {
+    #[error("JSON output error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("stdout error: {0}")]
+    Io(#[from] std::io::Error),
+}
+
+pub(crate) fn write_json<W: std::io::Write>(out: &mut W, value: &impl serde::Serialize) -> Result<(), OutputError> {
+    serde_json::to_writer_pretty(&mut *out, value)?;
+    out.write_all(b"\n")?;
+    out.flush()?;
+    Ok(())
+}
+
+pub(crate) fn write_line<W: std::io::Write>(out: &mut W, value: &str) -> Result<(), OutputError> {
+    writeln!(out, "{value}")?;
+    out.flush()?;
+    Ok(())
+}
+
+// The binary is a separate crate; keep the marker private and expose only its identity check.
+pub fn is_output_error(mut error: &(dyn std::error::Error + 'static)) -> bool {
+    loop {
+        if error.is::<OutputError>() {
+            return true;
+        }
+        match error.source() {
+            Some(source) => error = source,
+            None => return false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum LedgerSet {
@@ -335,76 +365,71 @@ pub enum Command {
     },
 }
 
-pub async fn start(cmd: Command) {
+pub async fn start(cmd: &Command) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match cmd {
         Command::Ping {
-            ref host,
-            ref port,
-            ref network_magic,
-            ref timeout_seconds,
+            host,
+            port,
+            network_magic,
+            timeout_seconds,
         } => {
-            ping::ping(&mut stdout(), host.as_str(), *port, *network_magic, *timeout_seconds).await;
+            ping::ping(&mut stdout(), host, *port, *network_magic, *timeout_seconds).await?;
         }
-        Command::Validate { ref db, ref hash } => {
-            validate::validate_block(db, hash.as_str());
-        }
+        Command::Validate { db, hash } => validate::validate_block(db, hash)?,
         Command::DumpBlock {
-            ref intersect_slot,
-            ref intersect_hash,
-            ref host,
-            ref port,
-            ref network_magic,
+            intersect_slot,
+            intersect_hash,
+            host,
+            port,
+            network_magic,
         } => {
-            if let Err(error) = dumpblock::run(nodeclient::dumpblock::Args {
+            dumpblock::run(nodeclient::dumpblock::Args {
                 intersect_slot: *intersect_slot,
                 intersect_hash: intersect_hash.clone(),
                 host: host.clone(),
                 port: *port,
                 network_magic: *network_magic,
             })
-            .await
-            {
-                handle_error(error);
-            }
+            .await?;
         }
         Command::Sync {
-            ref db,
-            ref host,
-            ref port,
-            ref network_magic,
-            ref no_service,
-            ref shelley_genesis_hash,
-            ref use_redb,
+            db,
+            host,
+            port,
+            network_magic,
+            no_service,
+            shelley_genesis_hash,
+            use_redb,
         } => {
             sync::sync(
                 db,
-                host.as_str(),
+                host,
                 *port,
                 *network_magic,
-                shelley_genesis_hash.as_str(),
+                shelley_genesis_hash,
                 *no_service,
                 *use_redb,
             )
-            .await;
+            .await?;
         }
         Command::Leaderlog {
-            ref db,
-            ref byron_genesis,
-            ref shelley_genesis,
-            ref pool_stake,
-            ref active_stake,
-            ref d,
-            ref extra_entropy,
-            ref ledger_set,
-            ref pool_id,
-            ref pool_vrf_skey,
-            ref timezone,
-            ref consensus,
-            ref shelley_transition_epoch,
-            ref nonce,
-            ref epoch,
+            db,
+            byron_genesis,
+            shelley_genesis,
+            pool_stake,
+            active_stake,
+            d,
+            extra_entropy,
+            ledger_set,
+            pool_id,
+            pool_vrf_skey,
+            timezone,
+            consensus,
+            shelley_transition_epoch,
+            nonce,
+            epoch,
         } => {
-            if let Err(error) = leaderlog::calculate_leader_logs(
+            leaderlog::calculate_leader_logs(
                 db,
                 byron_genesis,
                 shelley_genesis,
@@ -421,27 +446,25 @@ pub async fn start(cmd: Command) {
                 shelley_transition_epoch,
                 nonce,
                 epoch,
-            ) {
-                handle_error(error);
-            }
+            )?;
         }
         Command::Nonce {
-            ref db,
-            ref byron_genesis,
-            ref shelley_genesis,
-            ref extra_entropy,
-            ref ledger_set,
-            ref shelley_transition_epoch,
-            ref consensus,
-            ref epoch,
+            db,
+            byron_genesis,
+            shelley_genesis,
+            extra_entropy,
+            ledger_set,
+            shelley_transition_epoch,
+            consensus,
+            epoch,
         } => {
-            if let Err(error) = leaderlog::calculate_leader_logs(
+            leaderlog::calculate_leader_logs(
                 db,
                 byron_genesis,
                 shelley_genesis,
-                &0u64,
-                &0u64,
-                &0f64,
+                &0,
+                &0,
+                &0.0,
                 extra_entropy,
                 ledger_set,
                 "nonce",
@@ -452,136 +475,113 @@ pub async fn start(cmd: Command) {
                 shelley_transition_epoch,
                 &None,
                 epoch,
-            ) {
-                handle_error(error);
-            }
+            )?;
         }
-        Command::Sendtip {
-            ref config,
-            ref cardano_node,
-        } => {
-            if !config.exists() {
-                handle_error("config not found!");
-                return;
+        Command::Sendtip { config, cardano_node } => {
+            let pooltool_config = pooltool::get_pooltool_config(config)?;
+            if !cardano_node.is_file() {
+                return Err("cardano-node not found!".into());
             }
-            if !cardano_node.exists() {
-                handle_error("cardano-node not found!");
-                return;
-            }
-
-            let pooltool_config: PooltoolConfig = pooltool::get_pooltool_config(config);
-            let mut handles: Vec<JoinHandle<_>> = vec![];
-            for pool in pooltool_config.pools.into_iter() {
+            let client = reqwest::Client::builder()
+                .user_agent(APP_USER_AGENT)
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .timeout(std::time::Duration::from_secs(15))
+                .build()?;
+            let mut tasks = tokio::task::JoinSet::new();
+            for pool in pooltool_config.pools {
                 let api_key = pooltool_config.api_key.clone();
                 let cardano_node_path = cardano_node.clone();
-                handles.push(thread::spawn(move || {
-                    tokio::runtime::Runtime::new().unwrap().block_on(sync::sendtip(
+                let client = client.clone();
+                tasks.spawn(async move {
+                    sync::sendtip(
                         pool.name,
                         pool.pool_id,
                         pool.host,
                         pool.port,
                         api_key,
                         &cardano_node_path,
-                    ));
-                }));
+                        client,
+                    )
+                    .await
+                });
             }
-
-            for handle in handles {
-                handle.join().unwrap()
+            while let Some(result) = tasks.join_next().await {
+                result??;
             }
         }
         Command::Sendslots {
-            ref config,
-            ref db,
-            ref byron_genesis,
-            ref shelley_genesis,
-            ref shelley_transition_epoch,
-            ref override_time,
+            config,
+            db,
+            byron_genesis,
+            shelley_genesis,
+            shelley_transition_epoch,
+            override_time,
         } => {
-            if !config.exists() {
-                handle_error("config not found!");
-                return;
-            }
-            let pooltool_config: PooltoolConfig = pooltool::get_pooltool_config(config);
-            leaderlog::send_slots(
-                db,
-                byron_genesis,
-                shelley_genesis,
-                pooltool_config,
-                shelley_transition_epoch,
-                override_time,
-            );
+            let config = pooltool::get_pooltool_config(config)?;
+            let db = db.clone();
+            let byron = byron_genesis.clone();
+            let shelley = shelley_genesis.clone();
+            let transition = *shelley_transition_epoch;
+            let override_time = override_time.clone();
+            tokio::task::spawn_blocking(move || {
+                leaderlog::send_slots(&db, &byron, &shelley, config, &transition, &override_time)
+            })
+            .await??;
         }
         Command::Status {
-            ref db,
-            ref byron_genesis,
-            ref shelley_genesis,
-            ref shelley_transition_epoch,
+            db,
+            byron_genesis,
+            shelley_genesis,
+            shelley_transition_epoch,
         } => {
-            leaderlog::status(db, byron_genesis, shelley_genesis, shelley_transition_epoch);
+            leaderlog::status(db, byron_genesis, shelley_genesis, shelley_transition_epoch)?;
         }
-        Command::Challenge { ref domain } => {
-            sign::create_challenge(domain);
+        Command::Challenge { domain } => {
+            sign::create_challenge(domain)?;
         }
         Command::Sign {
-            ref pool_vrf_skey,
-            ref domain,
-            ref nonce,
+            pool_vrf_skey,
+            domain,
+            nonce,
         } => {
-            if !pool_vrf_skey.exists() {
-                handle_error("vrf.skey not found!");
-                return;
-            }
-            sign::sign_challenge(pool_vrf_skey, domain, nonce);
+            sign::sign_challenge(pool_vrf_skey, domain, nonce)?;
         }
         Command::Verify {
-            ref pool_vrf_vkey,
-            ref pool_vrf_vkey_hash,
-            ref domain,
-            ref nonce,
-            ref signature,
+            pool_vrf_vkey,
+            pool_vrf_vkey_hash,
+            domain,
+            nonce,
+            signature,
         } => {
-            sign::verify_challenge(pool_vrf_vkey, pool_vrf_vkey_hash, domain, nonce, signature);
+            sign::verify_challenge(pool_vrf_vkey, pool_vrf_vkey_hash, domain, nonce, signature)?;
         }
         Command::Snapshot {
-            ref socket_path,
-            ref network_magic,
-            ref name,
-            ref network_id,
-            ref stake_prefix,
-            ref output_file,
+            socket_path,
+            network_magic,
+            name,
+            network_id,
+            stake_prefix,
+            output_file,
         } => {
-            if let Err(error) = snapshot::dump(
+            snapshot::dump(
                 socket_path,
                 *network_magic,
-                name.as_str(),
+                name,
                 *network_id,
-                stake_prefix.as_str(),
-                output_file.as_str(),
+                stake_prefix,
+                output_file,
             )
-            .await
-            {
-                handle_error(error);
-            }
+            .await?;
         }
         Command::PoolStake {
-            ref socket_path,
-            ref network_magic,
-            ref name,
-            ref network_id,
-            ref output_file,
+            socket_path,
+            network_magic,
+            name,
+            network_id,
+            output_file,
         } => {
-            if let Err(error) = snapshot::pool_stake_dump(
-                socket_path,
-                *network_magic,
-                name.as_str(),
-                *network_id,
-                output_file.as_str(),
-            )
-            .await
-            {
-                handle_error(error);
-            }
+            snapshot::pool_stake_dump(socket_path, *network_magic, name, *network_id, output_file).await?;
         }
     }
+    Ok(())
 }

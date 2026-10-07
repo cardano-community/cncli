@@ -4,10 +4,10 @@ use crate::nodeclient::blockstore::sqlite::SqLiteBlockStore;
 use crate::nodeclient::blockstore::BlockStore;
 use crate::nodeclient::leaderlog::deserialize::cbor_hex;
 use crate::nodeclient::leaderlog::ledgerstate::calculate_ledger_state_sigma_d_and_extra_entropy;
-use crate::{LedgerSet, PooltoolConfig};
+use crate::nodeclient::sync::pooltool::PooltoolConfig;
+use crate::LedgerSet;
 use chrono::{DateTime, NaiveDateTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
-use itertools::sorted;
 use pallas_crypto::hash::{Hash, Hasher};
 use vrf_dalek::vrf03::{PublicKey03, SecretKey03, VrfProof03};
 
@@ -16,11 +16,11 @@ use pallas_math::math::{ExpOrdering, FixedDecimal, FixedPrecision, DEFAULT_PRECI
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
-use std::fmt::Display;
 use std::fs::File;
 use std::io::{stdout, BufReader};
 use std::path::Path;
 use std::str::FromStr;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 use tracing::{debug, error, info, span, trace, Level};
 
@@ -35,6 +35,12 @@ pub enum Error {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
+    #[error("HTTP error: {0}")]
+    Http(#[from] reqwest::Error),
+
+    #[error("Output error: {0}")]
+    Output(#[from] crate::OutputError),
+
     #[error("Rusqlite error: {0}")]
     Rusqlite(#[from] rusqlite::Error),
 
@@ -48,10 +54,10 @@ pub enum Error {
     Leaderlog(String),
 
     #[error("Blockstore error: {0}")]
-    Blockstore(Box<blockstore::Error>),
+    Blockstore(#[source] Box<blockstore::Error>),
 
     #[error("Redb error: {0}")]
-    Redb(Box<blockstore::redb::Error>),
+    Redb(#[source] Box<blockstore::redb::Error>),
 
     #[error("Sqlite error: {0}")]
     Sqlite(#[from] blockstore::sqlite::Error),
@@ -70,13 +76,6 @@ impl From<blockstore::redb::Error> for Error {
     fn from(err: blockstore::redb::Error) -> Self {
         Error::Redb(Box::new(err))
     }
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct LeaderLogError {
-    status: String,
-    error_message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -305,10 +304,16 @@ fn mk_input_vrf(slot: u64, eta0: &[u8]) -> Vec<u8> {
 }
 
 fn vrf_eval_certified(seed: &[u8], pool_vrf_skey: &[u8]) -> Result<Hash<64>, Error> {
-    let vrf_skey: &[u8; 32] = pool_vrf_skey[..32].try_into().expect("Infallible");
+    let vrf_skey: &[u8; 32] = pool_vrf_skey
+        .get(..32)
+        .and_then(|bytes| bytes.try_into().ok())
+        .ok_or_else(|| Error::Leaderlog("VRF signing key must contain at least 32 bytes".to_string()))?;
+    let seed = seed
+        .get(..32)
+        .ok_or_else(|| Error::Leaderlog("VRF seed must contain at least 32 bytes".to_string()))?;
     let vrf_skey = SecretKey03::from_bytes(vrf_skey);
     let vrf_public_key = PublicKey03::from(&vrf_skey);
-    let certified_proof = VrfProof03::generate(&vrf_public_key, &vrf_skey, &seed[..32]);
+    let certified_proof = VrfProof03::generate(&vrf_public_key, &vrf_skey, seed);
     let certified_proof_hash = Hash::<64>::from(certified_proof.proof_to_hash());
     trace!("certified_proof_hash: {}", hex::encode(certified_proof_hash));
     Ok(certified_proof_hash)
@@ -319,6 +324,14 @@ fn vrf_leader_value(raw_vrf: &[u8]) -> Result<FixedDecimal, Error> {
     hasher.input(vec![0x4C_u8].as_slice()); // "L"
     hasher.input(raw_vrf);
     Ok(FixedDecimal::from(hasher.finalize().as_slice()))
+}
+
+fn leader_from_ordering(ordering: ExpOrdering) -> Result<bool, Error> {
+    match ordering {
+        ExpOrdering::LT => Ok(true),
+        ExpOrdering::GT => Ok(false),
+        ExpOrdering::UNKNOWN => Err(Error::Leaderlog("Uncertain slot leader comparison".to_string())),
+    }
 }
 
 // Determine if our pool is a slot leader for this given slot
@@ -354,7 +367,7 @@ fn is_slot_leader_praos(
     trace!("c: {}", c);
     trace!("x: {}", &x);
 
-    Ok(ordering.estimation == ExpOrdering::LT)
+    leader_from_ordering(ordering.estimation)
 }
 
 // Determine if our pool is a slot leader for this given slot
@@ -388,7 +401,7 @@ fn is_slot_leader_tpraos(
     trace!("c: {}", c);
     trace!("x: {}", &x);
 
-    Ok(ordering.estimation == ExpOrdering::LT)
+    leader_from_ordering(ordering.estimation)
 }
 
 fn get_current_slot(
@@ -454,7 +467,9 @@ pub(crate) fn calculate_leader_logs(
     epoch: &Option<u64>,
 ) -> Result<(), Error> {
     debug!("calculate_leader_logs() start");
-    let tz: Tz = timezone.parse::<Tz>().unwrap();
+    let tz: Tz = timezone
+        .parse::<Tz>()
+        .map_err(|_| Error::Leaderlog("Invalid timezone".to_string()))?;
 
     if !db_path.exists() {
         return Err(Error::Leaderlog(format!(
@@ -502,6 +517,24 @@ pub(crate) fn calculate_leader_logs(
 
     let shelley = read_shelley_genesis(shelley_genesis)?;
     debug!("{:?}", shelley);
+    if shelley.slot_length == 0 || shelley.epoch_length == 0 || byron.protocol_consts.k == 0 {
+        return Err(Error::Leaderlog(
+            "Genesis slot and epoch lengths must be nonzero".to_string(),
+        ));
+    }
+    if !is_just_nonce
+        && (*active_stake == 0
+            || pool_stake > active_stake
+            || !d.is_finite()
+            || !(0.0..=1.0).contains(d)
+            || !shelley.active_slots_coeff.is_finite()
+            || !(0.0..1.0).contains(&shelley.active_slots_coeff)
+            || shelley.active_slots_coeff == 0.0)
+    {
+        return Err(Error::Leaderlog(
+            "Invalid leader schedule stake or probability parameters".to_string(),
+        ));
+    }
 
     let shelley_transition_epoch = match *shelley_transition_epoch {
         None => guess_shelley_transition_epoch(shelley.network_magic),
@@ -509,6 +542,7 @@ pub(crate) fn calculate_leader_logs(
     };
 
     let ledger_info = calculate_ledger_state_sigma_d_and_extra_entropy(pool_stake, active_stake, d, extra_entropy)?;
+    let extra_entropy_vec = ledger_info.extra_entropy.as_ref().map(hex::decode).transpose()?;
 
     let tip_slot_number = match nonce {
         Some(_) => {
@@ -523,6 +557,9 @@ pub(crate) fn calculate_leader_logs(
             tip_slot_number
         }
     };
+    if tip_slot_number == 0 {
+        return Err(Error::Leaderlog("db not fully synced!".to_string()));
+    }
 
     let current_epoch = get_current_epoch(&byron, &shelley, shelley_transition_epoch);
 
@@ -598,15 +635,12 @@ pub(crate) fn calculate_leader_logs(
             debug!("nh: {}", nh);
 
             debug!("extra_entropy: {:?}", &ledger_info.extra_entropy);
-            let extra_entropy_vec: Option<Vec<u8>> = ledger_info
-                .extra_entropy
-                .map(|entropy| hex::decode(entropy).expect("Invalid hex string"));
             generate_epoch_nonce(nc, nh, extra_entropy_vec.as_deref())
         }
     };
 
     if is_just_nonce {
-        println!("{}", hex::encode(epoch_nonce));
+        crate::write_line(&mut stdout().lock(), &hex::encode(epoch_nonce))?;
         return Ok(());
     }
 
@@ -616,6 +650,11 @@ pub(crate) fn calculate_leader_logs(
     if pool_vrf_skey.key_type != "VrfSigningKey_PraosVRF" {
         return Err(Error::Leaderlog(
             "Pool VRF Skey must be of type: VrfSigningKey_PraosVRF".to_string(),
+        ));
+    }
+    if pool_vrf_skey.key.len() < 32 {
+        return Err(Error::Leaderlog(
+            "VRF signing key must contain at least 32 bytes".to_string(),
         ));
     }
 
@@ -668,47 +707,34 @@ pub(crate) fn calculate_leader_logs(
         .par_bridge() // <--- use rayon parallel bridge
         .map(|slot_in_epoch| first_slot_of_epoch + slot_in_epoch)
         .filter(|epoch_slot| !is_overlay_slot(&first_slot_of_epoch, epoch_slot, &ledger_info.decentralization))
-        .filter_map(|leader_slot| match consensus {
-            "tpraos" => {
-                match is_slot_leader_tpraos(
+        .map(|leader_slot| {
+            let is_leader = match consensus {
+                "tpraos" => is_slot_leader_tpraos(
                     leader_slot,
                     &sigma,
                     epoch_nonce.as_slice(),
                     &pool_vrf_skey.key,
                     &cert_nat_max,
                     &c,
-                ) {
-                    Ok(true) => Some(leader_slot),
-                    Ok(false) => None,
-                    Err(msg) => {
-                        handle_error(msg);
-                        None
-                    }
-                }
-            }
-            "praos" | "cpraos" => {
-                match is_slot_leader_praos(
+                )?,
+                "praos" | "cpraos" => is_slot_leader_praos(
                     leader_slot,
                     &sigma,
                     epoch_nonce.as_slice(),
                     &pool_vrf_skey.key,
                     &cert_nat_max,
                     &c,
-                ) {
-                    Ok(true) => Some(leader_slot),
-                    Ok(false) => None,
-                    Err(msg) => {
-                        handle_error(msg);
-                        None
-                    }
-                }
-            }
-            _ => panic!(),
+                )?,
+                _ => return Err(Error::Leaderlog(format!("Invalid Consensus: --consensus {consensus}"))),
+            };
+            Ok(is_leader.then_some(leader_slot))
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<Option<u64>>, Error>>()?;
+    let mut assigned_slots: Vec<u64> = assigned_slots.into_iter().flatten().collect();
+    assigned_slots.sort_unstable();
 
     // Update leader log with all assigned slots (sort first)
-    for (i, slot) in sorted(assigned_slots.iter()).enumerate() {
+    for (i, slot) in assigned_slots.iter().enumerate() {
         let no = (i + 1) as u64;
         let slot = Slot {
             no,
@@ -740,57 +766,41 @@ pub(crate) fn calculate_leader_logs(
 
     block_store.save_slots(epoch, pool_id, assigned_slots.len() as u64, slots.as_str(), &hash)?;
 
-    println!("{}", serde_json::to_string_pretty(&leader_log)?);
+    crate::write_json(&mut stdout().lock(), &leader_log)?;
 
     Ok(())
 }
 
-pub(crate) fn status(db_path: &Path, byron_genesis: &Path, shelley_genesis: &Path, shelley_trans_epoch: &Option<u64>) {
+pub(crate) fn status(
+    db_path: &Path,
+    byron_genesis: &Path,
+    shelley_genesis: &Path,
+    shelley_trans_epoch: &Option<u64>,
+) -> Result<(), Error> {
     if !db_path.exists() {
-        handle_error("database not found!");
-        return;
+        return Err(Error::Leaderlog("database not found!".to_string()));
     }
-    // check if db_path is a redb database based on magic number
-    let use_redb = is_redb_database(db_path).expect("infallible");
-
-    let mut block_store: Box<dyn BlockStore + Send> = if use_redb {
-        Box::new(RedbBlockStore::new(db_path).expect("infallible"))
+    let mut block_store: Box<dyn BlockStore + Send> = if is_redb_database(db_path)? {
+        Box::new(RedbBlockStore::new(db_path)?)
     } else {
-        Box::new(SqLiteBlockStore::new(db_path).expect("infallible"))
+        Box::new(SqLiteBlockStore::new(db_path)?)
     };
-
-    match read_byron_genesis(byron_genesis) {
-        Ok(byron) => {
-            debug!("{:?}", byron);
-            match read_shelley_genesis(shelley_genesis) {
-                Ok(shelley) => {
-                    debug!("{:?}", shelley);
-                    let shelley_trans_epoch = match *shelley_trans_epoch {
-                        None => guess_shelley_transition_epoch(shelley.network_magic),
-                        Some(value) => value,
-                    };
-                    match block_store.get_tip_slot_number() {
-                        Ok(tip_slot_number) => {
-                            debug!("tip_slot_number: {}", tip_slot_number);
-                            let tip_time =
-                                slot_to_naivedatetime(&byron, &shelley, tip_slot_number, shelley_trans_epoch)
-                                    .and_utc()
-                                    .timestamp();
-                            let system_time = Utc::now().timestamp();
-                            if system_time - tip_time < 120 {
-                                print_status_synced();
-                            } else {
-                                handle_error("db not fully synced!")
-                            }
-                        }
-                        Err(error) => handle_error(error),
-                    }
-                }
-                Err(error) => handle_error(error),
-            }
-        }
-        Err(error) => handle_error(error),
+    let byron = read_byron_genesis(byron_genesis)?;
+    let shelley = read_shelley_genesis(shelley_genesis)?;
+    let shelley_trans_epoch =
+        shelley_trans_epoch.unwrap_or_else(|| guess_shelley_transition_epoch(shelley.network_magic));
+    let tip_slot_number = block_store.get_tip_slot_number()?;
+    if tip_slot_number == 0 {
+        return Err(Error::Leaderlog("db not fully synced!".to_string()));
     }
+    let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number, shelley_trans_epoch)
+        .and_utc()
+        .timestamp();
+    if Utc::now().timestamp() - tip_time >= 120 {
+        return Err(Error::Leaderlog("db not fully synced!".to_string()));
+    }
+    crate::write_json(&mut stdout().lock(), &serde_json::json!({"status": "ok"}))?;
+    Ok(())
 }
 
 pub(crate) fn send_slots(
@@ -800,133 +810,320 @@ pub(crate) fn send_slots(
     pooltool_config: PooltoolConfig,
     shelley_trans_epoch: &Option<u64>,
     override_time: &Option<String>,
-) {
+) -> Result<(), Error> {
+    if pooltool_config.api_key.trim().is_empty()
+        || pooltool_config.pools.is_empty()
+        || pooltool_config.pools.iter().any(|pool| pool.pool_id.trim().is_empty())
+    {
+        return Err(Error::Leaderlog("Invalid PoolTool configuration".to_string()));
+    }
     if !db_path.exists() {
-        handle_error("database not found!");
-        return;
+        return Err(Error::Leaderlog("database not found!".to_string()));
     }
-    // check if db_path is a redb database based on magic number
-    let use_redb = is_redb_database(db_path).expect("infallible");
-
-    let mut block_store: Box<dyn BlockStore + Send> = if use_redb {
-        Box::new(RedbBlockStore::new(db_path).expect("infallible"))
+    let mut block_store: Box<dyn BlockStore + Send> = if is_redb_database(db_path)? {
+        Box::new(RedbBlockStore::new(db_path)?)
     } else {
-        Box::new(SqLiteBlockStore::new(db_path).expect("infallible"))
+        Box::new(SqLiteBlockStore::new(db_path)?)
     };
-
-    match read_byron_genesis(byron_genesis) {
-        Ok(byron) => {
-            debug!("{:?}", byron);
-            match read_shelley_genesis(shelley_genesis) {
-                Ok(shelley) => {
-                    debug!("{:?}", shelley);
-                    match block_store.get_tip_slot_number() {
-                        Ok(tip_slot_number) => {
-                            debug!("tip_slot_number: {}", tip_slot_number);
-                            let shelley_trans_epoch = match *shelley_trans_epoch {
-                                None => guess_shelley_transition_epoch(shelley.network_magic),
-                                Some(value) => value,
-                            };
-                            let tip_time =
-                                slot_to_naivedatetime(&byron, &shelley, tip_slot_number, shelley_trans_epoch)
-                                    .and_utc()
-                                    .timestamp();
-                            let system_time = Utc::now().timestamp();
-                            if system_time - tip_time < 120 {
-                                let (epoch, _) =
-                                    get_first_slot_of_epoch(&byron, &shelley, tip_slot_number, shelley_trans_epoch);
-                                debug!("epoch: {}", epoch);
-                                for pool in pooltool_config.pools.iter() {
-                                    match block_store.get_current_slots(epoch, &pool.pool_id) {
-                                        Ok((slot_qty, hash)) => {
-                                            debug!("slot_qty: {}", slot_qty);
-                                            debug!("hash: {}", &hash);
-                                            match block_store.get_previous_slots(epoch - 1, &pool.pool_id) {
-                                                Ok(prev_slots) => {
-                                                    let request = serde_json::ser::to_string(&PooltoolSendSlots {
-                                                        api_key: pooltool_config.api_key.clone(),
-                                                        pool_id: pool.pool_id.clone(),
-                                                        epoch,
-                                                        slot_qty,
-                                                        hash,
-                                                        override_time: override_time.clone(),
-                                                        prev_slots,
-                                                    })
-                                                    .unwrap();
-                                                    info!("Sending: {}", &request);
-                                                    match reqwest::blocking::Client::builder().build() {
-                                                        Ok(client) => {
-                                                            let pooltool_result = client
-                                                                .post("https://api.pooltool.io/v0/sendslots")
-                                                                .body(request)
-                                                                .send();
-
-                                                            match pooltool_result {
-                                                                Ok(response) => match response.text() {
-                                                                    Ok(text) => {
-                                                                        info!("Pooltool Response: {}", text);
-                                                                    }
-                                                                    Err(error) => {
-                                                                        error!("PoolTool error: {}", error);
-                                                                    }
-                                                                },
-                                                                Err(error) => {
-                                                                    error!("PoolTool error: {}", error);
-                                                                }
-                                                            }
-                                                        }
-                                                        Err(err) => {
-                                                            error!("Could not set up the reqwest client!: {}", err)
-                                                        }
-                                                    }
-                                                }
-                                                Err(error) => {
-                                                    error!("Db Error: {}", error)
-                                                }
-                                            }
-                                        }
-                                        Err(error) => {
-                                            error!("Cannot find db record for {},{}: {}", epoch, &pool.pool_id, error)
-                                        }
-                                    }
-                                }
-                            } else {
-                                handle_error("db not fully synced!")
-                            }
-                        }
-                        Err(error) => handle_error(error),
-                    }
-                }
-                Err(error) => handle_error(error),
-            }
-        }
-        Err(error) => handle_error(error),
+    let byron = read_byron_genesis(byron_genesis)?;
+    let shelley = read_shelley_genesis(shelley_genesis)?;
+    let tip_slot_number = block_store.get_tip_slot_number()?;
+    if tip_slot_number == 0 {
+        return Err(Error::Leaderlog("db not fully synced!".to_string()));
     }
+    let shelley_trans_epoch =
+        shelley_trans_epoch.unwrap_or_else(|| guess_shelley_transition_epoch(shelley.network_magic));
+    let tip_time = slot_to_naivedatetime(&byron, &shelley, tip_slot_number, shelley_trans_epoch)
+        .and_utc()
+        .timestamp();
+    if Utc::now().timestamp() - tip_time >= 120 {
+        return Err(Error::Leaderlog("db not fully synced!".to_string()));
+    }
+    let (epoch, _) = get_first_slot_of_epoch(&byron, &shelley, tip_slot_number, shelley_trans_epoch);
+    let previous_epoch = epoch
+        .checked_sub(1)
+        .ok_or_else(|| Error::Leaderlog("No previous epoch available".to_string()))?;
+    let client = reqwest::blocking::Client::builder()
+        .user_agent(crate::APP_USER_AGENT)
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
+        .build()?;
+    for pool in &pooltool_config.pools {
+        let (slot_qty, hash) = block_store.get_current_slots(epoch, &pool.pool_id)?;
+        let prev_slots = block_store.get_previous_slots(previous_epoch, &pool.pool_id)?;
+        let request = PooltoolSendSlots {
+            api_key: pooltool_config.api_key.clone(),
+            pool_id: pool.pool_id.clone(),
+            epoch,
+            slot_qty,
+            hash,
+            override_time: override_time.clone(),
+            prev_slots,
+        };
+        post_slots(&client, crate::nodeclient::sync::pooltool::POOLTOOL_BASE_URL, &request)?;
+    }
+    Ok(())
 }
 
-fn print_status_synced() {
-    println!(
-        "{{\n\
-            \x20\"status\": \"ok\"\n\
-            }}"
-    );
-}
-
-pub fn handle_error<T: Display>(error_message: T) {
-    serde_json::ser::to_writer_pretty(
-        &mut stdout(),
-        &LeaderLogError {
-            status: "error".to_string(),
-            error_message: format!("{error_message}"),
-        },
-    )
-    .unwrap();
+fn post_slots(client: &reqwest::blocking::Client, base_url: &str, request: &PooltoolSendSlots) -> Result<(), Error> {
+    let started = Instant::now();
+    let result = (|| {
+        let body = serde_json::to_string(request)?;
+        let response = client.post(format!("{base_url}/v0/sendslots")).body(body).send()?;
+        response.error_for_status().map_err(Error::from)
+    })();
+    let http_status = match &result {
+        Ok(response) => Some(response.status().as_u16()),
+        Err(Error::Http(error)) => error.status().map(|status| status.as_u16()),
+        Err(_) => None,
+    };
+    let duration_ms = started.elapsed().as_millis() as u64;
+    match result {
+        Ok(_) => {
+            info!(
+                operation = "pooltool.sendslots",
+                pool_id = %request.pool_id,
+                epoch = request.epoch,
+                http_status,
+                duration_ms,
+                outcome = "ok"
+            );
+            Ok(())
+        }
+        Err(error) => {
+            error!(
+                operation = "pooltool.sendslots",
+                pool_id = %request.pool_id,
+                epoch = request.epoch,
+                http_status,
+                duration_ms,
+                outcome = "error"
+            );
+            Err(error)
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use chrono::Utc;
+
     use crate::nodeclient::leaderlog::{is_overlay_slot, vrf_eval_certified};
-    use chrono::{NaiveDateTime, Utc};
+
+    #[test]
+    fn short_vrf_inputs_return_errors() {
+        assert!(matches!(
+            vrf_eval_certified(&[0; 32], &[0; 31]),
+            Err(super::Error::Leaderlog(_))
+        ));
+        assert!(matches!(
+            vrf_eval_certified(&[0; 31], &[0; 32]),
+            Err(super::Error::Leaderlog(_))
+        ));
+    }
+
+    #[test]
+    fn uncertain_comparison_aborts_schedule_collection() {
+        use pallas_math::math::ExpOrdering;
+        use rayon::prelude::*;
+        let schedule = [ExpOrdering::LT, ExpOrdering::UNKNOWN, ExpOrdering::GT]
+            .into_par_iter()
+            .enumerate()
+            .map(|(slot, ordering)| super::leader_from_ordering(ordering).map(|leader| leader.then_some(slot as u64)))
+            .collect::<Result<Vec<Option<u64>>, super::Error>>();
+        assert!(matches!(schedule, Err(super::Error::Leaderlog(_))));
+    }
+
+    #[test]
+    fn short_key_cannot_save_even_an_overlay_only_schedule() {
+        use super::{calculate_leader_logs, BlockStore, SqLiteBlockStore};
+        use std::fs;
+        let directory = std::env::temp_dir().join(format!("cncli-leaderlog-{}", uuid::Uuid::now_v7()));
+        fs::create_dir(&directory).unwrap();
+        let db = directory.join("chain.db");
+        let byron = directory.join("byron.json");
+        let shelley = directory.join("shelley.json");
+        let key = directory.join("vrf.skey");
+        drop(SqLiteBlockStore::new(&db).unwrap());
+        fs::write(
+            &byron,
+            serde_json::to_vec(&serde_json::json!({
+                "startTime": Utc::now().timestamp() - 1000,
+                "protocolConsts": {"k": 1},
+                "blockVersionData": {"slotDuration": "1000"}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            &shelley,
+            r#"{"activeSlotsCoeff":0.05,"networkMagic":42,"slotLength":1,"epochLength":100}"#,
+        )
+        .unwrap();
+        fs::write(
+            &key,
+            serde_json::to_vec(&serde_json::json!({
+                "type": "VrfSigningKey_PraosVRF",
+                "cborHex": format!("581f{}", "00".repeat(31))
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        for consensus in ["praos", "tpraos", "cpraos"] {
+            let result = calculate_leader_logs(
+                &db,
+                &byron,
+                &shelley,
+                &1,
+                &100,
+                &1.0,
+                &None,
+                &crate::LedgerSet::Set,
+                "test-pool",
+                &key,
+                "UTC",
+                false,
+                consensus,
+                &Some(0),
+                &Some("00".repeat(32)),
+                &Some(2),
+            );
+            assert!(matches!(result, Err(super::Error::Leaderlog(_))));
+            let mut store = SqLiteBlockStore::new(&db).unwrap();
+            assert!(store.get_current_slots(2, "test-pool").is_err());
+        }
+        fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn sendslots_http_logging_boundary() {
+        use super::{post_slots, PooltoolSendSlots};
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::Arc;
+        use std::time::Duration;
+        use tokio::sync::Mutex;
+
+        #[derive(Clone)]
+        struct LogWriter(Arc<Mutex<Vec<u8>>>);
+
+        impl Write for LogWriter {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.blocking_lock().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+
+        const SECRET: &str = "CNCLI_TEST_SECRET_DO_NOT_LOG";
+        for (status, outcome) in [(200, "ok"), (429, "error"), (500, "error")] {
+            let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
+            let server = std::thread::spawn(move || {
+                let (mut socket, _) = listener.accept().unwrap();
+                socket.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+                socket.set_write_timeout(Some(Duration::from_secs(3))).unwrap();
+                let mut received = Vec::new();
+                let (header_end, content_length) = loop {
+                    let mut chunk = [0; 1024];
+                    let count = socket.read(&mut chunk).unwrap();
+                    assert_ne!(count, 0, "request ended before its HTTP headers");
+                    received.extend_from_slice(&chunk[..count]);
+                    if let Some(end) = received.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+                        let headers = std::str::from_utf8(&received[..end]).unwrap();
+                        assert_eq!(headers.lines().next().unwrap(), "POST /v0/sendslots HTTP/1.1");
+                        let length = headers
+                            .lines()
+                            .filter_map(|line| line.split_once(':'))
+                            .find(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                            .unwrap()
+                            .1
+                            .trim()
+                            .parse::<usize>()
+                            .unwrap();
+                        break (end + 4, length);
+                    }
+                };
+                while received.len() < header_end + content_length {
+                    let mut chunk = [0; 1024];
+                    let count = socket.read(&mut chunk).unwrap();
+                    assert_ne!(count, 0, "request ended before its HTTP body");
+                    received.extend_from_slice(&chunk[..count]);
+                }
+                let payload: serde_json::Value =
+                    serde_json::from_slice(&received[header_end..header_end + content_length]).unwrap();
+                let echo = serde_json::to_string(&payload).unwrap();
+                write!(
+                    socket,
+                    "HTTP/1.1 {status} Test\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{echo}",
+                    echo.len()
+                )
+                .unwrap();
+                payload
+            });
+            let logs = Arc::new(Mutex::new(Vec::new()));
+            let writer = LogWriter(Arc::clone(&logs));
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_ansi(false)
+                .without_time()
+                .with_writer(move || writer.clone())
+                .finish();
+            let request = PooltoolSendSlots {
+                api_key: SECRET.to_string(),
+                // A short, multibyte ID also proves logging does not slice at byte eight.
+                pool_id: "池".to_string(),
+                epoch: 42,
+                slot_qty: 2,
+                hash: "CNCLI_TEST_HASH_DO_NOT_LOG".to_string(),
+                override_time: (status == 200).then(|| "2026-10-02T00:00:00Z".to_string()),
+                prev_slots: (status == 200).then(|| "CNCLI_TEST_SLOTS_DO_NOT_LOG".to_string()),
+            };
+            let result = tracing::subscriber::with_default(subscriber, || {
+                let client = reqwest::blocking::Client::builder()
+                    .no_proxy()
+                    .timeout(Duration::from_secs(3))
+                    .build()
+                    .unwrap();
+                post_slots(&client, &base_url, &request)
+            });
+            let payload = server.join().unwrap();
+            assert_eq!(payload, serde_json::to_value(&request).unwrap());
+            assert_eq!(payload["apiKey"], SECRET);
+            assert_eq!(payload["poolId"], "池");
+            assert_eq!(payload["epoch"], 42);
+            assert_eq!(payload["slotQty"], 2);
+            assert_eq!(payload["hash"], "CNCLI_TEST_HASH_DO_NOT_LOG");
+            assert_eq!(payload.as_object().unwrap().len(), if status == 200 { 7 } else { 5 });
+            if status == 200 {
+                assert_eq!(payload["overrideTime"], "2026-10-02T00:00:00Z");
+                assert_eq!(payload["prevSlots"], "CNCLI_TEST_SLOTS_DO_NOT_LOG");
+            } else {
+                assert!(payload.get("overrideTime").is_none());
+                assert!(payload.get("prevSlots").is_none());
+            }
+            assert_eq!(result.is_ok(), status == 200);
+            if status != 200 {
+                assert!(matches!(result, Err(super::Error::Http(error)) if error.status().unwrap().as_u16() == status));
+            }
+            let logs = String::from_utf8(logs.blocking_lock().clone()).unwrap();
+            assert!(!logs.contains(SECRET), "{logs}");
+            assert!(!logs.contains(&request.hash), "{logs}");
+            assert!(!logs.contains("CNCLI_TEST_SLOTS_DO_NOT_LOG"), "{logs}");
+            assert!(!logs.contains("apiKey"), "{logs}");
+            assert!(!logs.contains("slotQty"), "{logs}");
+            assert!(!logs.contains("overrideTime"), "{logs}");
+            assert!(logs.contains("operation=\"pooltool.sendslots\""), "{logs}");
+            assert!(logs.contains("pool_id=池"), "{logs}");
+            assert!(logs.contains("epoch=42"), "{logs}");
+            assert!(logs.contains(&format!("http_status={status}")), "{logs}");
+            assert!(logs.contains("duration_ms="), "{logs}");
+            assert!(logs.contains(&format!("outcome=\"{outcome}\"")), "{logs}");
+        }
+    }
 
     #[test]
     fn test_vrf_eval_certified_compatibility() {
@@ -947,53 +1144,5 @@ mod tests {
         // AD test
         current_slot = 15920150_u64;
         assert!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &d));
-    }
-
-    #[test]
-    fn test_date_parsing() {
-        let genesis_start_time_sec = NaiveDateTime::parse_from_str("2022-10-25T00:00:00Z", "%Y-%m-%dT%H:%M:%S%.fZ")
-            .unwrap()
-            .and_utc()
-            .timestamp();
-
-        assert_eq!(genesis_start_time_sec, 1666656000);
-    }
-
-    #[test]
-    fn test_date_parsing2() {
-        let genesis_start_time_sec =
-            NaiveDateTime::parse_from_str("2024-05-16T17:18:10.000000000Z", "%Y-%m-%dT%H:%M:%S%.fZ")
-                .unwrap()
-                .and_utc()
-                .timestamp();
-
-        assert_eq!(genesis_start_time_sec, 1715879890);
-    }
-
-    #[test]
-    fn test_date_parsing3() {
-        let genesis_start_time_sec = NaiveDateTime::parse_from_str("2021-12-09T22:55:22Z", "%Y-%m-%dT%H:%M:%S%.fZ")
-            .unwrap()
-            .and_utc()
-            .timestamp();
-        assert_eq!(genesis_start_time_sec, 1639090522);
-        let current_time_sec = Utc::now().timestamp();
-        println!("current_time_sec: {}", current_time_sec);
-        let current_epoch = (current_time_sec - genesis_start_time_sec) / 3600;
-        println!("current_epoch: {}", current_epoch);
-    }
-
-    #[test]
-    fn test_date_parsing_mainnet() {
-        let genesis_start_time_sec = NaiveDateTime::parse_from_str("2017-09-23T21:44:51Z", "%Y-%m-%dT%H:%M:%S%.fZ")
-            .unwrap()
-            .and_utc()
-            .timestamp();
-
-        assert_eq!(genesis_start_time_sec, 1506203091);
-        let current_time_sec = Utc::now().timestamp();
-        println!("current_time_sec: {}", current_time_sec);
-        let current_epoch = (current_time_sec - genesis_start_time_sec) / 432000;
-        println!("current_epoch: {}", current_epoch);
     }
 }

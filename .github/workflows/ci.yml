@@ -1,9 +1,10 @@
-# Based on https://github.com/actions-rs/meta/blob/master/recipes/quickstart.md
+name: Validate
 
 on:
-  push: { }
+  push: {}
 
-name: Validate
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -16,27 +17,25 @@ jobs:
           - { os: ubuntu-22.04, label: ubuntu22, target: x86_64-unknown-linux-musl, use-cross: true }
           - { os: macos-latest, label: macos, target: aarch64-apple-darwin }
           - { os: windows-latest, label: windows, target: x86_64-pc-windows-msvc }
-        rust: [ nightly ]
-
     runs-on: ${{ matrix.job.os }}
-
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install nightly toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install pinned nightly toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-09-25
+          targets: ${{ matrix.job.target }}
           components: rustfmt, clippy
 
       - name: Install cross
         if: ${{ matrix.job.use-cross }}
-        run: cargo install cross
+        run: cargo install cross --version 0.2.5 --locked
 
       - name: Run cargo check
         if: ${{ matrix.job.target == 'x86_64-unknown-linux-gnu' }}
-        run: cargo check
+        run: cargo check --locked
 
       - name: Run cargo fmt
         if: ${{ matrix.job.target == 'x86_64-unknown-linux-gnu' }}
@@ -44,61 +43,167 @@ jobs:
 
       - name: Run cargo clippy (cross)
         if: ${{ matrix.job.use-cross }}
-        run: cross clippy --release --target ${{ matrix.job.target }} -- -D warnings
+        run: cross clippy --locked --release --target ${{ matrix.job.target }} -- -D warnings
 
       - name: Run cargo clippy
         if: ${{ !matrix.job.use-cross }}
-        run: cargo clippy --release --target ${{ matrix.job.target }} -- -D warnings
+        run: cargo clippy --locked --release --target ${{ matrix.job.target }} -- -D warnings
 
       - name: Run cargo test (cross)
         if: ${{ matrix.job.use-cross }}
-        run: cross test --release --target ${{ matrix.job.target }}
+        run: cross test --locked --release --target ${{ matrix.job.target }}
 
       - name: Run cargo test
         if: ${{ !matrix.job.use-cross }}
-        run: cargo test --release --target ${{ matrix.job.target }}
+        run: cargo test --locked --release --target ${{ matrix.job.target }}
+
+      - name: Run offline suite with loopback-only networking
+        if: ${{ matrix.job.target == 'x86_64-unknown-linux-gnu' }}
+        shell: bash
+        run: |
+          cargo fetch --locked
+          sudo unshare --net bash -c 'ip link set lo up; exec sudo -u "$1" env PATH="$2" RUSTUP_HOME="$3" CARGO_HOME="$4" cargo test --locked --offline' bash "$(id -un)" "$PATH" "$HOME/.rustup" "$HOME/.cargo"
 
       - name: Build Release (cross)
         if: ${{ matrix.job.use-cross }}
-        run: cross build --release --target ${{ matrix.job.target }} --locked
+        run: cross build --locked --release --target ${{ matrix.job.target }}
 
       - name: Build Release
         if: ${{ !matrix.job.use-cross }}
-        run: cargo build --release --target ${{ matrix.job.target }} --locked
+        run: cargo build --locked --release --target ${{ matrix.job.target }}
+
+      - name: Smoke built artifact
+        shell: bash
+        run: |
+          BINARY="target/${{ matrix.job.target }}/release/cncli"
+          if [[ "${{ matrix.job.target }}" == *-pc-windows-* ]]; then BINARY+=".exe"; fi
+          "$BINARY" --version
+          "$BINARY" --help
 
       - name: Package
         id: package
         shell: bash
+        env:
+          TARGET: ${{ matrix.job.target }}
+          LABEL: ${{ matrix.job.label }}
         run: |
-          PROJECT_NAME=$(sed -n 's/^name = "\(.*\)"/\1/p' Cargo.toml)
-          PROJECT_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
-          if [[ "${{ matrix.job.target }}" == *-pc-windows-* ]]; then
-            PKG_SUFFIX=".zip"
+          if [[ "$TARGET" == *-pc-windows-* ]]; then PYTHON=python; else PYTHON=python3; fi
+          IFS=$' \t\r' read -r PROJECT_NAME PROJECT_VERSION < <("$PYTHON" -c 'import json,subprocess; m=json.loads(subprocess.check_output(["cargo","metadata","--locked","--no-deps","--format-version","1"])); p=next(p for p in m["packages"] if p["name"]=="cncli"); print(p["name"],p["version"])')
+          if [[ "$TARGET" == *-pc-windows-* ]]; then PKG_SUFFIX=".zip"; else PKG_SUFFIX=".tar.gz"; fi
+          PKG_NAME="${PROJECT_NAME}-${PROJECT_VERSION}-${LABEL}-${TARGET}${PKG_SUFFIX}"
+          if [[ "$TARGET" == *-pc-windows-* ]]; then
+            7z -y a "$PKG_NAME" "./target/$TARGET/release/cncli.exe"
           else
-            PKG_SUFFIX=".tar.gz"
+            tar -C "target/$TARGET/release" -czf "$PKG_NAME" cncli
           fi
-          PKG_NAME=${PROJECT_NAME}-${PROJECT_VERSION}-${{ matrix.job.label }}-${{ matrix.job.target }}${PKG_SUFFIX}
-          
-          if [[ "${{ matrix.job.target }}" == *-pc-windows-* ]]; then
-            7z -y a "${PKG_NAME}" ./target/${{matrix.job.target}}/release/cncli.exe | tail -2
-          else
-            tar -C target/${{matrix.job.target}}/release -czf "${PKG_NAME}" cncli
-          fi
-
-          echo ::set-output name=PKG_NAME::${PKG_NAME}
-          echo ::set-output name=PKG_PATH::${PKG_NAME}
+          export PKG_NAME
+          "$PYTHON" - <<'PY'
+          import hashlib, os, pathlib
+          archive = pathlib.Path(os.environ["PKG_NAME"])
+          digest = hashlib.sha256()
+          with archive.open("rb") as stream:
+              for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                  digest.update(chunk)
+          archive.with_name(archive.name + ".sha256").write_text(f"{digest.hexdigest()}  {archive.name}\n")
+          PY
+          printf 'PKG_NAME=%s\nPKG_PATH=%s\n' "$PKG_NAME" "$PKG_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ steps.package.outputs.PKG_NAME }}
-          path: ${{ steps.package.outputs.PKG_PATH }}
+          if-no-files-found: error
+          path: |
+            ${{ steps.package.outputs.PKG_PATH }}
+            ${{ steps.package.outputs.PKG_PATH }}.sha256
 
-      - name: Release
-        uses: softprops/action-gh-release@v3
-        if: startsWith(github.ref, 'refs/tags/v')
+  release:
+    name: Publish verified release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install pinned nightly toolchain
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action
         with:
-          prerelease: "${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}"
-          files: ${{ steps.package.outputs.PKG_PATH }}
+          toolchain: nightly-2026-09-25
+
+      - name: Download all target artifacts
+        uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify complete artifact set and checksums
+        id: verified
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib, json, os, pathlib, subprocess
+          metadata = json.loads(subprocess.check_output(["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"]))
+          package = next(p for p in metadata["packages"] if p["name"] == "cncli")
+          targets = [
+              ("ubuntu22", "x86_64-unknown-linux-gnu", ".tar.gz"),
+              ("ubuntu22", "x86_64-unknown-linux-musl", ".tar.gz"),
+              ("macos", "aarch64-apple-darwin", ".tar.gz"),
+              ("windows", "x86_64-pc-windows-msvc", ".zip"),
+          ]
+          names = [f'{package["name"]}-{package["version"]}-{label}-{target}{suffix}' for label, target, suffix in targets]
+          directory = pathlib.Path("dist")
+          expected = set(names + [name + ".sha256" for name in names])
+          actual = {path.name for path in directory.iterdir()}
+          if actual != expected or any(not path.is_file() or path.is_symlink() for path in directory.iterdir()):
+              raise SystemExit(f"Unexpected artifact set: missing={sorted(expected - actual)}, extra={sorted(actual - expected)}")
+          for name in names:
+              digest = hashlib.sha256()
+              with (directory / name).open("rb") as stream:
+                  for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                      digest.update(chunk)
+              expected_sidecar = f"{digest.hexdigest()}  {name}\n"
+              if (directory / (name + ".sha256")).read_text() != expected_sidecar:
+                  raise SystemExit(f"Checksum mismatch: {name}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write("archives<<CNCLI_VERIFIED_ARCHIVES\n")
+              output.write("\n".join(str(directory / name) for name in names))
+              output.write("\nCNCLI_VERIFIED_ARCHIVES\n")
+          PY
+
+      - name: Attest verified archives
+        id: provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: ${{ steps.verified.outputs.archives }}
+
+      - name: Retain actual provenance bundle
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BUNDLE_PATH: ${{ steps.provenance.outputs.bundle-path }}
+        run: |
+          test -n "$BUNDLE_PATH" && test -s "$BUNDLE_PATH"
+          cp -- "$BUNDLE_PATH" dist/cncli-provenance.jsonl
+
+      - name: Upload verified release set
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cncli-verified-release
+          if-no-files-found: error
+          path: |
+            ${{ steps.verified.outputs.archives }}
+            dist/*.sha256
+            dist/cncli-provenance.jsonl
+
+      - name: Release verified set
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          fail_on_unmatched_files: true
+          prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
+          files: |
+            ${{ steps.verified.outputs.archives }}
+            dist/*.sha256
+            dist/cncli-provenance.jsonl

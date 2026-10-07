@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
 #
 # Send slots to PoolTool, mail leaderlog, store slots as CSV or in PostgreSQL.
 #
@@ -19,31 +20,31 @@
 
 # export CARDANO_NODE_SOCKET_PATH="/path/to/node.socket"  # (exported by your env/service)
 
-timezone="Etc/UTC"                             # REQUIRED: set correct timezone for leaderlog scheduling
-hexStakePool=""                                # REQUIRED: pool id in hex
-jsonPoolTool="/usr/local/etc/pooltool.json"    # optional: path to PoolTool json (leave empty to skip)
-slotsCsvFile="/var/local/cncli/slots.csv"      # optional: path to write assigned slots CSV (leave empty to skip)
-leaderPromFile=""                              # optional: write assigned slot count in Prometheus format (leave empty to skip)
-mailLeaderLogTo=""                             # optional: email address to send leaderlog (leave empty to skip)
-saveToPostgres=none                            # REQUIRED: Choose one of 'none', 'secure', 'past' or 'all'.
-useScriptLogging=true                          # REQUIRED: handles logging and locking through this script
+timezone="${timezone:-Etc/UTC}"
+hexStakePool="${hexStakePool:-}"                 # REQUIRED: operator's pool id in hex
+jsonPoolTool="${jsonPoolTool-/etc/cncli/pooltool.json}" # empty disables PoolTool
+slotsCsvFile="${slotsCsvFile-/var/lib/cncli-leaderlog/slots.csv}"
+leaderPromFile="${leaderPromFile:-}"
+mailLeaderLogTo="${mailLeaderLogTo:-}"
+saveToPostgres="${saveToPostgres:-none}"
+useScriptLogging="${useScriptLogging:-true}"
 
-consensusMode="cpraos"                         # optional: Consensus mode for leader schedule calculation [cpraos | praos]
-vrfSigningKeyFile="/etc/cardano/mainnet/keys/vrf.skey"             # REQUIRED
-shelleyGenesisFile="/etc/cardano/mainnet/shelley-genesis.json"     # REQUIRED
-byronGenesisFile="/etc/cardano/mainnet/byron-genesis.json"         # REQUIRED
-dbCnCli="/path/to/cncli.db"                                        # REQUIRED
-binCardanoCli=""                               # optional: (override with ex. /usr/local/bin/cardano-cli if needed; defaults to $PATH)
-binCnCli=""                                    # optional: (override with ex. /usr/local/bin/cncli if needed; defaults to $PATH)
-binPython3=""                                  # optional: (override with ex. /usr/bin/python3 if needed; defaults to $PATH)
+consensusMode="${consensusMode:-cpraos}"
+vrfSigningKeyFile="${vrfSigningKeyFile:-/etc/cncli/vrf.skey}"
+shelleyGenesisFile="${shelleyGenesisFile:-/etc/cncli/mainnet-shelley-genesis.json}"
+byronGenesisFile="${byronGenesisFile:-/etc/cncli/mainnet-byron-genesis.json}"
+dbCnCli="${dbCnCli:-/var/lib/cncli/cncli.db}"
+binCardanoCli="${binCardanoCli:-/usr/local/bin/cardano-cli}"
+binCnCli="${binCnCli:-/usr/local/bin/cncli}"
+binPython3="${binPython3:-python3}"
 
 # ------------------------------------------------------------------------------
 # PostgreSQL connection (EDIT THESE)
 # ------------------------------------------------------------------------------
-export PGUSER=
-export PGHOST=
-export PGDATABASE=
-export PGPASSFILE=
+export PGUSER="${PGUSER:-}"
+export PGHOST="${PGHOST:-}"
+export PGDATABASE="${PGDATABASE:-}"
+export PGPASSFILE="${PGPASSFILE:-}"
 
 # ------------------------------------------------------------------------------
 # Binaries (override via environment if needed; default to PATH)
@@ -58,7 +59,7 @@ binPython3="${binPython3:-python3}"
 # ------------------------------------------------------------------------------
 # Behavior / logging
 # ------------------------------------------------------------------------------
-LOG_DIR="${LOG_DIR:-$HOME/.cncli-leaderlog}"
+LOG_DIR="${LOG_DIR:-/var/log/cncli-leaderlog}"
 LOG_FILE="${LOG_DIR}/cncli-leaderlog.log"
 LOCK_FILE="${LOG_DIR}/cncli-leaderlog.lock"
 CMD_TIMEOUT="${CMD_TIMEOUT:-300s}"             # default timeout for long ops
@@ -91,19 +92,20 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --test) TEST=1; shift ;;
     --force-email) FORCE_EMAIL=1; shift ;;
-    --csv) CSV_OVERRIDE="$2"; shift 2 ;;
+    --csv)
+      [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || { echo "--csv requires a path" >&2; exit 1; }
+      CSV_OVERRIDE="$2"; shift 2 ;;
     --postgres) TEST=1; POSTGRES=1; shift ;;
     --current) CURRENT=1; shift ;;
     --next) NEXT=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown flag: $1"; usage; exit 1 ;;
   esac
-done 2>/dev/null || true
+done
 
 # ------------------------------------------------------------------------------
 # Strict mode + logging + error trap
 # ------------------------------------------------------------------------------
-set -Eeuo pipefail
 if [[ "${DEBUG}" == "1" ]]; then set -x; fi
 if [[ "$useScriptLogging" == "1" || "${useScriptLogging,,}" == "true" ]]; then mkdir -p "${LOG_DIR}"; fi
 
@@ -159,7 +161,7 @@ fi
 [[ -r "${dbCnCli}"             ]] || die "CNCLI DB not readable: ${dbCnCli}"
 
 if [[ -n "${jsonPoolTool}" ]]; then
-  [[ -r "${jsonPoolTool}" ]] || log "WARN: PoolTool config not readable: ${jsonPoolTool} (sending to PoolTool will be skipped)."
+  [[ -r "${jsonPoolTool}" ]] || die "PoolTool config not readable: ${jsonPoolTool}"
 fi
 
 # Prepare output dir for CSV (if set)
@@ -169,17 +171,21 @@ fi
 
 # Versions snapshot
 log "Starting cncli-leaderlog run"
-log "cardano-cli: $(${binCardanoCli} --version | head -n1)"
-log "cncli:       $(${binCnCli} --version 2>/dev/null || echo 'unknown')"
-log "jq:          $(${binJq} --version)"
-log "timeout:     $(${binTimeout} --version | head -n1)"
+cardanoVersion="$("${binCardanoCli}" --version)"
+cncliVersion="$("${binCnCli}" --version)"
+jqVersion="$("${binJq}" --version)"
+timeoutVersion="$("${binTimeout}" --version)"
+log "cardano-cli: ${cardanoVersion%%$'\n'*}"
+log "cncli:       ${cncliVersion}"
+log "jq:          ${jqVersion}"
+log "timeout:     ${timeoutVersion%%$'\n'*}"
 log "timezone:    ${timezone}"
 log "pool:        ${hexStakePool}"
 
 # ------------------------------------------------------------------------------
 # Script internal variables (epoch math)
 # ------------------------------------------------------------------------------
-binCardanoCliMajorVersion="$(${binCardanoCli} --version | head -n1 | awk '{print $2}' | cut -d'.' -f1)"
+binCardanoCliMajorVersion="$(awk '{print $2}' <<<"${cardanoVersion%%$'\n'*}" | cut -d'.' -f1)"
 secondsCardanoStart=$(date +%s -d "2017-09-23 21:44:51 +0000")
 daysCardanoStart=$(( secondsCardanoStart / 86400 ))
 secondsNow=$(date +%s)
@@ -224,16 +230,16 @@ calculateLeaderLog () {
 
   local poolTotalStake poolActiveStake
   if [[ ${binCardanoCliMajorVersion} -eq 1 ]]; then
-    poolTotalStake="$(grep -oP "(?<=    \"pool${3^}\": )\d+(?=,?)" <<<"${poolSnapshot}" || true)"
-    poolActiveStake="$(grep -oP "(?<=    \"active${3^}\": )\d+(?=,?)" <<<"${poolSnapshot}" || true)"
+    poolTotalStake="$(grep -oP "(?<=    \"pool${3^}\": )\d+(?=,?)" <<<"${poolSnapshot}")" || die "Missing pool stake"
+    poolActiveStake="$(grep -oP "(?<=    \"active${3^}\": )\d+(?=,?)" <<<"${poolSnapshot}")" || die "Missing active stake"
   else
     local stakeNumbers
-    stakeNumbers="$(grep -oP "(?<=    \"$3\": )\d+(?=,?)" <<<"${poolSnapshot}" | tr '\n' ' ' || true)"
+    stakeNumbers="$(grep -oP "(?<=    \"$3\": )\d+(?=,?)" <<<"${poolSnapshot}" | tr '\n' ' ')" || die "Missing snapshot stake"
     poolTotalStake="$(cut -d' ' -f1 <<<"${stakeNumbers}")"
     poolActiveStake="$(cut -d' ' -f2 <<<"${stakeNumbers}")"
   fi
 
-  if [[ -z "${poolTotalStake}" || -z "${poolActiveStake}" ]]; then
+  if [[ ! "${poolTotalStake}" =~ ^[0-9]+$ || ! "${poolActiveStake}" =~ ^[0-9]+$ ]]; then
     log "DEBUG poolSnapshot: ${poolSnapshot}"
     die "Could not parse pool stake numbers (total='${poolTotalStake}' active='${poolActiveStake}')"
   fi
@@ -254,7 +260,7 @@ calculateLeaderLog () {
 
   # Validate JSON status
   local status
-  status="$(${binJq} -r '.status // empty' < "${leaderlogJsonFile}" || true)"
+  status="$("${binJq}" -er '.status' < "${leaderlogJsonFile}")" || die "Invalid leaderlog JSON"
   if [[ "${status}" != "ok" ]]; then
     log "Leaderlog status not ok. Full JSON follows:"
     cat "${leaderlogJsonFile}" | tee -a "${LOG_FILE}"
@@ -268,7 +274,7 @@ mailLeaderLog () {
   if [[ -n "${mailLeaderLogTo}" && -r "${leaderlogJsonFile}" ]]; then
     if command -v "${binMail}" >/dev/null 2>&1; then
       log "Mailing leaderlog to ${mailLeaderLogTo}…"
-      if ! { ${binJq} . < "${leaderlogJsonFile}" | "${binMail}" -s "Leaderlog for $1 epoch (${2})" -- "${mailLeaderLogTo}"; }; then
+      if ! { "${binJq}" . < "${leaderlogJsonFile}" | "${binMail}" -s "Leaderlog for $1 epoch (${2})" -- "${mailLeaderLogTo}"; }; then
         die "Mail delivery failed"
       fi
       log "Mail sent"
@@ -281,7 +287,8 @@ mailLeaderLog () {
 }
 
 sendPoolToolSlots () {
-  if [[ -n "${jsonPoolTool}" && -r "${jsonPoolTool}" ]]; then
+  if [[ -n "${jsonPoolTool}" ]]; then
+    [[ -r "${jsonPoolTool}" ]] || die "PoolTool config not readable"
     log "Retrieving CNCLI database status…"
     local statusJson status
     if ! statusJson="$(run_timeout nice -n19 "${binCnCli}" status \
@@ -289,7 +296,7 @@ sendPoolToolSlots () {
         --shelley-genesis "${shelleyGenesisFile}")"; then
       die "cncli status failed"
     fi
-    status="$(${binJq} -r '.status // empty' <<<"${statusJson}")"
+    status="$("${binJq}" -er '.status' <<<"${statusJson}")" || die "Invalid status JSON"
     if [[ "${status}" != "ok" ]]; then
       log "CNCLI status not ok; payload:"
       log "${statusJson}"
@@ -304,13 +311,10 @@ sendPoolToolSlots () {
         --shelley-genesis "${shelleyGenesisFile}" --config "${jsonPoolTool}")"; then
       die "cncli sendslots failed"
     fi
-    if grep -q '"error"' <<<"${result}"; then
-      log "PoolTool send returned error: ${result}"
-      die "sendslots reported error"
-    fi
+    # Successful sendslots has no JSON envelope; exit status is authoritative.
     log "PoolTool sendslots done"
   else
-    log "Not sending slots to PoolTool (config missing/unreadable)"
+    log "Not sending slots to PoolTool (config disabled)"
   fi
 }
 
@@ -327,27 +331,28 @@ writeLeaderSlots () {
 
   mkdir -p "$(dirname "${outCsv}")" || die "Cannot create CSV dir: $(dirname "${outCsv}")"
 
-  local status
-  status="$(${binJq} -r '.status // empty' < "${leaderlogJsonFile}" || true)"
-  if [[ "${status}" == "ok" ]]; then
-    log "Writing leaderlog CSV to ${outCsv}…"
-    if ! ${binJq} -r '.assignedSlots[] | (.at|tostring) + "," + (.slot|tostring) + "," + (.no|tostring)' < "${leaderlogJsonFile}" > "${outCsv}.tmp"; then
-      die "jq extraction failed for CSV"
-    fi
-    mv -f "${outCsv}.tmp" "${outCsv}"
-    log "CSV written at: ${outCsv}"
-  else
-    log "Not writing CSV: leaderlog status='${status}'"
+  local tempCsv
+  "${binJq}" -e '.status == "ok" and (.assignedSlots | type == "array")' < "${leaderlogJsonFile}" >/dev/null || die "Invalid leaderlog CSV source"
+  tempCsv="$(mktemp "${outCsv}.XXXXXXXX.tmp")"
+  if ! "${binJq}" -r '.assignedSlots[] | (.at|tostring) + "," + (.slot|tostring) + "," + (.no|tostring)' < "${leaderlogJsonFile}" > "${tempCsv}"; then
+    rm -f -- "${tempCsv}"
+    die "jq extraction failed for CSV"
   fi
+  if ! mv -f -- "${tempCsv}" "${outCsv}"; then
+    rm -f -- "${tempCsv}"
+    die "Cannot replace CSV"
+  fi
+  log "CSV written at: ${outCsv}"
 }
 
 writeLeaderProm ()
 {
-  if [[ "${leaderPromFile}" != "" && -w `dirname "${leaderPromFile}"` && `jq -r '.status' <<< "$(cat ${leaderlogJsonFile})"` == "ok" ]];
-  then
-    log "Writing total slot count to Prometheus file ${leaderPromFile}…"
-    printf "assigned_blocks_epoch %d\n" `cat ${leaderlogJsonFile} | jq -r '.epochSlots'` > ${leaderPromFile}
-    if [[ $? -eq 0 ]]; then log "Wrote total slot count to ${leaderPromFile}."; else log "Failed to write to ${leaderPromFile}"; fi
+  if [[ -n "${leaderPromFile}" ]]; then
+    local slots
+    "${binJq}" -e '.status == "ok"' < "${leaderlogJsonFile}" >/dev/null || die "Invalid leaderlog status"
+    slots="$("${binJq}" -er '.epochSlots' < "${leaderlogJsonFile}")" || die "Missing slot count"
+    printf "assigned_blocks_epoch %d\n" "${slots}" > "${leaderPromFile}"
+    log "Wrote total slot count to ${leaderPromFile}."
   else
     log "Not writing total slot count to Prometheus file"
   fi
@@ -358,16 +363,18 @@ saveToPostgres()
   if [[ "${saveToPostgres}" != 'none' ]];
   then
     i=0
-    epoch=$(cat "${leaderlogJsonFile}" | jq -r '.epoch')
-    totalSlots=$(cat "${leaderlogJsonFile}" | jq -r '.epochSlots')
+    epoch=$("${binJq}" -er '.epoch' < "${leaderlogJsonFile}")
+    totalSlots=$("${binJq}" -er '.epochSlots' < "${leaderlogJsonFile}")
     log "Saving '${saveToPostgres}' slots to PostgreSQL... "
     psql -qc "delete from leaderlog where epoch=${epoch} and slot is null"
+    rows=$("${binJq}" -c '.assignedSlots[]' < "${leaderlogJsonFile}")
 
     while read -r row;
     do
-      no=$(echo "$row" | jq -r '.no')
-      slot=$(echo "$row" | jq -r '.slot')
-      at=$(echo "$row" | jq -r '.at')
+      [[ -n "$row" ]] || continue
+      no=$("${binJq}" -er '.no' <<<"$row")
+      slot=$("${binJq}" -er '.slot' <<<"$row")
+      at=$("${binJq}" -er '.at' <<<"$row")
       ts=$(date -d "$at" +%s)
 
       if [[ "${saveToPostgres}" == "all" || ( "${saveToPostgres}" == "past" && $ts -lt $secondsNow ) ]];
@@ -378,7 +385,7 @@ saveToPostgres()
         psql -qc "insert into leaderlog (nr, epoch) values (${no}, ${epoch})"
       fi
       i=$((i + 1))
-    done <<< "$(cat "${leaderlogJsonFile}" | jq -c '.assignedSlots[]')"
+    done <<< "${rows}"
 
     log "Saved $i of $totalSlots slots to PostgreSQL."
   else
@@ -390,7 +397,7 @@ saveToPostgres()
 # Test mode: run immediately for CURRENT epoch to validate CSV + email
 # ------------------------------------------------------------------------------
 if [[ "${TEST}" == "1" ]]; then
-  if [[ -n "${POSTGRES:-}" ]]; then
+  if [[ "${POSTGRES}" == "1" ]]; then
   log "TEST mode: checking connection to PostgeSQL only..."
     psql -c '\conninfo'
     exit 0

@@ -1,10 +1,22 @@
 # CNCLI Usage
 
+## Command outcomes
+
+Successful commands exit 0. Operational/configuration/validation failures exit 1 and emit one JSON object with `"status": "error"` and `"errorMessage"`; ping also preserves host/port. Results (JSON, nonce, block hex or CSV as applicable) use stdout and tracing logs use stderr. If writing stdout fails, including a closed pipe, CNCLI diagnoses on stderr and exits 1 without attempting a second JSON document.
+
+A found historical orphan is a valid lookup: validate emits `"status": "orphaned"` and exits 0. A missing block fails. Successful sendslots, snapshot and sync retain their existing output behavior; no invented success JSON envelope is emitted. Consumers must check exit status before parsing results.
+
+`sync --no-service` returns its first failure and succeeds only when it reaches and commits the advertised tip (including an already-at-tip intersection). Service sync retries transport failures, not storage/configuration/integrity errors.
+
+Sendtip reports the latest observed tip best-effort. While HTTP is in flight, newer updates replace older pending updates; rollback/disconnect clears stale state. An already-sent HTTP request cannot be retracted. HTTP failures wait for the next header, without an outbox or obsolete-tip retries.
+
+SQLite is the concurrent sync + leaderlog deployment default. Redb supports serialized/offline operations; stop sync and use a backend-consistent disposable copy when scheduling redb leaderlog. Never force-unlock or copy a live redb file.
+
 ## Commands & Examples
 
 ### Ping Command
 
-This command validates that the remote server is on the given network and returns its response time.
+This command validates that the remote server is on the given network and returns its response time. `--timeout-seconds` is one deadline covering DNS lookup, TCP connection and handshake, not a separate allowance for each stage. No addresses, rejection, a query reply or a silent peer fails with exit 1.
 
 #### Show Ping Help
 
@@ -23,7 +35,7 @@ OPTIONS:
     -h, --host <host>                          cardano-node hostname to connect to
         --network-magic <network-magic>        network magic. [default: 764824073]
     -p, --port <port>                          cardano-node port [default: 3001]
-    -t, --timeout-seconds <timeout-seconds>    connect timeout in seconds [default: 2]
+    -t, --timeout-seconds <timeout-seconds>    whole DNS/connect/handshake deadline in seconds [default: 2]
 ```
 
 #### Example Mainnet ping using defaults
@@ -331,24 +343,7 @@ $ cncli nonce --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genes
 
 This command calculates a stake pool's expected slot list. ```prev``` and ```current``` logs are available as long as you have a synchronized database. ```next``` logs are only available 1.5 days before the end of the epoch. You need to use ```.poolStakeMark``` and ```.activeStakeMark``` for ```next```, ```.poolStakeSet``` and ```.activeStakeSet``` for ```current```, ```.poolStakeGo``` and ```.activeStakeGo``` for ```prev```.
 
-Example usage with the ```stake-snapshot```:
-
-```bash
-echo "BCSH"
-SNAPSHOT=$(/home/westbam/.local/bin/cardano-cli query stake-snapshot --stake-pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --mainnet)
-/home/westbam/.cargo/bin/cncli sync --host 127.0.0.1 --port 6000 --no-service
-POOL_STAKE=$(echo "$SNAPSHOT" | grep -oP '(?<=    "poolStakeMark": )\d+(?=,?)')
-ACTIVE_STAKE=$(echo "$SNAPSHOT" | grep -oP '(?<=    "activeStakeMark": )\d+(?=,?)')
-BCSH=`/home/westbam/.cargo/bin/cncli leaderlog --pool-id 00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114 --pool-vrf-skey ./bcsh.vrf.skey --byron-genesis /home/westbam/haskell/local/byron-genesis.json --shelley-genesis /home/westbam/haskell/local/shelley-genesis.json --pool-stake $POOL_STAKE --active-stake $ACTIVE_STAKE --consensus praos --ledger-set next`
-
-EPOCH=`jq .epoch <<< $BCSH`
-echo "\`Epoch $EPOCH\` 🧙🔮:"
-
-SLOTS=`jq .epochSlots <<< $BCSH`
-IDEAL=`jq .epochSlotsIdeal <<< $BCSH`
-PERFORMANCE=`jq .maxPerformance <<< $BCSH`
-echo "\`BCSH  - $SLOTS \`🎰\`,  $PERFORMANCE% \`🍀max, \`$IDEAL\` 🧱ideal"
-```
+For executable stake-snapshot examples, use the tracked [next](scripts/cncli-leaderlog-next.sh), [current](scripts/cncli-leaderlog-current.sh), and [previous](scripts/cncli-leaderlog-prev.sh) wrappers. Set the operator pool ID, key/genesis/socket paths and binary/path overrides documented in [INSTALL.md](INSTALL.md#helper-scripts). They check snapshot/sync/leaderlog exit status and JSON before printing a schedule; do not continue calculations after a failed command.
 
 **Note**: to automate calculating your assigned slots and sending them to [PoolTool](https://pooltool.io/), please refer to the [installation guide](INSTALL.md).
 
@@ -550,18 +545,9 @@ OPTIONS:
 $ cncli sendslots --byron-genesis ~/haskell/local/byron-genesis.json --shelley-genesis ~/haskell/local/shelley-genesis.json
 ```
 
-##### Sendslots success Result
+##### Sendslots success result
 
-```text
-2020-12-01T03:34:33.883Z INFO  cncli::nodeclient::leaderlog > Sending: {"apiKey":"d67822d0-0008-4eb5-9e1e-9c30bdb8d82d","poolId":"00beef0a9be2f6d897ed24a613cf547bb20cd282a04edfc53d477114","epoch":232,"slotQty":25,"hash":"d15b6c8d4c81fe48cff0650c5b59ab20da9765374c58c933dacd058eb38bb670"}
-2020-12-01T03:34:33.969Z INFO  cncli::nodeclient::leaderlog > Pooltool Response: {"statusCode":200,"headers":{"Content-Type":"application/json","Access-Control-Allow-Origin":"*"},"body":"{\"success\":true,\"message\":\"We have updated your assigned slots for epoch 232 to be 25 with a hash of d15b6c8d4c81fe48cff0650c5b59ab20da9765374c58c933dacd058eb38bb670.  You must provide an array of slots that matches this hash to have your performance counted.\"}"}
-2020-12-01T03:34:33.971Z INFO  cncli::nodeclient::leaderlog > Sending: {"apiKey":"d67822d0-0008-4eb5-9e1e-9c30bdb8d82d","poolId":"00beef8710427e328a29555283c74b202b40bec9a62630a9f03b1e18","epoch":232,"slotQty":24,"hash":"97655646efcfe8a569508d70e6fc46135488fc5600bb95233c3f005106a7f5a3"}
-2020-12-01T03:34:34.051Z INFO  cncli::nodeclient::leaderlog > Pooltool Response: {"statusCode":200,"headers":{"Content-Type":"application/json","Access-Control-Allow-Origin":"*"},"body":"{\"success\":true,\"message\":\"We have updated your assigned slots for epoch 232 to be 24 with a hash of 97655646efcfe8a569508d70e6fc46135488fc5600bb95233c3f005106a7f5a3.  You must provide an array of slots that matches this hash to have your performance counted.\"}"}
-2020-12-01T03:34:34.053Z INFO  cncli::nodeclient::leaderlog > Sending: {"apiKey":"d67822d0-0008-4eb5-9e1e-9c30bdb8d82d","poolId":"00beef9385526062d41cd7293746048c6a9a13ab8b591920cf40c706","epoch":232,"slotQty":54,"hash":"f12dff6eb3786d04cb2d7f666e92876faa7d5f2a26de77d3affc1aaffa6d81a5"}
-2020-12-01T03:34:34.149Z INFO  cncli::nodeclient::leaderlog > Pooltool Response: {"statusCode":200,"headers":{"Content-Type":"application/json","Access-Control-Allow-Origin":"*"},"body":"{\"success\":true,\"message\":\"We have updated your assigned slots for epoch 232 to be 54 with a hash of f12dff6eb3786d04cb2d7f666e92876faa7d5f2a26de77d3affc1aaffa6d81a5.  You must provide an array of slots that matches this hash to have your performance counted.\"}"}
-2020-12-01T03:34:34.150Z INFO  cncli::nodeclient::leaderlog > Sending: {"apiKey":"d67822d0-0008-4eb5-9e1e-9c30bdb8d82d","poolId":"00beef284975ef87856c1343f6bf50172253177fdebc756524d43fc1","epoch":232,"slotQty":42,"hash":"30c92d028c99af5ca51dd58293a575b14671d56cd6c846bd1c21126a2addd9ac"}
-2020-12-01T03:34:34.222Z INFO  cncli::nodeclient::leaderlog > Pooltool Response: {"statusCode":200,"headers":{"Content-Type":"application/json","Access-Control-Allow-Origin":"*"},"body":"{\"success\":true,\"message\":\"We have updated your assigned slots for epoch 232 to be 42 with a hash of 30c92d028c99af5ca51dd58293a575b14671d56cd6c846bd1c21126a2addd9ac.  You must provide an array of slots that matches this hash to have your performance counted.\"}"}
-```
+Exit status is 0 with no stdout success envelope. Non-secret tracing events on stderr contain operation, full pool ID, epoch, HTTP status, duration and outcome. Requests, API keys and remote response bodies are never logged. Missing slots, configuration errors and HTTP rejection fail with exit 1; sending stops at the first failed pool, without retries or undoing already accepted sends.
 
 ### Sign Command
 

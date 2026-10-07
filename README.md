@@ -6,11 +6,17 @@ A community-based ```cardano-node``` CLI tool. It's a collection of utilities to
 
 ## Installation
 
-To install CNCLI using either the release binaries or compiling the Rust code, or to update to a newer version, refer to the [installation guide](INSTALL.md). This guide will also help you setup ```systemd``` services for ```cncli sync``` and ```cncli sendtip```, along with a set of ```cronjobs``` and related helper shell scripts for [PoolTool](https://pooltool.io/) integrations.
+To install CNCLI using release binaries or compile the Rust code, or update to a newer version, refer to the [installation guide](INSTALL.md). It covers staged checksum/attestation verification and least-authority `systemd` services for sync, sendtip and the leaderlog timer.
 
 ## Usage & Examples
 
 For a list of CNCLI commands and related usage examples, please refer to the [usage guide](USAGE.md).
+
+Results are written to stdout; tracing logs go to stderr. Operational/validation failures return exit 1 and one JSON error (unless stdout itself failed). Found orphaned blocks remain successful validation results. Shell integrations must check the exit status, not search output for `"error"`; successful sendslots has no success envelope.
+
+Ping's timeout bounds DNS, connection and handshake together. `sync --no-service` succeeds only after reaching/committing the tip and returns its first failure. Sendtip is best-effort latest-tip reporting: newer pending tips replace older ones, rollback/disconnect invalidates stale tips, and HTTP failures wait for the next header rather than replaying a backlog.
+
+Use SQLite for concurrent sync and leaderlog. Redb remains supported for serialized/offline operations; it is not a shared live writer. See [deployment guidance](INSTALL.md#automation).
 
 ## Contributors
 
