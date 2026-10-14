@@ -424,7 +424,12 @@ async fn seed(db: &Path, redb: bool, headers: &[Header; 3]) {
         "newly reached tip must send Done"
     );
     let output = child.output().await;
-    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert!(
+        output.status.success(),
+        "stdout={}; stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(output.stdout.is_empty());
     peer.close().await;
     for header in headers {
