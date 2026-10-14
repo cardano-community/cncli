@@ -8,6 +8,8 @@ A found historical orphan is a valid lookup: validate emits `"status": "orphaned
 
 `sync --no-service` returns its first failure and succeeds only when it reaches and commits the advertised tip (including an already-at-tip intersection). Service sync retries transport failures, not storage/configuration/integrity errors.
 
+Before successful no-service teardown, CNCLI waits up to five seconds for a keepalive round trip queued after chain-sync `Done`. This confirms `Done` was written before the transport is aborted; a failed or timed-out round trip is a command failure.
+
 Sendtip reports the latest observed tip best-effort. While HTTP is in flight, newer updates replace older pending updates; rollback/disconnect clears stale state. An already-sent HTTP request cannot be retracted. HTTP failures wait for the next header, without an outbox or obsolete-tip retries.
 
 SQLite is the concurrent sync + leaderlog deployment default. Redb supports serialized/offline operations; stop sync and use a backend-consistent disposable copy when scheduling redb leaderlog. Never force-unlock or copy a live redb file.

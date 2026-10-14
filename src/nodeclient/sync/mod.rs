@@ -428,7 +428,50 @@ impl Drop for SessionCleanup {
     }
 }
 
-async fn connect_peer(host: &str, port: u16, network_magic: u64) -> Result<PeerClient, Error> {
+struct FinishKeepAlive {
+    request: tokio::sync::oneshot::Sender<()>,
+    acknowledged: tokio::sync::oneshot::Receiver<()>,
+}
+
+fn spawn_keepalive(
+    mut client: keepalive::Client,
+    finish_on_tip: bool,
+) -> (pallas_network::facades::KeepAliveHandle, Option<FinishKeepAlive>) {
+    let interval = Duration::from_secs(DEFAULT_KEEP_ALIVE_INTERVAL_SEC);
+    if !finish_on_tip {
+        return (KeepAliveLoop::client(client, interval).spawn(), None);
+    }
+    let (request, mut requested) = tokio::sync::oneshot::channel();
+    let (acknowledge, acknowledged) = tokio::sync::oneshot::channel();
+    let handle = tokio::spawn(async move {
+        let mut ticks = tokio::time::interval(interval);
+        loop {
+            tokio::select! {
+                _ = ticks.tick() => {
+                    client.keepalive_roundtrip().await.map_err(pallas_network::facades::Error::KeepAliveClientLoop)?;
+                }
+                result = &mut requested => {
+                    if result.is_err() {
+                        return KeepAliveLoop::run_client(client, interval).await;
+                    }
+                    // The shared FIFO mux writes Done before this request. Its response
+                    // proves Done left the queue before transport cancellation.
+                    client.keepalive_roundtrip().await.map_err(pallas_network::facades::Error::KeepAliveClientLoop)?;
+                    let _ = acknowledge.send(());
+                    return std::future::pending().await;
+                }
+            }
+        }
+    });
+    (handle, Some(FinishKeepAlive { request, acknowledged }))
+}
+
+async fn connect_peer(
+    host: &str,
+    port: u16,
+    network_magic: u64,
+    finish_on_tip: bool,
+) -> Result<(PeerClient, Option<FinishKeepAlive>), Error> {
     let bearer = tokio::time::timeout(FIVE_SECS, async {
         let addresses = tokio::net::lookup_host((host, port)).await?;
         let mut last_error = std::io::Error::new(std::io::ErrorKind::NotFound, "peer resolved to no addresses");
@@ -469,17 +512,21 @@ async fn connect_peer(host: &str, port: u16, network_magic: u64) -> Result<PeerC
         cleanup.abort().await;
         return Err(error);
     }
-    Ok(PeerClient {
-        plexer: cleanup
-            .plexer
-            .take()
-            .ok_or_else(|| Error::Reporter("missing peer transport".into()))?,
-        keepalive: KeepAliveLoop::client(keepalive, Duration::from_secs(DEFAULT_KEEP_ALIVE_INTERVAL_SEC)).spawn(),
-        chainsync: chainsync::Client::new(cs_channel),
-        blockfetch: blockfetch::Client::new(bf_channel),
-        txsubmission: txsubmission::Client::new(txsub_channel),
-        peersharing: peersharing::Client::new(peersharing_channel),
-    })
+    let (keepalive, finish) = spawn_keepalive(keepalive, finish_on_tip);
+    Ok((
+        PeerClient {
+            plexer: cleanup
+                .plexer
+                .take()
+                .ok_or_else(|| Error::Reporter("missing peer transport".into()))?,
+            keepalive,
+            chainsync: chainsync::Client::new(cs_channel),
+            blockfetch: blockfetch::Client::new(bf_channel),
+            txsubmission: txsubmission::Client::new(txsub_channel),
+            peersharing: peersharing::Client::new(peersharing_channel),
+        },
+        finish,
+    ))
 }
 
 fn retryable(error: &Error) -> bool {
@@ -527,7 +574,11 @@ async fn stop_peer(
     }
 }
 
-async fn chain_session(peer: PeerClient, observer: &mut ChainObserver) -> Result<(), Error> {
+async fn chain_session(
+    peer: PeerClient,
+    finish: Option<FinishKeepAlive>,
+    observer: &mut ChainObserver,
+) -> Result<(), Error> {
     let PeerClient {
         plexer,
         mut keepalive,
@@ -539,13 +590,29 @@ async fn chain_session(peer: PeerClient, observer: &mut ChainObserver) -> Result
         keepalive: Some(keepalive.abort_handle()),
     };
     let mut keepalive_consumed = false;
-    let result = tokio::select! {
+    let mut result = tokio::select! {
         result = do_chainsync(&mut chainsync, observer) => result,
         result = &mut keepalive => {
             keepalive_consumed = true;
             keepalive_result(result)
         },
     };
+    if result.is_ok() {
+        if let Some(finish) = finish {
+            result = async {
+                finish
+                    .request
+                    .send(())
+                    .map_err(|_| Error::Reporter("keepalive stopped before Done delivery".into()))?;
+                tokio::time::timeout(FIVE_SECS, finish.acknowledged)
+                    .await
+                    .map_err(|_| Error::Timeout("Done delivery"))?
+                    .map_err(|_| Error::Reporter("keepalive failed before Done delivery".into()))?;
+                Ok(())
+            }
+            .await;
+        }
+    }
     let result = stop_peer(cleanup, keepalive, keepalive_consumed, result).await;
     observer.disconnected();
     result
@@ -572,8 +639,8 @@ async fn chain_loop(
     no_service: bool,
 ) -> Result<(), Error> {
     loop {
-        let result = match connect_peer(host, port, network_magic).await {
-            Ok(peer) => chain_session(peer, observer).await,
+        let result = match connect_peer(host, port, network_magic, no_service).await {
+            Ok((peer, finish)) => chain_session(peer, finish, observer).await,
             Err(error) => Err(error),
         };
         match result {
@@ -636,13 +703,13 @@ pub(crate) async fn sendtip(
     let reporter = notifier.run(receiver);
     tokio::pin!(reporter);
     loop {
-        let connection = connect_peer(&host, port, MAINNET_MAGIC);
+        let connection = connect_peer(&host, port, MAINNET_MAGIC, false);
         tokio::pin!(connection);
         let connection = tokio::select! {
             result = &mut connection => result,
             result = &mut reporter => {
                 // Finish the bounded handshake so its running plexer is never detached.
-                if let Ok(peer) = connection.await {
+                if let Ok((peer, _)) = connection.await {
                     let cleanup = SessionCleanup { plexer: Some(peer.plexer), keepalive: Some(peer.keepalive.abort_handle()) };
                     return stop_peer(cleanup, peer.keepalive, false, result).await;
                 }
@@ -650,7 +717,7 @@ pub(crate) async fn sendtip(
             }
         };
         let result = match connection {
-            Ok(peer) => {
+            Ok((peer, _)) => {
                 let PeerClient {
                     plexer,
                     mut keepalive,
