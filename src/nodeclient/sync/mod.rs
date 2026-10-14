@@ -400,7 +400,7 @@ async fn do_chainsync(client: &mut chainsync::N2NClient, observer: &mut ChainObs
     }
 }
 
-// ponytail: locked Pallas 1.3.0 abort never suspends; replace this guard if abort gains an await.
+// ponytail: pinned Pallas d1dfe10e abort never suspends; replace this guard if abort gains an await.
 // One poll aborts both plexer tasks when the owning command future is cancelled.
 struct SessionCleanup {
     plexer: Option<pallas_network::multiplexer::RunningPlexer>,

@@ -8,6 +8,14 @@ A community-based ```cardano-node``` CLI tool. It's a collection of utilities to
 
 To install CNCLI using release binaries or compile the Rust code, or update to a newer version, refer to the [installation guide](INSTALL.md). It covers staged checksum/attestation verification and least-authority `systemd` services for sync, sendtip and the leaderlog timer.
 
+All Pallas dependencies are pinned to upstream commit
+[`d1dfe10e2bac83c7d3b5371a72814354a5acd1ba`](https://github.com/txpipe/pallas/commit/d1dfe10e2bac83c7d3b5371a72814354a5acd1ba)
+for the Cardano-node fixed-point arithmetic fix, pending a release containing it.
+Cargo resolves both direct and transitive Pallas crates from this exact revision;
+no sibling Pallas checkout is required. CNCLI pins stable Rust 1.98.1;
+Pallas retains its own toolchain and MSRV policy.
+
+
 ## Usage & Examples
 
 For a list of CNCLI commands and related usage examples, please refer to the [usage guide](USAGE.md).

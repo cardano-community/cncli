@@ -10,10 +10,10 @@ build = "build.rs"
 [dependencies]
 bech32 = "0.12.0"
 bincode = "2"
-pallas-crypto = "1.2"
-pallas-math = "1.2"
-pallas-network = "1.2"
-pallas-traverse = "1.2"
+pallas-crypto = { git = "https://github.com/txpipe/pallas", rev = "d1dfe10e2bac83c7d3b5371a72814354a5acd1ba" }
+pallas-math = { git = "https://github.com/txpipe/pallas", rev = "d1dfe10e2bac83c7d3b5371a72814354a5acd1ba" }
+pallas-network = { git = "https://github.com/txpipe/pallas", rev = "d1dfe10e2bac83c7d3b5371a72814354a5acd1ba" }
+pallas-traverse = { git = "https://github.com/txpipe/pallas", rev = "d1dfe10e2bac83c7d3b5371a72814354a5acd1ba" }
 vrf_dalek = { git = "https://github.com/txpipe/vrf", rev = "044b45a1a919ba9d9c2471fc5c4d441f13086676" }
 chrono = "0.4.45"
 chrono-tz = "0.10"
