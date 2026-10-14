@@ -433,12 +433,42 @@ impl RedbBlockStore {
                 }
             };
             let mut updates = Vec::new();
-            for entry in chain_table.iter()? {
-                let (key, record) = entry?;
-                let mut record = record.value();
-                if !record.orphaned && target_number.is_none_or(|number| record.block_number > number) {
-                    record.orphaned = true;
-                    updates.push((key.value(), record));
+            match point {
+                Point::Specific(slot, _) => {
+                    let index = write_tx.open_multimap_table(CHAIN_TABLE_SLOT_INDEX)?;
+                    let slots = index.range::<u64>((std::ops::Bound::Excluded(*slot), std::ops::Bound::Unbounded))?;
+                    for entry in slots {
+                        let (slot, keys) = entry?;
+                        let mut active = None;
+                        for key in keys {
+                            let key = key?.value();
+                            let record = chain_table
+                                .get(key)?
+                                .ok_or_else(|| Error::DataIntegrity("Slot index references a missing block".into()))?
+                                .value();
+                            if record.slot_number != slot.value() {
+                                return Err(Error::DataIntegrity("Slot index does not match block slot".into()));
+                            }
+                            if !record.orphaned && active.replace((key, record)).is_some() {
+                                return Err(Error::DataIntegrity("Multiple active blocks at one slot".into()));
+                            }
+                        }
+                        let Some((key, mut record)) = active else { continue };
+                        if !record.orphaned && target_number.is_none_or(|number| record.block_number > number) {
+                            record.orphaned = true;
+                            updates.push((key, record));
+                        }
+                    }
+                }
+                Point::Origin => {
+                    for entry in chain_table.iter()? {
+                        let (key, record) = entry?;
+                        let mut record = record.value();
+                        if !record.orphaned && target_number.is_none_or(|number| record.block_number > number) {
+                            record.orphaned = true;
+                            updates.push((key.value(), record));
+                        }
+                    }
                 }
             }
             for (key, record) in updates {

@@ -22,10 +22,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install pinned nightly toolchain
+      - name: Install pinned stable toolchain
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action
         with:
-          toolchain: nightly-2026-09-25
+          toolchain: 1.98.1
           targets: ${{ matrix.job.target }}
           components: rustfmt, clippy
 
@@ -130,10 +130,10 @@ jobs:
       - name: Checkout sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install pinned nightly toolchain
+      - name: Install pinned stable toolchain
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable action
         with:
-          toolchain: nightly-2026-09-25
+          toolchain: 1.98.1
 
       - name: Download all target artifacts
         uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
