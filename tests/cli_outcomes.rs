@@ -255,7 +255,6 @@ async fn no_service_returns_first_connection_failure() {
     let port = listener.local_addr().unwrap().port();
     drop(listener);
     for redb in [false, true] {
-        let started = Instant::now();
         error(
             &sync(
                 &dir.0.join(if redb { "failed.redb" } else { "failed.db" }),
@@ -266,10 +265,28 @@ async fn no_service_returns_first_connection_failure() {
             .output()
             .await,
         );
-        assert!(
-            started.elapsed() < Duration::from_secs(3),
-            "no-service retried a failed connection"
+    }
+}
+
+#[tokio::test]
+async fn no_service_does_not_reconnect_after_handshake_transport_failure() {
+    let dir = FixtureDir::new();
+    for redb in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let process = sync(
+            &dir.0.join(if redb { "disconnected.redb" } else { "disconnected.db" }),
+            listener.local_addr().unwrap().port(),
+            redb,
+            true,
         );
+        // Fail the first handshake while retaining the listener to observe retries.
+        let (stream, _) = bounded(listener.accept()).await.unwrap();
+        drop(stream);
+        tokio::select! {
+            biased;
+            retry = listener.accept() => panic!("no-service reconnected after transport failure: {retry:?}"),
+            output = process.output() => { error(&output); }
+        }
     }
 }
 

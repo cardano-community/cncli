@@ -54,6 +54,11 @@ cargo clippy -- -D warnings
 ```bash
 cargo test
 ```
+
+The CLI outcome suite uses loopback peers to verify `sync --no-service` exits on
+connection failure and does not reconnect after a dropped handshake. Retry detection
+observes connections rather than relying on platform-dependent connection-refusal timing.
+
 ### Leaderlog node parity
 
 `tests/reference/leaderlog` builds an isolated oracle against the recorded ledger package
