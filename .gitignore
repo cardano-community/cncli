@@ -1,4 +1,6 @@
 /target
+/dist-newstyle
+__pycache__/
 .idea
 *.db*
 *.redb*

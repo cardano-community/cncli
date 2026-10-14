@@ -8,12 +8,12 @@ use crate::nodeclient::sync::pooltool::PooltoolConfig;
 use crate::LedgerSet;
 use chrono::{DateTime, NaiveDateTime, TimeDelta, TimeZone, Utc};
 use chrono_tz::Tz;
+use dashu_int::IBig;
 use pallas_crypto::hash::{Hash, Hasher};
-use vrf_dalek::vrf03::{PublicKey03, SecretKey03, VrfProof03};
+use rational::ExactRatio;
 
 use pallas_crypto::nonce::generate_epoch_nonce;
-use pallas_math::math::{ExpOrdering, FixedDecimal, FixedPrecision, DEFAULT_PRECISION};
-use rayon::prelude::*;
+use pallas_math::math::FixedDecimal;
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_number_from_string;
 use std::fs::File;
@@ -22,10 +22,12 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
 use thiserror::Error;
-use tracing::{debug, error, info, span, trace, Level};
+use tracing::{debug, error, info};
 
 mod deserialize;
+mod election;
 mod ledgerstate;
+mod rational;
 
 #[derive(Error, Debug)]
 pub enum Error {
@@ -102,10 +104,57 @@ struct BlockVersionData {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ShelleyGenesis {
-    active_slots_coeff: f64,
+    #[serde(deserialize_with = "deserialize_active_slots_coeff")]
+    active_slots_coeff: ExactRatio,
     network_magic: u32,
     slot_length: u64,
     epoch_length: u64,
+}
+
+fn deserialize_active_slots_coeff<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<ExactRatio, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    let ratio = match value {
+        serde_json::Value::Number(number) => ExactRatio::from_text(&number.to_string()),
+        serde_json::Value::Object(object) => {
+            let parse_integer = |name| match object.get(name) {
+                Some(serde_json::Value::Number(number)) => {
+                    let text = number.to_string();
+                    let digits = text.strip_prefix('-').unwrap_or(&text);
+                    if digits.is_empty() || !digits.bytes().all(|c| c.is_ascii_digit()) {
+                        return Err("Rational JSON parts must be integers".to_string());
+                    }
+                    IBig::from_str(&text).map_err(|_| "Invalid rational JSON integer".to_string())
+                }
+                _ => Err("Rational JSON parts must be integers".to_string()),
+            };
+            parse_integer("numerator").and_then(|numerator| {
+                parse_integer("denominator").and_then(|denominator| ExactRatio::from_parts(numerator, denominator))
+            })
+        }
+        _ => Err("Active slots coefficient must be a number or rational object".to_string()),
+    }
+    .map_err(serde::de::Error::custom)?;
+    if ratio.numerator == 0 {
+        return Err(serde::de::Error::custom("Active slots coefficient must be positive"));
+    }
+    Ok(ratio)
+}
+
+fn slot_range_error() -> Error {
+    Error::Leaderlog("Leader schedule arithmetic exceeds supported slot range".to_string())
+}
+
+fn stability_window(k: u64, multiplier: u64, f: &ExactRatio) -> Result<u64, Error> {
+    if f.numerator == 0 {
+        return Err(Error::Leaderlog(
+            "Invalid leader schedule stake or probability parameters".to_string(),
+        ));
+    }
+    let numerator = IBig::from(k) * IBig::from(multiplier) * IBig::from(f.denominator);
+    let denominator = IBig::from(f.numerator);
+    let quotient = &numerator / &denominator;
+    let ceiling = quotient + IBig::from(u8::from(&numerator % &denominator != IBig::ZERO));
+    u64::try_from(&ceiling).map_err(|_| slot_range_error())
 }
 
 #[derive(Debug, Deserialize)]
@@ -256,152 +305,14 @@ fn slot_to_timestamp(
     tz.from_utc_datetime(&slot_time).to_rfc3339()
 }
 
-pub fn is_overlay_slot(first_slot_of_epoch: &u64, current_slot: &u64, d: &f64) -> bool {
-    let d = FixedDecimal::from((*d * 1000.0).round() as u64) / FixedDecimal::from(1000u64);
-    trace!("d: {}", &d);
-    let diff_slot: FixedDecimal = FixedDecimal::from(current_slot - first_slot_of_epoch);
-    trace!("diff_slot: {}", &diff_slot);
-    let diff_slot_inc: FixedDecimal = &diff_slot + &FixedDecimal::from(1u64);
-    trace!("diff_slot_inc: {}", &diff_slot_inc);
-    let left = (&d * &diff_slot).ceil();
-    trace!("left: {}", &left);
-    let right = (&d * &diff_slot_inc).ceil();
-    trace!("right: {}", &right);
-    trace!("is_overlay_slot: {} - {}", current_slot, left < right);
-    left < right
-}
-
-//
-// The universal constant nonce. The blake2b hash of the 8 byte long value of 1
-// 12dd0a6a7d0e222a97926da03adb5a7768d31cc7c5c2bd6828e14a7d25fa3a60
-// Sometimes called seedL in the haskell code
-//
-const UC_NONCE: [u8; 32] = [
-    0x12, 0xdd, 0x0a, 0x6a, 0x7d, 0x0e, 0x22, 0x2a, 0x97, 0x92, 0x6d, 0xa0, 0x3a, 0xdb, 0x5a, 0x77, 0x68, 0xd3, 0x1c,
-    0xc7, 0xc5, 0xc2, 0xbd, 0x68, 0x28, 0xe1, 0x4a, 0x7d, 0x25, 0xfa, 0x3a, 0x60,
-];
-
-fn mk_seed(slot: u64, eta0: &[u8]) -> Vec<u8> {
-    trace!("mk_seed() start slot {}", slot);
-    let mut hasher = Hasher::<256>::new();
-    hasher.input(&slot.to_be_bytes());
-    hasher.input(eta0);
-    let slot_to_seed = hasher.finalize();
-
-    UC_NONCE
-        .iter()
-        .enumerate()
-        .map(|(i, byte)| byte ^ slot_to_seed[i])
-        .collect()
-}
-
-fn mk_input_vrf(slot: u64, eta0: &[u8]) -> Vec<u8> {
-    trace!("mk_seed() start slot {}", slot);
-    let mut hasher = Hasher::<256>::new();
-    hasher.input(&slot.to_be_bytes());
-    hasher.input(eta0);
-    hasher.finalize().to_vec()
-}
-
-fn vrf_eval_certified(seed: &[u8], pool_vrf_skey: &[u8]) -> Result<Hash<64>, Error> {
-    let vrf_skey: &[u8; 32] = pool_vrf_skey
-        .get(..32)
-        .and_then(|bytes| bytes.try_into().ok())
-        .ok_or_else(|| Error::Leaderlog("VRF signing key must contain at least 32 bytes".to_string()))?;
-    let seed = seed
-        .get(..32)
-        .ok_or_else(|| Error::Leaderlog("VRF seed must contain at least 32 bytes".to_string()))?;
-    let vrf_skey = SecretKey03::from_bytes(vrf_skey);
-    let vrf_public_key = PublicKey03::from(&vrf_skey);
-    let certified_proof = VrfProof03::generate(&vrf_public_key, &vrf_skey, seed);
-    let certified_proof_hash = Hash::<64>::from(certified_proof.proof_to_hash());
-    trace!("certified_proof_hash: {}", hex::encode(certified_proof_hash));
-    Ok(certified_proof_hash)
-}
-
-fn vrf_leader_value(raw_vrf: &[u8]) -> Result<FixedDecimal, Error> {
-    let mut hasher = Hasher::<256>::new();
-    hasher.input(vec![0x4C_u8].as_slice()); // "L"
-    hasher.input(raw_vrf);
-    Ok(FixedDecimal::from(hasher.finalize().as_slice()))
-}
-
-fn leader_from_ordering(ordering: ExpOrdering) -> Result<bool, Error> {
-    match ordering {
-        ExpOrdering::LT => Ok(true),
-        ExpOrdering::GT => Ok(false),
-        ExpOrdering::UNKNOWN => Err(Error::Leaderlog("Uncertain slot leader comparison".to_string())),
-    }
-}
-
-// Determine if our pool is a slot leader for this given slot
-// @param slot The slot to check
-// @param sigma The controlled stake proportion for the pool
-// @param eta0 The epoch nonce value
-// @param pool_vrf_skey The vrf signing key for the pool
-// @param cert_nat_max The value 2^256
-// @param c ln(1-activeSlotsCoeff) - usually ln(1-0.05)
-fn is_slot_leader_praos(
-    slot: u64,
-    sigma: &FixedDecimal,
-    eta0: &[u8],
-    pool_vrf_skey: &[u8],
-    cert_nat_max: &FixedDecimal,
-    c: &FixedDecimal,
-) -> Result<bool, Error> {
-    let seed: Vec<u8> = mk_input_vrf(slot, eta0);
-    let cert_nat: Hash<64> = vrf_eval_certified(&seed, pool_vrf_skey)?;
-    let cert_leader_vrf: FixedDecimal = vrf_leader_value(cert_nat.as_slice())?;
-    let denominator = cert_nat_max - &cert_leader_vrf;
-    let recip_q: FixedDecimal = cert_nat_max / &denominator;
-    let x: FixedDecimal = -(sigma * c);
-    let ordering = x.exp_cmp(1000, 3, &recip_q);
-
-    let span = span!(Level::TRACE, "is_slot_leader_praos");
-    let _enter = span.enter();
-    trace!("is_slot_leader_praos: {}", slot);
-    trace!("seed: {}", hex::encode(&seed));
-    trace!("cert_nat: {}", &cert_nat);
-    trace!("cert_leader_vrf: {}", &cert_leader_vrf);
-    trace!("recip_q: {}", &recip_q);
-    trace!("c: {}", c);
-    trace!("x: {}", &x);
-
-    leader_from_ordering(ordering.estimation)
-}
-
-// Determine if our pool is a slot leader for this given slot
-// @param slot The slot to check
-// @param sigma The controlled stake proportion for the pool
-// @param eta0 The epoch nonce value
-// @param pool_vrf_skey The vrf signing key for the pool
-// @param cert_nat_max The value 2^512
-// @param c 1-activeSlotsCoeff - usually 0.95
-fn is_slot_leader_tpraos(
-    slot: u64,
-    sigma: &FixedDecimal,
-    eta0: &[u8],
-    pool_vrf_skey: &[u8],
-    cert_nat_max: &FixedDecimal,
-    c: &FixedDecimal,
-) -> Result<bool, Error> {
-    let seed: Vec<u8> = mk_seed(slot, eta0);
-    let cert_nat: FixedDecimal = FixedDecimal::from(vrf_eval_certified(&seed, pool_vrf_skey)?.as_slice());
-    let denominator = cert_nat_max - &cert_nat;
-    let recip_q: FixedDecimal = cert_nat_max / &denominator;
-    let x: FixedDecimal = -(sigma * c);
-    let ordering = x.exp_cmp(1000, 3, &recip_q);
-
-    let span = span!(Level::TRACE, "is_slot_leader_tpraos");
-    let _enter = span.enter();
-    trace!("is_slot_leader: {}", slot);
-    trace!("seed: {}", hex::encode(&seed));
-    trace!("cert_nat: {}", &cert_nat);
-    trace!("recip_q: {}", &recip_q);
-    trace!("c: {}", c);
-    trace!("x: {}", &x);
-
-    leader_from_ordering(ordering.estimation)
+fn is_overlay_slot(offset: u64, d: &ExactRatio) -> bool {
+    let denominator = u128::from(d.denominator);
+    let numerator = u128::from(d.numerator);
+    let ceiling = |offset: u128| {
+        let product = offset * numerator;
+        product / denominator + u128::from(!product.is_multiple_of(denominator))
+    };
+    ceiling(u128::from(offset)) < ceiling(u128::from(offset) + 1)
 }
 
 fn get_current_slot(
@@ -454,7 +365,7 @@ pub(crate) fn calculate_leader_logs(
     shelley_genesis: &Path,
     pool_stake: &u64,
     active_stake: &u64,
-    d: &f64,
+    d: &str,
     extra_entropy: &Option<String>,
     ledger_set: &LedgerSet,
     pool_id: &str,
@@ -522,15 +433,9 @@ pub(crate) fn calculate_leader_logs(
             "Genesis slot and epoch lengths must be nonzero".to_string(),
         ));
     }
-    if !is_just_nonce
-        && (*active_stake == 0
-            || pool_stake > active_stake
-            || !d.is_finite()
-            || !(0.0..=1.0).contains(d)
-            || !shelley.active_slots_coeff.is_finite()
-            || !(0.0..1.0).contains(&shelley.active_slots_coeff)
-            || shelley.active_slots_coeff == 0.0)
-    {
+    let d = ExactRatio::from_text(d)
+        .map_err(|_| Error::Leaderlog("Invalid leader schedule stake or probability parameters".to_string()))?;
+    if !is_just_nonce && (*active_stake == 0 || pool_stake > active_stake) {
         return Err(Error::Leaderlog(
             "Invalid leader schedule stake or probability parameters".to_string(),
         ));
@@ -541,7 +446,7 @@ pub(crate) fn calculate_leader_logs(
         Some(value) => value,
     };
 
-    let ledger_info = calculate_ledger_state_sigma_d_and_extra_entropy(pool_stake, active_stake, d, extra_entropy)?;
+    let ledger_info = calculate_ledger_state_sigma_d_and_extra_entropy(pool_stake, active_stake, &d, extra_entropy)?;
     let extra_entropy_vec = ledger_info.extra_entropy.as_ref().map(hex::decode).transpose()?;
 
     let tip_slot_number = match nonce {
@@ -606,20 +511,27 @@ pub(crate) fn calculate_leader_logs(
                 )));
             }
 
-            let first_slot_of_prev_epoch = first_slot_of_epoch - shelley.epoch_length;
+            let first_slot_of_prev_epoch = first_slot_of_epoch
+                .checked_sub(shelley.epoch_length)
+                .ok_or_else(slot_range_error)?;
             debug!("first_slot_of_epoch: {}", first_slot_of_epoch);
             debug!("first_slot_of_prev_epoch: {}", first_slot_of_prev_epoch);
             let stability_window_multiplier = match consensus {
                 "cpraos" => 4u64,
                 _ => 3u64,
             };
-            let stability_window = ((stability_window_multiplier * byron.protocol_consts.k) as f64
-                / shelley.active_slots_coeff)
-                .ceil() as u64;
-            let stability_window_start = first_slot_of_epoch - stability_window;
+            let stability_window = stability_window(
+                byron.protocol_consts.k,
+                stability_window_multiplier,
+                &shelley.active_slots_coeff,
+            )?;
+            let stability_window_start = first_slot_of_epoch
+                .checked_sub(stability_window)
+                .ok_or_else(slot_range_error)?;
             debug!("stability_window: {}", stability_window);
             debug!("stability_window_start: {}", stability_window_start);
-            let stability_window_start_plus_1_min = stability_window_start + 60;
+            let stability_window_start_plus_1_min =
+                stability_window_start.checked_add(60).ok_or_else(slot_range_error)?;
 
             let tip_slot_number = block_store.get_tip_slot_number()?;
             if tip_slot_number < stability_window_start_plus_1_min {
@@ -662,15 +574,17 @@ pub(crate) fn calculate_leader_logs(
     debug!("sigma: {}", &sigma);
     debug!("decentralization_param: {:?}", &ledger_info.decentralization);
 
-    let d: f64 = (ledger_info.decentralization * 1000.0).round() / 1000.0;
-    debug!("d: {:?}", &d);
-
-    let active_slots_coeff = (shelley.active_slots_coeff * 10000f64) as u64;
-    let active_slots_coeff = format!("{}000000000000000000000000000000", active_slots_coeff);
-    let active_slots_coeff = FixedDecimal::from_str(&active_slots_coeff.to_string(), DEFAULT_PRECISION)?;
-    debug!("active_slots_coeff: {}", &active_slots_coeff);
-
-    let d_multiplier = FixedDecimal::from(((1.0 - d) * 1000.0).round() as u64) / FixedDecimal::from(1000u64);
+    let d = ledger_info.decentralization;
+    let active_slots_coeff = shelley.active_slots_coeff.to_fixed();
+    let d_multiplier = if consensus == "tpraos" {
+        ExactRatio {
+            numerator: d.denominator - d.numerator,
+            denominator: d.denominator,
+        }
+        .to_fixed()
+    } else {
+        FixedDecimal::from(1u64)
+    };
     let epoch_slots_ideal = f64::from_str(
         &(&sigma * &(&FixedDecimal::from(shelley.epoch_length) * &active_slots_coeff) * d_multiplier).to_string(),
     )?;
@@ -688,52 +602,28 @@ pub(crate) fn calculate_leader_logs(
         sigma: f64::from_str(&sigma.to_string())?,
         active_stake: ledger_info.sigma.0,
         total_active_stake: ledger_info.sigma.1,
-        d,
-        f: shelley.active_slots_coeff,
+        d: f64::from_str(&d.to_fixed().to_string())?,
+        f: f64::from_str(&shelley.active_slots_coeff.to_fixed().to_string())?,
         assigned_slots: vec![],
     };
 
-    let cert_nat_max: FixedDecimal = match consensus {
-        "tpraos" => FixedDecimal::from_str("134078079299425970995740249982058461274793658205923933777235614437217640300735469768018742981669034276900318581864860508537538828119465699464336490060840960000000000000000000000000000000000", DEFAULT_PRECISION)?, // 2^512
-        "praos" | "cpraos" => FixedDecimal::from_str("1157920892373161954235709850086879078532699846656405640394575840079131296399360000000000000000000000000000000000", DEFAULT_PRECISION)?, // 2^256
-        _ => return Err(Error::Leaderlog(format!(
-            "Invalid Consensus: --consensus {consensus}"
-        )))
-    };
-    let c: FixedDecimal = (FixedDecimal::from(1u64) - active_slots_coeff).ln();
+    let threshold = election::LeaderThreshold::new(
+        ledger_info.sigma.0,
+        ledger_info.sigma.1,
+        &shelley.active_slots_coeff,
+        if consensus == "tpraos" { 64 } else { 32 },
+    )?;
+    let assigned_slots = election::calculate_schedule(
+        first_slot_of_epoch,
+        shelley.epoch_length,
+        consensus,
+        &d,
+        &epoch_nonce,
+        &pool_vrf_skey.key,
+        &threshold,
+    )?;
 
-    // Calculate all of our assigned slots in the epoch (in parallel)
-    let assigned_slots = (0..shelley.epoch_length)
-        .par_bridge() // <--- use rayon parallel bridge
-        .map(|slot_in_epoch| first_slot_of_epoch + slot_in_epoch)
-        .filter(|epoch_slot| !is_overlay_slot(&first_slot_of_epoch, epoch_slot, &ledger_info.decentralization))
-        .map(|leader_slot| {
-            let is_leader = match consensus {
-                "tpraos" => is_slot_leader_tpraos(
-                    leader_slot,
-                    &sigma,
-                    epoch_nonce.as_slice(),
-                    &pool_vrf_skey.key,
-                    &cert_nat_max,
-                    &c,
-                )?,
-                "praos" | "cpraos" => is_slot_leader_praos(
-                    leader_slot,
-                    &sigma,
-                    epoch_nonce.as_slice(),
-                    &pool_vrf_skey.key,
-                    &cert_nat_max,
-                    &c,
-                )?,
-                _ => return Err(Error::Leaderlog(format!("Invalid Consensus: --consensus {consensus}"))),
-            };
-            Ok(is_leader.then_some(leader_slot))
-        })
-        .collect::<Result<Vec<Option<u64>>, Error>>()?;
-    let mut assigned_slots: Vec<u64> = assigned_slots.into_iter().flatten().collect();
-    assigned_slots.sort_unstable();
-
-    // Update leader log with all assigned slots (sort first)
+    // Schedule order is the persisted and displayed order.
     for (i, slot) in assigned_slots.iter().enumerate() {
         let no = (i + 1) as u64;
         let slot = Slot {
@@ -908,30 +798,55 @@ fn post_slots(client: &reqwest::blocking::Client, base_url: &str, request: &Pool
 mod tests {
     use chrono::Utc;
 
-    use crate::nodeclient::leaderlog::{is_overlay_slot, vrf_eval_certified};
+    use crate::nodeclient::leaderlog::is_overlay_slot;
 
     #[test]
-    fn short_vrf_inputs_return_errors() {
-        assert!(matches!(
-            vrf_eval_certified(&[0; 32], &[0; 31]),
-            Err(super::Error::Leaderlog(_))
-        ));
-        assert!(matches!(
-            vrf_eval_certified(&[0; 31], &[0; 32]),
-            Err(super::Error::Leaderlog(_))
-        ));
+    fn exact_stability_window_and_overflow() {
+        use super::{rational::ExactRatio, stability_window};
+        let f = ExactRatio::from_text("1/3").unwrap();
+        assert_eq!(stability_window(2, 3, &f).unwrap(), 18);
+        assert_eq!(
+            stability_window(1, 3, &ExactRatio::from_text("0.4").unwrap()).unwrap(),
+            8
+        );
+        assert!(stability_window(u64::MAX, 4, &f).is_err());
+        assert!(stability_window(1, 3, &ExactRatio::from_text("0").unwrap()).is_err());
     }
 
     #[test]
-    fn uncertain_comparison_aborts_schedule_collection() {
-        use pallas_math::math::ExpOrdering;
-        use rayon::prelude::*;
-        let schedule = [ExpOrdering::LT, ExpOrdering::UNKNOWN, ExpOrdering::GT]
-            .into_par_iter()
-            .enumerate()
-            .map(|(slot, ordering)| super::leader_from_ordering(ordering).map(|leader| leader.then_some(slot as u64)))
-            .collect::<Result<Vec<Option<u64>>, super::Error>>();
-        assert!(matches!(schedule, Err(super::Error::Leaderlog(_))));
+    fn genesis_coefficients_keep_lexical_precision() {
+        for (value, expected) in [
+            ("0.12345678901234567", "12345678901234567/100000000000000000"),
+            ("1e-19", "1/10000000000000000000"),
+            (r#"{"numerator":-2,"denominator":-6}"#, "1/3"),
+            ("1", "1"),
+        ] {
+            let genesis: super::ShelleyGenesis = serde_json::from_str(&format!(
+                r#"{{"activeSlotsCoeff":{value},"networkMagic":42,"slotLength":1,"epochLength":60}}"#
+            ))
+            .unwrap();
+            assert_eq!(
+                genesis.active_slots_coeff,
+                super::rational::ExactRatio::from_text(expected).unwrap()
+            );
+        }
+        for value in [
+            "0",
+            "-0.1",
+            "1.1",
+            "1e-20",
+            r#"{"numerator":1,"denominator":0}"#,
+            r#""0.05""#,
+            "null",
+        ] {
+            assert!(
+                serde_json::from_str::<super::ShelleyGenesis>(&format!(
+                    r#"{{"activeSlotsCoeff":{value},"networkMagic":42,"slotLength":1,"epochLength":60}}"#
+                ))
+                .is_err(),
+                "{value}"
+            );
+        }
     }
 
     #[test]
@@ -976,7 +891,7 @@ mod tests {
                 &shelley,
                 &1,
                 &100,
-                &1.0,
+                "1",
                 &None,
                 &crate::LedgerSet::Set,
                 "test-pool",
@@ -1126,23 +1041,18 @@ mod tests {
     }
 
     #[test]
-    fn test_vrf_eval_certified_compatibility() {
-        assert_eq!(
-            hex::encode(vrf_eval_certified(&[0u8; 32], &[0u8; 32]).unwrap()),
-            "2f9e929479cb32192477b6908a57e6ad748f13a96152ebd67cb6345b2c66b5377ebe42828160bd98d29a710f4b4efe3d7a6a1ed49ae9433f5b06c172c11d04a0"
-        );
-    }
-
-    #[test]
     fn test_is_overlay_slot() {
         let first_slot_of_epoch = 15724800_u64;
-        let mut current_slot = 16128499_u64;
-        let d: f64 = 32_f64 / 100_f64;
-
-        assert!(!is_overlay_slot(&first_slot_of_epoch, &current_slot, &d));
-
-        // AD test
-        current_slot = 15920150_u64;
-        assert!(is_overlay_slot(&first_slot_of_epoch, &current_slot, &d));
+        let d = super::rational::ExactRatio::from_text("0.32").unwrap();
+        assert!(!is_overlay_slot(16128499 - first_slot_of_epoch, &d));
+        assert!(is_overlay_slot(15920150 - first_slot_of_epoch, &d));
+        let tiny = super::rational::ExactRatio::from_text("1/2500").unwrap();
+        assert!(is_overlay_slot(0, &tiny));
+        assert!(!is_overlay_slot(2499, &tiny));
+        assert!(is_overlay_slot(2500, &tiny));
+        assert!(is_overlay_slot(
+            u64::MAX,
+            &super::rational::ExactRatio::from_text("1").unwrap()
+        ));
     }
 }

@@ -146,8 +146,12 @@ pub enum Command {
         pool_stake: u64,
         #[structopt(long, help = "total active stake snapshot value in lovelace")]
         active_stake: u64,
-        #[structopt(long = "d", default_value = "0", help = "decentralization parameter")]
-        d: f64,
+        #[structopt(
+            long = "d",
+            default_value = "0",
+            help = "exact decentralization parameter (decimal, scientific, or integer/integer)"
+        )]
+        d: String,
         #[structopt(long, help = "hex string of the extra entropy value")]
         extra_entropy: Option<String>,
         #[structopt(
@@ -464,7 +468,7 @@ pub async fn start(cmd: &Command) -> Result<(), Box<dyn std::error::Error + Send
                 shelley_genesis,
                 &0,
                 &0,
-                &0.0,
+                "0",
                 extra_entropy,
                 ledger_set,
                 "nonce",

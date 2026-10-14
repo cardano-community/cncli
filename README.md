@@ -54,6 +54,40 @@ cargo clippy -- -D warnings
 ```bash
 cargo test
 ```
+### Leaderlog node parity
+
+`tests/reference/leaderlog` builds an isolated oracle against the recorded ledger package
+pins and freeze. It is not an installed-node version assertion. Expectations in
+`tests/data/leaderlog` come from those real Haskell packages; C numerical goldens remain
+untouched and are not comparator authority. Extra arithmetic rows at `aRaw=10^34` record
+the oracle's division-by-zero error; production leadership uses the guarded integer
+reciprocal at the inclusive VRF bound.
+
+```bash
+cabal build --project-file=tests/reference/leaderlog/cabal.project exe:jormanager-leaderlog-oracle
+ORACLE=$(cabal list-bin --project-file=tests/reference/leaderlog/cabal.project exe:jormanager-leaderlog-oracle)
+cargo +1.98.1 build --release --locked
+python3 tests/reference/leaderlog/verify.py --check \
+  --ledger-source /path/to/pinned/cardano-ledger --oracle "$ORACLE" \
+  --cncli target/x86_64-unknown-linux-gnu/release/cncli
+NODE_ORACLE="$ORACLE" cargo +1.98.1 test --release --lib live_node_differential -- --ignored
+```
+
+The verifier checks every assigned slot, emitted JSON, SQLite slot list and Blake2b hash
+using fresh temporary databases and the public zero-seed fixture key. Add `--benchmark`
+for one warmup and five measured runs of each 432,000-slot fixture, including child peak
+RSS. Repeat schedule tests with `RAYON_NUM_THREADS=1`, `2`, and `4` to check deterministic
+ordering. The production loop prepares keys once and collects ordered 1024-slot chunks
+in windows bounded by the existing Rayon worker count.
+
+The current pin passed independent node-fixture verification and 116 actual CLI
+schedule replays, including full-epoch TPraos/Praos schedules, emitted JSON, SQLite
+slots and hashes. The live differential also passed 10,000 deterministic value
+cases, 32 boundary searches and 32 randomized schedules. Ordinary Rust regressions
+cover all committed signed-floor primitives and comparator classifications/iteration
+counts, in addition to node values and schedules. This establishes parity against
+the recorded oracle package resolution, not an unspecified installed node.
+
 
 ## License
 

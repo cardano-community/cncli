@@ -345,6 +345,8 @@ This command calculates a stake pool's expected slot list. ```prev``` and ```cur
 
 For executable stake-snapshot examples, use the tracked [next](scripts/cncli-leaderlog-next.sh), [current](scripts/cncli-leaderlog-current.sh), and [previous](scripts/cncli-leaderlog-prev.sh) wrappers. Set the operator pool ID, key/genesis/socket paths and binary/path overrides documented in [INSTALL.md](INSTALL.md#helper-scripts). They check snapshot/sync/leaderlog exit status and JSON before printing a schedule; do not continue calculations after a failed command.
 
+`--d` accepts an exact decimal, scientific notation, or an integer ratio, for example `--d 0.0004`, `--d 4e-4`, or `--d 1/3`. Values must be between zero and one; reduced numerator and denominator must fit unsigned 64-bit integers. Decimal inputs follow the ledger's normalized exponent limit of ±19 (`1e-19` is valid, `1e-20` is not). Overlay slots are excluded only for TPraos; Praos and CPraos ignore valid `d` values for election. The JSON `d` and `f` display fields remain numbers and are not used for consensus arithmetic.
+
 **Note**: to automate calculating your assigned slots and sending them to [PoolTool](https://pooltool.io/), please refer to the [installation guide](INSTALL.md).
 
 #### Show Leaderlog Help
@@ -366,7 +368,7 @@ OPTIONS:
     -c, --consensus <consensus>
             Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos [default:
             praos]
-        --d <d>                                                  decentralization parameter [default: 0]
+        --d <d>                                                  exact decentralization parameter (decimal, scientific, or integer/integer) [default: 0]
     -d, --db <db>                                                sqlite database file [default: ./cncli.db]
         --epoch <epoch>
             Provide a specific epoch number to calculate for and ignore --ledger-set option
