@@ -30,7 +30,7 @@ pub struct SqLiteBlockStore {
 }
 
 impl SqLiteBlockStore {
-    const DB_VERSION: i64 = 4;
+    const DB_VERSION: i64 = 5;
 
     pub fn new(db_path: &Path) -> Result<SqLiteBlockStore, Error> {
         debug!("Opening database");
@@ -185,6 +185,20 @@ impl SqLiteBlockStore {
                 info!("Upgrade database to version 4...");
                 tx.execute("ALTER TABLE chain ADD COLUMN block_vrf_0 TEXT NOT NULL DEFAULT ''", [])?;
                 tx.execute("ALTER TABLE chain ADD COLUMN block_vrf_1 TEXT NOT NULL DEFAULT ''", [])?;
+            }
+
+            if version < 5 {
+                info!(
+                    "Upgrade database to version 5 (active-chain indexes; large databases may take several minutes)..."
+                );
+                tx.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_chain_orphaned_slot_number ON chain(orphaned, slot_number)",
+                    [],
+                )?;
+                tx.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_chain_orphaned_block_number ON chain(orphaned, block_number)",
+                    [],
+                )?;
             }
 
             // Write metadata only after initialization or an upgrade succeeds.
@@ -559,6 +573,8 @@ impl BlockStore for SqLiteBlockStore {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
     struct Fixture(PathBuf);
 
@@ -571,6 +587,19 @@ mod tests {
 
         fn db_path(&self) -> PathBuf {
             self.0.join("chain.db")
+        }
+
+        fn v4_store(&self) -> SqLiteBlockStore {
+            let store = SqLiteBlockStore::new(&self.db_path()).unwrap();
+            store
+                .db
+                .execute_batch(
+                    "DROP INDEX idx_chain_orphaned_slot_number;
+                     DROP INDEX idx_chain_orphaned_block_number;
+                     UPDATE db_version SET version = 4;",
+                )
+                .unwrap();
+            store
         }
     }
 
@@ -614,6 +643,313 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap()
+    }
+
+    fn index_columns(db: &Connection, name: &str) -> Vec<String> {
+        db.prepare(&format!("PRAGMA index_info({name})"))
+            .unwrap()
+            .query_map([], |row| row.get(2))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    fn assert_active_chain_indexes(db: &Connection) {
+        assert_eq!(
+            index_columns(db, "idx_chain_orphaned_slot_number"),
+            ["orphaned", "slot_number"]
+        );
+        assert_eq!(
+            index_columns(db, "idx_chain_orphaned_block_number"),
+            ["orphaned", "block_number"]
+        );
+    }
+
+    fn persisted_rows(db: &Connection, table: &str) -> Vec<Vec<rusqlite::types::Value>> {
+        let mut stmt = db.prepare(&format!("SELECT * FROM {table} ORDER BY id")).unwrap();
+        let columns = stmt.column_count();
+        stmt.query_map([], |row| (0..columns).map(|column| row.get(column)).collect())
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
+    }
+
+    #[test]
+    fn fresh_database_has_active_chain_indexes() {
+        let fixture = Fixture::new();
+        let store = SqLiteBlockStore::new(&fixture.db_path()).unwrap();
+        assert_active_chain_indexes(&store.db);
+    }
+
+    #[test]
+    fn v4_upgrade_preserves_chain_nonces_slots_and_existing_indexes() {
+        for existing_indexes in ["", "_681", "upstream"] {
+            let fixture = Fixture::new();
+            let mut store = fixture.v4_store();
+            store
+                .sql_save_block(
+                    &[header(1, 10, 1, 0), header(2, 20, 2, 1), header(3, 30, 3, 2)],
+                    &"00".repeat(32),
+                )
+                .unwrap();
+            store.sql_save_block(&[header(2, 25, 12, 1)], &"00".repeat(32)).unwrap();
+            store.sql_save_slots(12, "pool", 2, "[25,30]", "schedule-hash").unwrap();
+            let suffix = if existing_indexes == "upstream" { "" } else { "_681" };
+            if !existing_indexes.is_empty() {
+                store
+                    .db
+                    .execute_batch(&format!(
+                        "CREATE INDEX idx_chain_orphaned_slot_number{suffix} ON chain(orphaned, slot_number);
+                         CREATE INDEX idx_chain_orphaned_block_number{suffix} ON chain(orphaned, block_number);"
+                    ))
+                    .unwrap();
+            }
+            let state = chain_state(&store);
+            let chain = persisted_rows(&store.db, "chain");
+            let slots = persisted_rows(&store.db, "slots");
+            drop(store);
+
+            for _ in 0..3 {
+                let mut store = SqLiteBlockStore::new(&fixture.db_path()).unwrap();
+                assert_eq!(
+                    store
+                        .db
+                        .query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
+                        .unwrap(),
+                    SqLiteBlockStore::DB_VERSION
+                );
+                assert_active_chain_indexes(&store.db);
+                if existing_indexes == "_681" {
+                    assert_eq!(
+                        index_columns(&store.db, "idx_chain_orphaned_slot_number_681"),
+                        ["orphaned", "slot_number"]
+                    );
+                    assert_eq!(
+                        index_columns(&store.db, "idx_chain_orphaned_block_number_681"),
+                        ["orphaned", "block_number"]
+                    );
+                }
+                assert_eq!(chain_state(&store), state);
+                assert_eq!(persisted_rows(&store.db, "chain"), chain);
+                assert_eq!(persisted_rows(&store.db, "slots"), slots);
+                assert_eq!(store.sql_get_tip_slot_number().unwrap(), 25);
+                assert_eq!(
+                    store.sql_get_previous_slots(12, "pool").unwrap(),
+                    Some("[25,30]".into())
+                );
+                assert_eq!(
+                    store.sql_get_current_slots(12, "pool").unwrap(),
+                    (2, "schedule-hash".into())
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn v4_index_failure_rolls_back_and_can_be_retried() {
+        let fixture = Fixture::new();
+        let mut store = fixture.v4_store();
+        store
+            .sql_save_block(&[header(1, 10, 1, 0), header(2, 20, 2, 1)], &"00".repeat(32))
+            .unwrap();
+        store.sql_save_slots(1, "pool", 1, "[10]", "saved-hash").unwrap();
+        store
+            .db
+            .execute_batch("CREATE TABLE idx_chain_orphaned_block_number (collision)")
+            .unwrap();
+        let state = chain_state(&store);
+        let chain = persisted_rows(&store.db, "chain");
+        let slots = persisted_rows(&store.db, "slots");
+        drop(store);
+
+        assert!(matches!(
+            SqLiteBlockStore::new(&fixture.db_path()),
+            Err(Error::Sqlite(_))
+        ));
+        let db = Connection::open(fixture.db_path()).unwrap();
+        assert_eq!(
+            db.query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
+                .unwrap(),
+            4
+        );
+        assert!(!db
+            .query_row::<bool, _, _>(
+                "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name = 'idx_chain_orphaned_slot_number')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap());
+        assert_eq!(persisted_rows(&db, "chain"), chain);
+        assert_eq!(persisted_rows(&db, "slots"), slots);
+        db.execute_batch("DROP TABLE idx_chain_orphaned_block_number").unwrap();
+        drop(db);
+
+        let store = SqLiteBlockStore::new(&fixture.db_path()).unwrap();
+        assert_active_chain_indexes(&store.db);
+        assert_eq!(
+            store
+                .db
+                .query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
+                .unwrap(),
+            SqLiteBlockStore::DB_VERSION
+        );
+        assert_eq!(chain_state(&store), state);
+        assert_eq!(persisted_rows(&store.db, "chain"), chain);
+        assert_eq!(persisted_rows(&store.db, "slots"), slots);
+    }
+
+    fn sqlite_work<T>(
+        store: &mut SqLiteBlockStore,
+        operation: impl FnOnce(&mut SqLiteBlockStore) -> Result<T, Error>,
+    ) -> (T, usize) {
+        let ticks = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&ticks);
+        store
+            .db
+            .progress_handler(
+                100,
+                Some(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+        let result = operation(store);
+        store.db.progress_handler(0, None::<fn() -> bool>).unwrap();
+        (result.unwrap(), ticks.load(Ordering::Relaxed) * 100)
+    }
+
+    #[test]
+    fn active_chain_queries_have_bounded_work_after_v4_upgrade() {
+        const BLOCKS: u64 = 100_000;
+        const TIP: u64 = 20 * BLOCKS;
+        let fixture = Fixture::new();
+        let mut store = fixture.v4_store();
+        let nonce = |number: u64| Hasher::<256>::hash(&number.to_be_bytes());
+        let template = header(1, 20, 1, 0);
+        let node_vkey = hex::encode(&template.node_vkey);
+        let node_vrf_vkey = hex::encode(&template.node_vrf_vkey);
+        let eta_vrf_0 = hex::encode(&template.eta_vrf_0);
+        let eta_vrf_1 = hex::encode(&template.eta_vrf_1);
+        let leader_vrf_0 = hex::encode(&template.leader_vrf_0);
+        let leader_vrf_1 = hex::encode(&template.leader_vrf_1);
+        let block_body_hash = hex::encode(&template.block_body_hash);
+        let pool_id = hex::encode(Hasher::<224>::hash(&template.node_vkey));
+        {
+            let tx = store.db.transaction().unwrap();
+            {
+                let mut insert = tx
+                    .prepare(
+                        "INSERT INTO chain (
+                         block_number, slot_number, hash, prev_hash, eta_v,
+                         node_vkey, node_vrf_vkey, eta_vrf_0, eta_vrf_1, leader_vrf_0, leader_vrf_1,
+                         block_size, block_body_hash, pool_opcert, unknown_0, unknown_1, unknown_2,
+                         protocol_major_version, protocol_minor_version, pool_id, block_vrf_0, block_vrf_1, orphaned)
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11,
+                         0, ?12, '', 0, 0, '', 2, 0, ?13, '', '', ?14)",
+                    )
+                    .unwrap();
+                for number in 1..=BLOCKS + 1 {
+                    let orphaned = number > BLOCKS;
+                    let slot = if orphaned { 3_000_000 } else { 20 * number };
+                    let hash = if orphaned {
+                        "ff".repeat(32)
+                    } else {
+                        format!("{number:064x}")
+                    };
+                    insert
+                        .execute(rusqlite::params![
+                            number,
+                            slot,
+                            hash,
+                            format!("{:064x}", number - 1),
+                            hex::encode(nonce(number)),
+                            node_vkey,
+                            node_vrf_vkey,
+                            eta_vrf_0,
+                            eta_vrf_1,
+                            leader_vrf_0,
+                            leader_vrf_1,
+                            block_body_hash,
+                            pool_id,
+                            orphaned,
+                        ])
+                        .unwrap();
+                }
+            }
+            tx.commit().unwrap();
+        }
+        drop(store);
+        let mut store = SqLiteBlockStore::new(&fixture.db_path()).unwrap();
+        let sqlite_version: String = store
+            .db
+            .query_row("SELECT sqlite_version()", [], |row| row.get(0))
+            .unwrap();
+
+        let (tip, work) = sqlite_work(&mut store, SqLiteBlockStore::sql_get_tip_slot_number);
+        eprintln!("SQLite {sqlite_version}: active tip {work} sampled VM operations");
+        assert_eq!(tip, TIP);
+        assert!(work < 10_000, "active tip used {work} VM operations");
+
+        let (eta_v, work) = sqlite_work(&mut store, |store| store.sql_get_eta_v_before_slot(TIP));
+        eprintln!("nonce boundary: {work} sampled VM operations");
+        assert_eq!(eta_v, nonce(BLOCKS - 1));
+        assert!(work < 10_000, "nonce boundary used {work} VM operations");
+
+        let (prev_hash, work) = sqlite_work(&mut store, |store| store.sql_get_prev_hash_before_slot(TIP));
+        eprintln!("previous-hash boundary: {work} sampled VM operations");
+        assert_eq!(prev_hash, Hash::from_str(&format!("{:064x}", BLOCKS - 2)).unwrap());
+        assert!(work < 10_000, "previous-hash boundary used {work} VM operations");
+
+        let (blocks, work) = sqlite_work(&mut store, SqLiteBlockStore::sql_load_blocks);
+        eprintln!("ordered active blocks: {work} sampled VM operations");
+        assert!(work < 1_000_000, "ordered block loading used {work} VM operations");
+        assert_eq!(blocks.len(), BLOCKS as usize);
+        for (offset, (slot, hash)) in blocks.iter().enumerate() {
+            let number = BLOCKS - offset as u64;
+            let mut expected_hash = [0; 32];
+            expected_hash[24..].copy_from_slice(&number.to_be_bytes());
+            assert_eq!(*slot, 20 * number);
+            assert_eq!(hash.as_slice(), expected_hash);
+        }
+
+        let genesis = "00".repeat(32);
+        let mut extension = header(BLOCKS + 1, TIP + 20, 23, 0);
+        extension.hash = hex::decode(format!("{:064x}", BLOCKS + 1)).unwrap();
+        extension.prev_hash = hex::decode(format!("{BLOCKS:064x}")).unwrap();
+        let expected_nonce = generate_rolling_nonce(nonce(BLOCKS), &extension.eta_vrf_0);
+        let ((), work) = sqlite_work(&mut store, |store| {
+            store.sql_save_block(std::slice::from_ref(&extension), &genesis)
+        });
+        eprintln!("append: {work} sampled VM operations");
+        assert!(work < 10_000, "append used {work} VM operations");
+        assert_eq!(store.sql_get_tip_slot_number().unwrap(), TIP + 20);
+        assert_eq!(store.sql_get_eta_v_before_slot(TIP + 21).unwrap(), expected_nonce);
+
+        let point = Point::Specific(TIP, extension.prev_hash.clone());
+        let ((), work) = sqlite_work(&mut store, |store| store.sql_rollback_to(&point));
+        eprintln!("rollback suffix: {work} sampled VM operations");
+        assert!(work < 10_000, "rollback used {work} VM operations");
+        assert_eq!(store.sql_get_tip_slot_number().unwrap(), TIP);
+        let extension_hash = hex::encode(&extension.hash);
+        assert!(store.sql_find_block_by_hash(&extension_hash).unwrap().unwrap().orphaned);
+
+        let mut replacement = header(BLOCKS + 1, TIP + 40, 42, 0);
+        replacement.prev_hash = extension.prev_hash;
+        let replacement_nonce = generate_rolling_nonce(nonce(BLOCKS), &replacement.eta_vrf_0);
+        store
+            .sql_save_block(std::slice::from_ref(&replacement), &genesis)
+            .unwrap();
+        assert_eq!(store.sql_get_tip_slot_number().unwrap(), TIP + 40);
+        assert!(store.sql_find_block_by_hash(&extension_hash).unwrap().unwrap().orphaned);
+        assert!(
+            !store
+                .sql_find_block_by_hash(&hex::encode(&replacement.hash))
+                .unwrap()
+                .unwrap()
+                .orphaned
+        );
+        assert_eq!(store.sql_get_eta_v_before_slot(TIP + 41).unwrap(), replacement_nonce);
     }
 
     #[test]
@@ -745,7 +1081,7 @@ mod tests {
     #[test]
     fn schema_metadata_fails_closed() {
         for marker in [
-            "UPDATE db_version SET version = 5",
+            "UPDATE db_version SET version = 6",
             "DROP TABLE db_version",
             "DELETE FROM db_version",
             "INSERT INTO db_version VALUES (3)",
@@ -779,10 +1115,10 @@ mod tests {
             };
             drop(store);
             let result = SqLiteBlockStore::new(&fixture.db_path());
-            if marker == "UPDATE db_version SET version = 5" {
+            if marker == "UPDATE db_version SET version = 6" {
                 assert!(matches!(
                     result,
-                    Err(Error::UnsupportedSchemaVersion { found: 5, supported: 4 })
+                    Err(Error::UnsupportedSchemaVersion { found: 6, supported: 5 })
                 ));
             } else {
                 assert!(matches!(result, Err(Error::DataIntegrity(_))));
@@ -887,8 +1223,9 @@ mod tests {
                     .db
                     .query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
                     .unwrap(),
-                4
+                SqLiteBlockStore::DB_VERSION
             );
+            assert_active_chain_indexes(&store.db);
             if version >= 1 {
                 assert_eq!(store.sql_load_blocks().unwrap(), vec![(10, vec![1; 32])]);
                 let block = store.sql_find_block_by_hash(&hex::encode([1; 32])).unwrap().unwrap();
