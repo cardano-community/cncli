@@ -2,7 +2,7 @@ use std::fs;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use pallas_network::facades::{KeepAliveHandle, KeepAliveLoop, PeerServer};
 use pallas_network::miniprotocols::chainsync::{ClientRequest, HeaderContent, N2NServer, Tip};
@@ -438,12 +438,123 @@ async fn seed(db: &Path, redb: bool, headers: &[Header; 3]) {
 }
 
 #[tokio::test]
+async fn sqlite_v4_upgrade_preserves_status_freshness() {
+    let dir = FixtureDir::new();
+    let db_path = dir.0.join("status.db");
+    let headers = chain();
+    seed(&db_path, false, &headers).await;
+    rusqlite::Connection::open(&db_path)
+        .unwrap()
+        .execute_batch(
+            "DROP INDEX idx_chain_orphaned_slot_number;
+             DROP INDEX idx_chain_orphaned_block_number;
+             UPDATE db_version SET version = 4;",
+        )
+        .unwrap();
+
+    let byron = dir.0.join("byron.json");
+    let shelley = dir.0.join("shelley.json");
+    fs::write(
+        &shelley,
+        r#"{"activeSlotsCoeff":0.05,"networkMagic":42,"slotLength":1,"epochLength":1000}"#,
+    )
+    .unwrap();
+    let write_byron = |age| {
+        let start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() - headers[2].slot - age;
+        fs::write(
+            &byron,
+            serde_json::to_vec(&serde_json::json!({
+                "startTime": start,
+                "protocolConsts": {"k": 1},
+                "blockVersionData": {"slotDuration": "1000"}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    };
+    let args = [
+        "status",
+        "--db",
+        db_path.to_str().unwrap(),
+        "--byron-genesis",
+        byron.to_str().unwrap(),
+        "--shelley-genesis",
+        shelley.to_str().unwrap(),
+        "--shelley-transition-epoch",
+        "0",
+    ];
+    for _ in 0..2 {
+        write_byron(10);
+        let output = run(&args).await;
+        assert!(
+            output.status.success(),
+            "stderr={}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert_eq!(json(&output), serde_json::json!({"status": "ok"}));
+        let db = rusqlite::Connection::open(&db_path).unwrap();
+        assert_eq!(
+            db.query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
+                .unwrap(),
+            5
+        );
+        let hashes: Vec<String> = db
+            .prepare("SELECT hash FROM chain ORDER BY block_number")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(hashes.len(), headers.len());
+        for (hash, header) in hashes.iter().zip(&headers) {
+            assert_eq!(hash, &header.hash);
+        }
+    }
+
+    let db = rusqlite::Connection::open(&db_path).unwrap();
+    db.execute(
+        "INSERT INTO chain (
+         block_number, slot_number, hash, prev_hash, eta_v,
+         node_vkey, node_vrf_vkey, eta_vrf_0, eta_vrf_1, leader_vrf_0, leader_vrf_1,
+         block_size, block_body_hash, pool_opcert, unknown_0, unknown_1, unknown_2,
+         protocol_major_version, protocol_minor_version, pool_id, block_vrf_0, block_vrf_1, orphaned)
+         SELECT block_number, slot_number + 300, ?1, prev_hash, eta_v,
+         node_vkey, node_vrf_vkey, eta_vrf_0, eta_vrf_1, leader_vrf_0, leader_vrf_1,
+         block_size, block_body_hash, pool_opcert, unknown_0, unknown_1, unknown_2,
+         protocol_major_version, protocol_minor_version, pool_id, block_vrf_0, block_vrf_1, 1
+         FROM chain ORDER BY slot_number DESC LIMIT 1",
+        ["ff".repeat(32)],
+    )
+    .unwrap();
+    drop(db);
+    write_byron(300);
+    error(&run(&args).await);
+    for mutation in ["UPDATE chain SET orphaned = 1", "DELETE FROM chain"] {
+        rusqlite::Connection::open(&db_path)
+            .unwrap()
+            .execute(mutation, [])
+            .unwrap();
+        error(&run(&args).await);
+    }
+}
+
+#[tokio::test]
 async fn newly_reached_tip_is_committed_and_already_at_tip_sends_done() {
     let dir = FixtureDir::new();
     let headers = chain();
     for redb in [false, true] {
         let db = dir.0.join(if redb { "tip.redb" } else { "tip.db" });
         seed(&db, redb, &headers).await;
+        if !redb {
+            rusqlite::Connection::open(&db)
+                .unwrap()
+                .execute_batch(
+                    "DROP INDEX idx_chain_orphaned_slot_number;
+                     DROP INDEX idx_chain_orphaned_block_number;
+                     UPDATE db_version SET version = 4;",
+                )
+                .unwrap();
+        }
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let child = sync(&db, listener.local_addr().unwrap().port(), redb, true);
         let mut peer = Peer::accept(&listener).await;

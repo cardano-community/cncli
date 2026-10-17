@@ -25,7 +25,7 @@ tar xzf "$archive" -C unpacked
 ./unpacked/cncli --help
 ```
 
-Before replacement, preserve the previous binary and a backend-consistent database backup. Stop the services during backup/replacement: for SQLite, use its backup API or copy all database state only after every writer has stopped; for redb, stop all users before copying. Never copy/unlock a live redb file. Review storage/nonce changes and rehearse backup/restore on disposable data first.
+Before replacement, preserve the previous binary and a backend-consistent database backup. Stop the services during backup/replacement: for SQLite, use its backup API or copy all database state only after every writer has stopped; for redb, stop all users before copying. Never copy/unlock a live redb file. Review storage/nonce changes and rehearse backup/restore on disposable data first. Read the [SQLite schema v5 upgrade notes](#sqlite-schema-v5-upgrade) before opening an existing SQLite database.
 
 ```bash
 sudo systemctl stop cncli-leaderlog.timer cncli-leaderlog.service cncli-sync.service cncli-sendtip.service
@@ -35,10 +35,20 @@ if test -e /usr/local/bin/cncli; then
 fi
 sudo install -o root -g root -m 0755 ./unpacked/cncli /usr/local/bin/cncli.new
 sudo mv /usr/local/bin/cncli.new /usr/local/bin/cncli
-sudo systemctl start cncli-sync.service cncli-sendtip.service cncli-leaderlog.timer
+sudo systemctl start cncli-sync.service cncli-sendtip.service
 ```
 
-For a first install, create the units below before starting them; omit the stop step if they do not exist. No command here automatically migrates or restores production data. A verified attestation identifies build provenance, not source correctness or bit-reproducibility. Older releases without attestations do not satisfy this staged verification procedure.
+After the initial migration completes and sync catches up, require a successful `cncli status` with your database/genesis arguments before running `sudo systemctl start cncli-leaderlog.timer`.
+
+For a first install, create the units below before starting them; omit the stop step if they do not exist. Opening the database can automatically migrate it; restoring a backup is a separate operator action. A verified attestation identifies build provenance, not source correctness or bit-reproducibility. Older releases without attestations do not satisfy this staged verification procedure.
+
+### SQLite schema v5 upgrade
+
+Opening a SQLite database at schema version 0–4 atomically upgrades it to version 5, adding `idx_chain_orphaned_slot_number` on `(orphaned, slot_number)` and `idx_chain_orphaned_block_number` on `(orphaned, block_number)`. These indexes accelerate active-chain reads and suffix updates without changing chain rows, nonces, saved slot schedules, orphan filtering or the 120-second freshness limit. Existing single-column indexes and operator `_681` workaround indexes remain intact; equivalent indexes under different names are not deduplicated.
+
+Run the initial upgrade with one cncli process while other database consumers are stopped. Index creation on large databases may take several minutes and needs additional free disk/WAL space. A lock, disk or index-creation failure propagates to the command; both new index builds and the version marker roll back together, leaving the upgrade retryable. Reopening version 5 skips index builds and metadata writes.
+
+Unmodified v6.8.1 rejects schema version 5. To roll back the binary, restore the consistent pre-migration backup; do not manually lower the schema marker.
 
 ### Compile from source
 
