@@ -314,7 +314,7 @@ OPTIONS:
         --byron-genesis <byron-genesis>                          byron genesis json file
     -c, --consensus <consensus>
             Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos [default:
-            praos]
+            cpraos]
     -d, --db <db>                                                sqlite database file [default: ./cncli.db]
         --epoch <epoch>
             Provide a specific epoch number to calculate for and ignore --ledger-set option
@@ -369,7 +369,7 @@ OPTIONS:
         --byron-genesis <byron-genesis>                          byron genesis json file
     -c, --consensus <consensus>
             Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos [default:
-            praos]
+            cpraos]
         --d <d>                                                  exact decentralization parameter (decimal, scientific, or integer/integer) [default: 0]
     -d, --db <db>                                                sqlite database file [default: ./cncli.db]
         --epoch <epoch>

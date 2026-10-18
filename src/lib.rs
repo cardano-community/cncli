@@ -173,7 +173,7 @@ pub enum Command {
         #[structopt(
             short,
             long,
-            default_value = "praos",
+            default_value = "cpraos",
             help = "Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos"
         )]
         consensus: String,
@@ -288,7 +288,7 @@ pub enum Command {
         #[structopt(
             short,
             long,
-            default_value = "praos",
+            default_value = "cpraos",
             help = "Consensus algorithm - Alonzo and earlier uses tpraos, Babbage uses praos, Conway uses cpraos"
         )]
         consensus: String,

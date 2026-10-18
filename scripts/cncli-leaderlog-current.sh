@@ -24,7 +24,7 @@ else
     ACTIVE_STAKE=$(grep -oP '(?<=    "activeStakeSet": )\d+(?=,?)' <<<"$SNAPSHOT")
 fi
 [[ "$POOL_STAKE" =~ ^[0-9]+$ && "$ACTIVE_STAKE" =~ ^[0-9]+$ ]] || { echo "Invalid snapshot stake amounts" >&2; exit 1; }
-BCSH=$("$CNCLI_BIN" leaderlog --db "$CNCLI_DB" --pool-id "$CNCLI_POOL_ID" --pool-vrf-skey "$CNCLI_VRF_SKEY" --byron-genesis "$CNCLI_BYRON_GENESIS" --shelley-genesis "$CNCLI_SHELLEY_GENESIS" --pool-stake "$POOL_STAKE" --active-stake "$ACTIVE_STAKE" --consensus praos --ledger-set current)
+BCSH=$("$CNCLI_BIN" leaderlog --db "$CNCLI_DB" --pool-id "$CNCLI_POOL_ID" --pool-vrf-skey "$CNCLI_VRF_SKEY" --byron-genesis "$CNCLI_BYRON_GENESIS" --shelley-genesis "$CNCLI_SHELLEY_GENESIS" --pool-stake "$POOL_STAKE" --active-stake "$ACTIVE_STAKE" --consensus cpraos --ledger-set current)
 "$JQ_BIN" -e '.status == "ok"' <<<"$BCSH" >/dev/null
 "$JQ_BIN" . <<<"$BCSH"
 EPOCH=$("$JQ_BIN" -er '.epoch' <<<"$BCSH")
