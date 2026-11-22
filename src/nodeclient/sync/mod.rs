@@ -683,14 +683,14 @@ pub(crate) async fn sendtip(
     host: String,
     port: u16,
     api_key: String,
-    cardano_node_path: &Path,
+    node_version: tokio::sync::watch::Receiver<String>,
     client: reqwest::Client,
 ) -> Result<(), Error> {
     let mut notifier = pooltool::PoolToolNotifier::new(
         pool_name,
         pool_id,
         api_key,
-        cardano_node_path.to_path_buf(),
+        node_version,
         client,
         pooltool::POOLTOOL_BASE_URL.to_owned(),
     )?;
