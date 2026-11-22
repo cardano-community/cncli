@@ -113,21 +113,7 @@ async fn read_node_version(cardano_node_path: &Path) -> Result<String, super::Er
     }
     let version = String::from_utf8(output.stdout)
         .map_err(|_| super::Error::Reporter("Invalid cardano-node version output".into()))?;
-    static VERSION_REGEX: std::sync::LazyLock<Result<Regex, regex::Error>> =
-        std::sync::LazyLock::new(|| Regex::new(r"cardano-node (\d+\.\d+\.\d+) .*\r?\ngit rev ([a-f\d]{5}).*"));
-    let regex = VERSION_REGEX
-        .as_ref()
-        .map_err(|_| super::Error::Reporter("Invalid node version matcher".into()))?;
-    let captures = regex
-        .captures(&version)
-        .ok_or_else(|| super::Error::Reporter("Unrecognized cardano-node version output".into()))?;
-    let release = captures
-        .get(1)
-        .ok_or_else(|| super::Error::Reporter("Missing node release".into()))?;
-    let revision = captures
-        .get(2)
-        .ok_or_else(|| super::Error::Reporter("Missing node revision".into()))?;
-    Ok(format!("{}:{}", release.as_str(), revision.as_str()))
+    parse_node_version(&version)
 }
 
 pub(crate) struct NodeVersionWatcher {
@@ -310,6 +296,42 @@ impl PoolToolNotifier {
     }
 }
 
+fn parse_node_version(version: &str) -> Result<String, super::Error> {
+    static HEADER_REGEX: std::sync::LazyLock<Result<Regex, regex::Error>> = std::sync::LazyLock::new(|| {
+        Regex::new(r"(?-u)^cardano-node (\d+(?:\.\d+){2,})(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?(?:\s|$)")
+    });
+    static GIT_REV_REGEX: std::sync::LazyLock<Result<Regex, regex::Error>> =
+        std::sync::LazyLock::new(|| Regex::new(r"^git rev ([0-9a-fA-F]{5})[0-9a-fA-F]*$"));
+
+    let header_regex = HEADER_REGEX
+        .as_ref()
+        .map_err(|_| super::Error::Reporter("Invalid node version matcher".into()))?;
+    let git_rev_regex = GIT_REV_REGEX
+        .as_ref()
+        .map_err(|_| super::Error::Reporter("Invalid node revision matcher".into()))?;
+
+    let mut lines = version.lines();
+    let header = lines
+        .next()
+        .ok_or_else(|| super::Error::Reporter("Unrecognized cardano-node version output".into()))?;
+    let release = header_regex
+        .captures(header)
+        .and_then(|captures| captures.get(1))
+        .ok_or_else(|| super::Error::Reporter("Unrecognized cardano-node version output".into()))?
+        .as_str();
+
+    let revision = match lines.map(str::trim_end).find(|line| !line.is_empty()) {
+        None | Some("git rev unknown") => "00000".to_owned(),
+        Some(line) => git_rev_regex
+            .captures(line)
+            .and_then(|captures| captures.get(1))
+            .map(|rev| rev.as_str().to_ascii_lowercase())
+            .ok_or_else(|| super::Error::Reporter("Unrecognized cardano-node version output".into()))?,
+    };
+
+    Ok(format!("{release}:{revision}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -340,6 +362,9 @@ mod tests {
                     "case \"$mode\" in\n",
                     "  ok) printf 'cardano-node 10.1.0 linux\\ngit rev abcdef012345\\n' ;;\n",
                     "  upgrade) printf 'cardano-node 10.2.0 linux\\ngit rev 1234567890ab\\n' ;;\n",
+                    "  multipart) printf 'cardano-node 11.2.0.164 - linux-x86_64 - ghc-9.6\\ngit rev 746f1b3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a\\n' ;;\n",
+                    "  two-part) printf 'cardano-node 11.2 - linux-x86_64\\ngit rev 746f1b3c9d8e\\n' ;;\n",
+                    "  bad-rev) printf 'cardano-node 11.2.0.164 - linux-x86_64\\ngit rev 746f\\n' ;;\n",
                     "  bad) printf 'unrecognized\\n' ;;\n",
                     "  exit) exit 1 ;;\n",
                     "  timeout) exec sleep 10 ;;\n",
@@ -365,6 +390,21 @@ mod tests {
                     "if \"%mode%\"==\"upgrade\" (\r\n",
                     "  echo cardano-node 10.2.0 windows\r\n",
                     "  echo git rev 1234567890ab\r\n",
+                    "  exit /b 0\r\n",
+                    ")\r\n",
+                    "if \"%mode%\"==\"multipart\" (\r\n",
+                    "  echo cardano-node 11.2.0.164 - windows-x86_64 - ghc-9.6\r\n",
+                    "  echo git rev 746f1b3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a\r\n",
+                    "  exit /b 0\r\n",
+                    ")\r\n",
+                    "if \"%mode%\"==\"two-part\" (\r\n",
+                    "  echo cardano-node 11.2 - windows-x86_64\r\n",
+                    "  echo git rev 746f1b3c9d8e\r\n",
+                    "  exit /b 0\r\n",
+                    ")\r\n",
+                    "if \"%mode%\"==\"bad-rev\" (\r\n",
+                    "  echo cardano-node 11.2.0.164 - windows-x86_64\r\n",
+                    "  echo git rev 746f\r\n",
                     "  exit /b 0\r\n",
                     ")\r\n",
                     "if \"%mode%\"==\"bad\" (\r\n",
@@ -641,9 +681,139 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_node_version_accepts_multipart_and_rejects_malformed_outputs() {
+        let output_format = Regex::new(r"(?-u)^\d+(?:\.\d+){2,}:[0-9a-f]{5}$").unwrap();
+        for (input, expected) in [
+            ("cardano-node 10.1.0 linux\ngit rev abcdef012345\n", "10.1.0:abcde"),
+            (
+                "cardano-node 11.1.3 - linux-x86_64 - ghc-9.6\ngit rev 1a2b3c4d5e6f7890abcdef1234567890abcdef12\n",
+                "11.1.3:1a2b3",
+            ),
+            (
+                "cardano-node 11.2.0.164 - linux-x86_64 - ghc-9.6\ngit rev 746f1b3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a\n",
+                "11.2.0.164:746f1",
+            ),
+            (
+                "cardano-node 11.2.0.164.1 - linux-x86_64 - ghc-9.6\ngit rev 746f1b3c9d8e7f6a5b4c3d2e1f0a9b8c7d6e5f4a\n",
+                "11.2.0.164.1:746f1",
+            ),
+            (
+                "cardano-node 8.5.0.0 - linux-x86_64 - ghc-8.10\ngit rev a29ee68ba2c850cd50be39a3105ef191cfbc41d5\n",
+                "8.5.0.0:a29ee",
+            ),
+            (
+                "cardano-node 11.2.0-pre - linux-x86_64 - ghc-9.6\ngit rev 746f1b3c9d8e\n",
+                "11.2.0:746f1",
+            ),
+            (
+                "cardano-node 11.2.0-rc1 - linux-x86_64 - ghc-9.6\ngit rev 746f1b3c9d8e\n",
+                "11.2.0:746f1",
+            ),
+            (
+                "cardano-node 11.2.0+build - linux-x86_64 - ghc-9.6\ngit rev 746f1b3c9d8e\n",
+                "11.2.0:746f1",
+            ),
+            ("cardano-node 11.2.0.164-rc.1+build.42\ngit rev 746f1\n", "11.2.0.164:746f1"),
+            (
+                "cardano-node 11.1.3 - linux-x86_64 - ghc-9.6\ngit rev ABCDEF0123456789ABCDEF0123456789ABCDEF01\n",
+                "11.1.3:abcde",
+            ),
+            (
+                "cardano-node 11.2.0.164 - linux-x86_64 - ghc-9.6\ngit rev 746F1B3C\n",
+                "11.2.0.164:746f1",
+            ),
+            (
+                "cardano-node 11.2.0.164 - linux-x86_64 - ghc-9.6\ngit rev 0000000000000000000000000000000000000000\n",
+                "11.2.0.164:00000",
+            ),
+            (
+                "cardano-node 11.2.0.164 - linux-x86_64 - ghc-9.6\ngit rev unknown\n",
+                "11.2.0.164:00000",
+            ),
+            (
+                "cardano-node 11.2.0.164 - linux-x86_64 - ghc-9.6\n",
+                "11.2.0.164:00000",
+            ),
+            ("cardano-node 11.2.0.164", "11.2.0.164:00000"),
+            (
+                "cardano-node 11.2.0.164 - windows-x86_64 - ghc-9.6\r\ngit rev 746F1B3C9D8E\r\n",
+                "11.2.0.164:746f1",
+            ),
+            ("cardano-node 10.1.0 windows\r\ngit rev unknown\r\n", "10.1.0:00000"),
+            ("cardano-node 11.2.0.164.1\r\n", "11.2.0.164.1:00000"),
+        ] {
+            let parsed = parse_node_version(input).unwrap_or_else(|err| panic!("rejected {input:?}: {err}"));
+            assert_eq!(parsed, expected, "unexpected version for {input:?}");
+            assert!(output_format.is_match(&parsed), "invalid format {parsed:?}");
+        }
+
+        for invalid in [
+            "",
+            "unrecognized\n",
+            "cardano-cli 11.2.0.164 - linux-x86_64 - ghc-9.6\ngit rev 746f1b3c\n",
+            "my-cardano-node 10.1.0 - linux\ngit rev abcdef012345\n",
+            "cardano-node 11 - linux-x86_64\ngit rev 746f1b3c\n",
+            "cardano-node 11.2 - linux-x86_64\ngit rev 746f1b3c\n",
+            "cardano-node v11.2.0 - linux-x86_64\ngit rev 746f1b3c\n",
+            "cardano-node 11.2.0. - linux-x86_64\ngit rev 746f1b3c\n",
+            "cardano-node 11.2.0.164. - linux-x86_64\ngit rev 746f1b3c\n",
+            "cardano-node 11.2.0_rc1 - linux-x86_64\ngit rev 746f1b3c\n",
+            "cardano-node 11.2.0- - linux-x86_64\ngit rev 746f1b3c\n",
+            "cardano-node 11.2.0+ - linux-x86_64\ngit rev 746f1b3c\n",
+            "cardano-node 11.2.0.164 - linux-x86_64\ngit rev\n",
+            "cardano-node 11.2.0.164 - linux-x86_64\ngit rev \n",
+            "cardano-node 11.2.0.164 - linux-x86_64\ngit rev 746f\n",
+            "cardano-node 11.2.0.164 - linux-x86_64\ngit rev ggggg\n",
+            "cardano-node 11.2.0.164 - linux-x86_64\ngit rev 746f1xyz\n",
+            "cardano-node 11.2.0.164 - linux-x86_64\ngit rev unknown extra\n",
+            "cardano-node 11.2.0.164 - linux-x86_64\nunrecognized revision line\n",
+        ] {
+            assert!(
+                matches!(parse_node_version(invalid), Err(super::super::Error::Reporter(_))),
+                "unexpectedly accepted {invalid:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn worker_sends_multipart_node_version() {
+        for v1 in [false, true] {
+            let node = NodeFixture::new("multipart");
+            let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+            let (_watcher, node_version) = NodeVersionWatcher::spawn(node.bin.clone()).await.unwrap();
+            let mut notifier = notifier(node_version, format!("http://{}", listener.local_addr().unwrap()));
+            let (tx, rx) = tokio::sync::watch::channel(None);
+            let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
+            let server = std::thread::spawn(move || {
+                let (stream, _, payload) = receive(&listener);
+                respond(stream, 200);
+                seen_tx.send(payload).unwrap();
+            });
+            let subscriber = tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_writer(std::io::sink)
+                .finish();
+            let worker = tokio::spawn(async move { notifier.run(rx).await }.with_subscriber(subscriber));
+            tx.send_replace(Some(header(1, v1)));
+            let payload = tokio::time::timeout(Duration::from_secs(10), seen_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(payload["data"]["version"], "11.2.0.164:746f1");
+            drop(tx);
+            tokio::time::timeout(Duration::from_secs(10), worker)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
+            server.join().unwrap();
+        }
+    }
+
     #[tokio::test]
     async fn invalid_initial_node_version_never_sends_http() {
-        for mode in ["bad", "exit", "timeout"] {
+        for mode in ["bad", "two-part", "bad-rev", "exit", "timeout"] {
             let node = NodeFixture::new(mode);
             let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
             listener.set_nonblocking(true).unwrap();
