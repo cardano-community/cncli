@@ -362,32 +362,117 @@ saveToPostgres()
 {
   if [[ "${saveToPostgres}" != 'none' ]];
   then
-    i=0
-    epoch=$("${binJq}" -er '.epoch' < "${leaderlogJsonFile}")
-    totalSlots=$("${binJq}" -er '.epochSlots' < "${leaderlogJsonFile}")
-    log "Saving '${saveToPostgres}' slots to PostgreSQL... "
-    psql -qc "delete from leaderlog where epoch=${epoch} and slot is null"
-    rows=$("${binJq}" -c '.assignedSlots[]' < "${leaderlogJsonFile}")
-
-    while read -r row;
-    do
-      [[ -n "$row" ]] || continue
-      no=$("${binJq}" -er '.no' <<<"$row")
-      slot=$("${binJq}" -er '.slot' <<<"$row")
-      at=$("${binJq}" -er '.at' <<<"$row")
-      ts=$(date -d "$at" +%s)
-
-      if [[ "${saveToPostgres}" == "all" || ( "${saveToPostgres}" == "past" && $ts -lt $secondsNow ) ]];
+    local extracted
+    extracted="$("${binJq}" -er '
+      def valid_uint: type == "number" and (tostring | test("^[0-9]+$"));
+      if (type == "object")
+         and (.epoch | valid_uint)
+         and (.epochSlots | valid_uint)
+         and (.assignedSlots | type == "array")
+         and all(.assignedSlots[];
+           (type == "object")
+           and (.no | valid_uint)
+           and (.slot | valid_uint)
+           and (.at | type == "string" and length > 0 and (test("[\r\n]") | not))
+         )
       then
-        psql -qc "insert into leaderlog (nr, slot, epoch, scheduled_at) values (${no}, ${slot}, ${epoch}, '${at}')
-                  on conflict (slot) do update set nr=${no}, epoch=${epoch}, scheduled_at='${at}'"
+        (.epoch | tostring),
+        (.epochSlots | tostring),
+        (.assignedSlots[] | (.no | tostring), (.slot | tostring), .at)
       else
-        psql -qc "insert into leaderlog (nr, epoch) values (${no}, ${epoch})"
-      fi
-      i=$((i + 1))
-    done <<< "${rows}"
+        error("invalid leaderlog payload")
+      end
+    ' < "${leaderlogJsonFile}")"
 
-    log "Saved $i of $totalSlots slots to PostgreSQL."
+    local parsed=()
+    mapfile -t parsed <<< "${extracted}"
+    (( ${#parsed[@]} >= 2 && (${#parsed[@]} - 2) % 3 == 0 )) || die "Invalid leaderlog payload"
+
+    local epoch="${parsed[0]}"
+    local totalSlots="${parsed[1]}"
+    [[ "${epoch}" =~ ^[0-9]+$ && "${totalSlots}" =~ ^[0-9]+$ ]] || die "Invalid leaderlog epoch metadata"
+
+    local nos=()
+    local slots=()
+    local ats=()
+    local idx=2
+    local no slot at
+    while (( idx < ${#parsed[@]} )); do
+      no="${parsed[idx]}"
+      slot="${parsed[idx + 1]}"
+      at="${parsed[idx + 2]}"
+      [[ "${no}" =~ ^[0-9]+$ && "${slot}" =~ ^[0-9]+$ && -n "${at}" && "${at}" != *$'\n'* && "${at}" != *$'\r'* ]] \
+        || die "Invalid leaderlog slot fields"
+      nos+=("${no}")
+      slots+=("${slot}")
+      ats+=("${at}")
+      idx=$((idx + 3))
+    done
+
+    local slotCount="${#nos[@]}"
+    local timestamps=()
+    if [[ "${saveToPostgres}" == "past" ]] && (( slotCount > 0 )); then
+      [[ "${secondsNow}" =~ ^-?[0-9]+$ ]] || die "Invalid current timestamp"
+      local tsOutput
+      tsOutput="$(printf '%s\n' "${ats[@]}" | date -f - +%s)"
+      mapfile -t timestamps <<< "${tsOutput}"
+      (( ${#timestamps[@]} == slotCount )) || die "Timestamp count mismatch from date"
+      local ts
+      for ts in "${timestamps[@]}"; do
+        [[ "${ts}" =~ ^-?[0-9]+$ ]] || die "Invalid parsed slot timestamp"
+      done
+    fi
+
+    local sqlStatements=("DELETE FROM leaderlog WHERE epoch = ${epoch} AND slot IS NULL;")
+    local currentKind=""
+    local batchValuesSql=""
+    local -A batchSeenSlots=()
+    local sq="'"
+    local i rowKind escapedAt tuple
+
+    for (( i = 0; i < slotCount; i++ )); do
+      if [[ "${saveToPostgres}" == "all" ]] || { [[ "${saveToPostgres}" == "past" ]] && [[ "${timestamps[i]}" -lt "${secondsNow}" ]]; }; then
+        rowKind="full"
+        escapedAt="${ats[i]//"$sq"/"''"}"
+        tuple="(${nos[i]}, ${slots[i]}, ${epoch}, '${escapedAt}')"
+      else
+        rowKind="secure"
+        tuple="(${nos[i]}, ${epoch})"
+      fi
+
+      if [[ -n "${currentKind}" ]] && { [[ "${rowKind}" != "${currentKind}" ]] || { [[ "${rowKind}" == "full" ]] && [[ -n "${batchSeenSlots[${slots[i]}]+x}" ]]; }; }; then
+        if [[ "${currentKind}" == "full" ]]; then
+          sqlStatements+=("INSERT INTO leaderlog (nr, slot, epoch, scheduled_at) VALUES ${batchValuesSql} ON CONFLICT (slot) DO UPDATE SET nr = EXCLUDED.nr, epoch = EXCLUDED.epoch, scheduled_at = EXCLUDED.scheduled_at;")
+        else
+          sqlStatements+=("INSERT INTO leaderlog (nr, epoch) VALUES ${batchValuesSql};")
+        fi
+        batchValuesSql=""
+        unset batchSeenSlots
+        local -A batchSeenSlots=()
+      fi
+
+      currentKind="${rowKind}"
+      if [[ "${rowKind}" == "full" ]]; then
+        batchSeenSlots["${slots[i]}"]=1
+      fi
+      if [[ -z "${batchValuesSql}" ]]; then
+        batchValuesSql="${tuple}"
+      else
+        batchValuesSql+=", ${tuple}"
+      fi
+    done
+
+    if [[ -n "${batchValuesSql}" ]]; then
+      if [[ "${currentKind}" == "full" ]]; then
+        sqlStatements+=("INSERT INTO leaderlog (nr, slot, epoch, scheduled_at) VALUES ${batchValuesSql} ON CONFLICT (slot) DO UPDATE SET nr = EXCLUDED.nr, epoch = EXCLUDED.epoch, scheduled_at = EXCLUDED.scheduled_at;")
+      else
+        sqlStatements+=("INSERT INTO leaderlog (nr, epoch) VALUES ${batchValuesSql};")
+      fi
+    fi
+
+    log "Saving '${saveToPostgres}' slots to PostgreSQL... "
+    printf '%s\n' "${sqlStatements[@]}" | psql --single-transaction -v ON_ERROR_STOP=1 -q
+    log "Saved ${slotCount} of ${totalSlots} slots to PostgreSQL."
   else
     log "Not saving any slots to PostgreSQL."
   fi
