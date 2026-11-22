@@ -30,7 +30,15 @@ pub struct SqLiteBlockStore {
 }
 
 impl SqLiteBlockStore {
-    const DB_VERSION: i64 = 5;
+    const DB_VERSION: i64 = 6;
+    const TIP_INTERSECT_BLOCK_SQL: &'static str =
+        "SELECT block_number, slot_number, hash FROM chain WHERE orphaned = 0 ORDER BY block_number DESC LIMIT 1";
+    const ANCESTOR_INTERSECT_BLOCKS_SQL: &'static str = "\
+        SELECT block_number, slot_number, hash \
+        FROM chain \
+        WHERE orphaned = 0 \
+          AND block_number IN (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19) \
+        ORDER BY block_number DESC";
 
     pub fn new(db_path: &Path) -> Result<SqLiteBlockStore, Error> {
         debug!("Opening database");
@@ -199,6 +207,17 @@ impl SqLiteBlockStore {
                     "CREATE INDEX IF NOT EXISTS idx_chain_orphaned_block_number ON chain(orphaned, block_number)",
                     [],
                 )?;
+            }
+
+            if version < 6 {
+                info!(
+                    "Upgrade database to version 6 (active-chain covering intersect index; large databases may take several minutes)..."
+                );
+                tx.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_chain_active_intersect ON chain(orphaned, block_number, slot_number, hash)",
+                    [],
+                )?;
+                info!("Upgrade database to version 6 complete.");
             }
 
             // Write metadata only after initialization or an upgrade succeeds.
@@ -377,7 +396,7 @@ impl SqLiteBlockStore {
             Point::Specific(slot, hash) => {
                 let block_number: u64 = tx
                     .query_row(
-                        "SELECT block_number FROM chain WHERE orphaned = 0 AND slot_number = ?1 AND hash = ?2",
+                        "SELECT block_number FROM chain WHERE orphaned = 0 AND slot_number = ?1 AND hash = ?2 AND prev_hash IS NOT NULL",
                         rusqlite::params![slot, hex::encode(hash)],
                         |row| row.get(0),
                     )
@@ -393,6 +412,7 @@ impl SqLiteBlockStore {
         Ok(())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     fn sql_load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error> {
         let db = &self.db;
         let mut stmt = db
@@ -404,6 +424,54 @@ impl SqLiteBlockStore {
                 Ok((slot, hex::decode(hash)?))
             })
             .collect()
+    }
+
+    fn sql_load_intersect_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error> {
+        let tip: Option<(u64, u64, String)> = self
+            .db
+            .prepare_cached(Self::TIP_INTERSECT_BLOCK_SQL)?
+            .query_row([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .optional()?;
+        let Some((tip_block_number, tip_slot_number, tip_hash_hex)) = tip else {
+            return Ok(Vec::new());
+        };
+
+        let mut blocks = Vec::with_capacity(blockstore::INTERSECT_BLOCK_OFFSETS.len());
+        blocks.push((tip_slot_number, hex::decode(tip_hash_hex)?));
+        if tip_block_number == 0 {
+            return Ok(blocks);
+        }
+
+        let mut targets = [-1_i64; 19];
+        for (slot, &offset) in targets.iter_mut().zip(&blockstore::INTERSECT_BLOCK_OFFSETS[1..]) {
+            if let Some(target) = tip_block_number.checked_sub(offset) {
+                *slot = i64::try_from(target).map_err(|_| Error::DataIntegrity("Block number exceeds i64".into()))?;
+            }
+        }
+
+        let mut stmt = self.db.prepare_cached(Self::ANCESTOR_INTERSECT_BLOCKS_SQL)?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(targets))?;
+        let mut prev_block_number = tip_block_number;
+        let mut prev_slot_number = tip_slot_number;
+        while let Some(row) = rows.next()? {
+            let block_number: u64 = row.get(0)?;
+            let slot_number: u64 = row.get(1)?;
+            let hash_hex: String = row.get(2)?;
+            if block_number >= prev_block_number {
+                return Err(Error::DataIntegrity(
+                    "Multiple active blocks at one block number".into(),
+                ));
+            }
+            if slot_number >= prev_slot_number {
+                return Err(Error::DataIntegrity(
+                    "Active block slot order does not match block numbers".into(),
+                ));
+            }
+            prev_block_number = block_number;
+            prev_slot_number = slot_number;
+            blocks.push((slot_number, hex::decode(hash_hex)?));
+        }
+        Ok(blocks)
     }
 
     fn sql_find_block_by_hash(&mut self, hash_start: &str) -> Result<Option<Block>, Error> {
@@ -514,6 +582,37 @@ impl SqLiteBlockStore {
             )
             .optional()?)
     }
+
+    #[cfg(test)]
+    pub(crate) fn seed_active_chain_for_test(&mut self, blocks: u64) {
+        let tx = self.db.transaction().unwrap();
+        {
+            let mut insert = tx
+                .prepare(
+                    "INSERT INTO chain (
+                     block_number, slot_number, hash, prev_hash, eta_v,
+                     node_vkey, node_vrf_vkey, eta_vrf_0, eta_vrf_1, leader_vrf_0, leader_vrf_1,
+                     block_size, block_body_hash, pool_opcert, unknown_0, unknown_1, unknown_2,
+                     protocol_major_version, protocol_minor_version, pool_id, block_vrf_0, block_vrf_1, orphaned)
+                     VALUES (?1, ?2, ?3, ?4, ?5, '', '', '', '', '', '',
+                     0, '', '', 0, 0, '', 2, 0, '', '', '', 0)",
+                )
+                .unwrap();
+            let zero_hash = "00".repeat(32);
+            for number in 1..=blocks {
+                insert
+                    .execute(rusqlite::params![
+                        number,
+                        20 * number,
+                        format!("{number:064x}"),
+                        format!("{:064x}", number - 1),
+                        &zero_hash,
+                    ])
+                    .unwrap();
+            }
+        }
+        tx.commit().unwrap();
+    }
 }
 
 impl BlockStore for SqLiteBlockStore {
@@ -531,6 +630,10 @@ impl BlockStore for SqLiteBlockStore {
 
     fn load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, blockstore::Error> {
         Ok(self.sql_load_blocks()?)
+    }
+
+    fn load_intersect_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, blockstore::Error> {
+        Ok(self.sql_load_intersect_blocks()?)
     }
 
     fn find_block_by_hash(&mut self, hash_start: &str) -> Result<Option<Block>, blockstore::Error> {
@@ -596,7 +699,20 @@ mod tests {
                 .execute_batch(
                     "DROP INDEX idx_chain_orphaned_slot_number;
                      DROP INDEX idx_chain_orphaned_block_number;
+                     DROP INDEX idx_chain_active_intersect;
                      UPDATE db_version SET version = 4;",
+                )
+                .unwrap();
+            store
+        }
+
+        fn v5_store(&self) -> SqLiteBlockStore {
+            let store = SqLiteBlockStore::new(&self.db_path()).unwrap();
+            store
+                .db
+                .execute_batch(
+                    "DROP INDEX idx_chain_active_intersect;
+                     UPDATE db_version SET version = 5;",
                 )
                 .unwrap();
             store
@@ -662,6 +778,10 @@ mod tests {
         assert_eq!(
             index_columns(db, "idx_chain_orphaned_block_number"),
             ["orphaned", "block_number"]
+        );
+        assert_eq!(
+            index_columns(db, "idx_chain_active_intersect"),
+            ["orphaned", "block_number", "slot_number", "hash"]
         );
     }
 
@@ -1076,12 +1196,13 @@ mod tests {
         assert_eq!(chain_state(&store), before);
         store.db.execute("UPDATE chain SET hash = 'invalid hex'", []).unwrap();
         assert!(matches!(store.sql_load_blocks(), Err(Error::FromHex(_))));
+        assert!(matches!(store.sql_load_intersect_blocks(), Err(Error::FromHex(_))));
     }
 
     #[test]
     fn schema_metadata_fails_closed() {
         for marker in [
-            "UPDATE db_version SET version = 6",
+            "UPDATE db_version SET version = 7",
             "DROP TABLE db_version",
             "DELETE FROM db_version",
             "INSERT INTO db_version VALUES (3)",
@@ -1115,10 +1236,10 @@ mod tests {
             };
             drop(store);
             let result = SqLiteBlockStore::new(&fixture.db_path());
-            if marker == "UPDATE db_version SET version = 6" {
+            if marker == "UPDATE db_version SET version = 7" {
                 assert!(matches!(
                     result,
-                    Err(Error::UnsupportedSchemaVersion { found: 6, supported: 5 })
+                    Err(Error::UnsupportedSchemaVersion { found: 7, supported: 6 })
                 ));
             } else {
                 assert!(matches!(result, Err(Error::DataIntegrity(_))));
@@ -1242,6 +1363,269 @@ mod tests {
             store.sql_save_slots(1, "pool", 2, "[20,30]", "new").unwrap();
             assert_eq!(store.sql_get_current_slots(1, "pool").unwrap(), (2, "new".into()));
             assert_eq!(store.sql_get_previous_slots(1, "pool").unwrap(), Some("[20,30]".into()));
+        }
+    }
+
+    #[test]
+    fn legacy_versions_zero_through_five_migrate_and_v5_failure_rolls_back() {
+        for version in 0..=5 {
+            let fixture = Fixture::new();
+            let db = Connection::open(fixture.db_path()).unwrap();
+            db.execute_batch("CREATE TABLE db_version(version INTEGER PRIMARY KEY)")
+                .unwrap();
+            db.execute("INSERT INTO db_version VALUES (?1)", [version]).unwrap();
+            if version >= 1 {
+                db.execute_batch(
+                    "CREATE TABLE chain (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                     block_number INTEGER NOT NULL, slot_number INTEGER NOT NULL,
+                     hash TEXT NOT NULL, prev_hash TEXT NOT NULL, eta_v TEXT NOT NULL,
+                     node_vkey TEXT NOT NULL, node_vrf_vkey TEXT NOT NULL,
+                     eta_vrf_0 TEXT NOT NULL, eta_vrf_1 TEXT NOT NULL,
+                     leader_vrf_0 TEXT NOT NULL, leader_vrf_1 TEXT NOT NULL,
+                     block_size INTEGER NOT NULL, block_body_hash TEXT NOT NULL,
+                     pool_opcert TEXT NOT NULL, unknown_0 INTEGER NOT NULL,
+                     unknown_1 INTEGER NOT NULL, unknown_2 TEXT NOT NULL,
+                     protocol_major_version INTEGER NOT NULL, protocol_minor_version INTEGER NOT NULL,
+                     orphaned INTEGER NOT NULL DEFAULT 0);
+                     CREATE INDEX idx_chain_slot_number ON chain(slot_number);
+                     CREATE INDEX idx_chain_orphaned ON chain(orphaned);
+                     CREATE INDEX idx_chain_hash ON chain(hash);
+                     CREATE INDEX idx_chain_block_number ON chain(block_number);",
+                )
+                .unwrap();
+                db.execute(
+                    "INSERT INTO chain (block_number, slot_number, hash, prev_hash, eta_v,
+                     node_vkey, node_vrf_vkey, eta_vrf_0, eta_vrf_1, leader_vrf_0, leader_vrf_1,
+                     block_size, block_body_hash, pool_opcert, unknown_0, unknown_1, unknown_2,
+                     protocol_major_version, protocol_minor_version, orphaned)
+                     VALUES (1, 10, ?1, ?2, ?2, ?3, '', '', '', '', '', 0, '', '', 0, 0, '', 2, 0, 0),
+                            (2, 20, ?4, ?1, ?2, ?3, '', '', '', '', '', 0, '', '', 0, 0, '', 2, 0, 1)",
+                    [
+                        hex::encode([1; 32]),
+                        hex::encode([0; 32]),
+                        hex::encode([4; 32]),
+                        hex::encode([99; 32]),
+                    ],
+                )
+                .unwrap();
+            }
+            if version >= 2 {
+                db.execute_batch(
+                    "CREATE TABLE slots (
+                     id INTEGER PRIMARY KEY AUTOINCREMENT, epoch INTEGER NOT NULL,
+                     pool_id TEXT NOT NULL, slot_qty INTEGER NOT NULL, slots TEXT NOT NULL,
+                     hash TEXT NOT NULL, UNIQUE(epoch,pool_id));",
+                )
+                .unwrap();
+                db.execute(
+                    "INSERT INTO slots(epoch,pool_id,slot_qty,slots,hash) VALUES (1,'pool',1,'[10]','old')",
+                    [],
+                )
+                .unwrap();
+            }
+            if version >= 3 {
+                db.execute_batch(
+                    "CREATE INDEX idx_chain_node_vkey ON chain(node_vkey);
+                     ALTER TABLE chain ADD COLUMN pool_id TEXT NOT NULL DEFAULT '';
+                     CREATE INDEX idx_chain_pool_id ON chain(pool_id);",
+                )
+                .unwrap();
+                db.execute(
+                    "UPDATE chain SET pool_id=?1",
+                    [hex::encode(Hasher::<224>::hash(&[4; 32]))],
+                )
+                .unwrap();
+            }
+            if version >= 4 {
+                db.execute_batch(
+                    "ALTER TABLE chain ADD COLUMN block_vrf_0 TEXT NOT NULL DEFAULT '';
+                     ALTER TABLE chain ADD COLUMN block_vrf_1 TEXT NOT NULL DEFAULT '';",
+                )
+                .unwrap();
+            }
+            if version >= 5 {
+                db.execute_batch(
+                    "CREATE INDEX idx_chain_orphaned_slot_number ON chain(orphaned, slot_number);
+                     CREATE INDEX idx_chain_orphaned_block_number ON chain(orphaned, block_number);",
+                )
+                .unwrap();
+            }
+            drop(db);
+
+            let mut store = SqLiteBlockStore::new(&fixture.db_path()).unwrap();
+            assert_eq!(
+                store
+                    .db
+                    .query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
+                    .unwrap(),
+                SqLiteBlockStore::DB_VERSION
+            );
+            assert_active_chain_indexes(&store.db);
+            if version >= 1 {
+                assert_eq!(store.sql_load_intersect_blocks().unwrap(), vec![(10, vec![1; 32])]);
+                store.sql_save_block(&[header(2, 25, 2, 1)], &"00".repeat(32)).unwrap();
+                assert_eq!(
+                    store.sql_load_intersect_blocks().unwrap(),
+                    vec![(25, vec![2; 32]), (10, vec![1; 32])]
+                );
+            } else {
+                assert!(store.sql_load_intersect_blocks().unwrap().is_empty());
+            }
+        }
+
+        let fixture = Fixture::new();
+        let mut store = fixture.v5_store();
+        store
+            .sql_save_block(
+                &[header(1, 10, 1, 0), header(2, 20, 2, 1), header(3, 30, 3, 2)],
+                &"00".repeat(32),
+            )
+            .unwrap();
+        store.sql_rollback_to(&Point::Specific(20, vec![2; 32])).unwrap();
+        store.sql_save_slots(2, "pool", 1, "[20]", "v5-hash").unwrap();
+        store
+            .db
+            .execute_batch("CREATE TABLE idx_chain_active_intersect (collision)")
+            .unwrap();
+        let chain = persisted_rows(&store.db, "chain");
+        let slots = persisted_rows(&store.db, "slots");
+        drop(store);
+
+        assert!(matches!(
+            SqLiteBlockStore::new(&fixture.db_path()),
+            Err(Error::Sqlite(_))
+        ));
+        let db = Connection::open(fixture.db_path()).unwrap();
+        assert_eq!(
+            db.query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
+                .unwrap(),
+            5
+        );
+        assert_eq!(persisted_rows(&db, "chain"), chain);
+        assert_eq!(persisted_rows(&db, "slots"), slots);
+        db.execute_batch("DROP TABLE idx_chain_active_intersect").unwrap();
+        drop(db);
+
+        let mut store = SqLiteBlockStore::new(&fixture.db_path()).unwrap();
+        assert_active_chain_indexes(&store.db);
+        assert_eq!(
+            store
+                .db
+                .query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
+                .unwrap(),
+            SqLiteBlockStore::DB_VERSION
+        );
+        assert_eq!(
+            store.sql_load_intersect_blocks().unwrap(),
+            vec![(20, vec![2; 32]), (10, vec![1; 32])]
+        );
+    }
+
+    #[test]
+    fn intersect_blocks_uses_covering_index_under_500_vdbe_steps_on_300k_store() {
+        const BLOCKS: u64 = 300_000;
+        let fixture = Fixture::new();
+        let mut store = fixture.v5_store();
+        {
+            let tx = store.db.transaction().unwrap();
+            {
+                let mut insert = tx
+                    .prepare(
+                        "INSERT INTO chain (
+                         block_number, slot_number, hash, prev_hash, eta_v,
+                         node_vkey, node_vrf_vkey, eta_vrf_0, eta_vrf_1, leader_vrf_0, leader_vrf_1,
+                         block_size, block_body_hash, pool_opcert, unknown_0, unknown_1, unknown_2,
+                         protocol_major_version, protocol_minor_version, pool_id, block_vrf_0, block_vrf_1, orphaned)
+                         VALUES (?1, ?2, ?3, ?4, ?5, '', '', '', '', '', '',
+                         0, '', '', 0, 0, '', 2, 0, '', '', '', ?6)",
+                    )
+                    .unwrap();
+                let zero_hash = "00".repeat(32);
+                for number in 1..=BLOCKS {
+                    insert
+                        .execute(rusqlite::params![
+                            number,
+                            20 * number,
+                            format!("{number:064x}"),
+                            format!("{:064x}", number - 1),
+                            &zero_hash,
+                            0,
+                        ])
+                        .unwrap();
+                }
+                // Add orphaned blocks at tip and checkpoint heights to ensure orphans are excluded.
+                for orphan_number in [BLOCKS, BLOCKS - 1, BLOCKS - 1024, BLOCKS + 1] {
+                    insert
+                        .execute(rusqlite::params![
+                            orphan_number,
+                            20 * orphan_number + 5,
+                            "ff".repeat(32),
+                            &zero_hash,
+                            &zero_hash,
+                            1,
+                        ])
+                        .unwrap();
+                }
+            }
+            tx.commit().unwrap();
+        }
+        drop(store);
+
+        let mut store = SqLiteBlockStore::new(&fixture.db_path()).unwrap();
+        for (sql, param_count) in [
+            (SqLiteBlockStore::TIP_INTERSECT_BLOCK_SQL, 0usize),
+            (SqLiteBlockStore::ANCESTOR_INTERSECT_BLOCKS_SQL, 19usize),
+        ] {
+            let plan_details: Vec<String> = store
+                .db
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map(
+                    rusqlite::params_from_iter(std::iter::repeat_n(1_i64, param_count)),
+                    |row| row.get::<_, String>(3),
+                )
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            eprintln!("EXPLAIN QUERY PLAN for load_intersect_blocks: {plan_details:?}");
+            assert!(
+                plan_details
+                    .iter()
+                    .all(|detail| detail.contains("USING COVERING INDEX idx_chain_active_intersect")),
+                "expected exclusively USING COVERING INDEX idx_chain_active_intersect in {plan_details:?}"
+            );
+        }
+
+        let (checkpoints, work) = sqlite_work(&mut store, SqLiteBlockStore::sql_load_intersect_blocks);
+        eprintln!("300k intersect lookup: {work} sampled VM operations");
+        assert!(work < 500, "load_intersect_blocks used {work} VM operations (>= 500)");
+
+        // Also verify exact 1-step granularity VDBE count stays strictly below 500.
+        let exact_steps = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&exact_steps);
+        store
+            .db
+            .progress_handler(
+                1,
+                Some(move || {
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    false
+                }),
+            )
+            .unwrap();
+        let checkpoints_exact = store.sql_load_intersect_blocks().unwrap();
+        store.db.progress_handler(0, None::<fn() -> bool>).unwrap();
+        let steps = exact_steps.load(Ordering::Relaxed);
+        eprintln!("300k intersect lookup exact VDBE steps: {steps}");
+        assert!(steps < 500, "exact VDBE steps {steps} exceeded 500");
+        assert_eq!(checkpoints, checkpoints_exact);
+
+        assert_eq!(checkpoints.len(), 20);
+        for (idx, &offset) in blockstore::INTERSECT_BLOCK_OFFSETS.iter().enumerate() {
+            let expected_number = BLOCKS - offset;
+            let expected_hash = hex::decode(format!("{expected_number:064x}")).unwrap();
+            assert_eq!(checkpoints[idx], (20 * expected_number, expected_hash));
         }
     }
 }

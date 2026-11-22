@@ -36,10 +36,16 @@ pub(crate) struct Block {
     pub(crate) orphaned: bool,
 }
 
+pub(crate) const INTERSECT_BLOCK_OFFSETS: [u64; 20] = [
+    0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144,
+];
+
 pub(crate) trait BlockStore {
     fn save_block(&mut self, pending_blocks: &[BlockHeader], shelley_genesis_hash: &str) -> Result<(), Error>;
     fn rollback_to(&mut self, point: &pallas_network::miniprotocols::Point) -> Result<(), Error>;
+    #[cfg_attr(not(test), allow(dead_code))]
     fn load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error>;
+    fn load_intersect_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error>;
     fn find_block_by_hash(&mut self, hash_start: &str) -> Result<Option<Block>, Error>;
     fn get_tip_slot_number(&mut self) -> Result<u64, Error>;
     fn get_eta_v_before_slot(&mut self, slot_number: u64) -> Result<Hash<32>, Error>;
