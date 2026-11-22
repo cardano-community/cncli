@@ -250,6 +250,7 @@ dependencies = [
  "built",
  "chrono",
  "chrono-tz",
+ "curve25519-dalek 3.2.0 (git+https://github.com/txpipe/curve25519-dalek?branch=ietf03_vrf_compat_ell2)",
  "dashu-int",
  "hex",
  "minicbor",
@@ -267,6 +268,7 @@ dependencies = [
  "serde-aux",
  "serde_cbor",
  "serde_json",
+ "sha2",
  "structopt",
  "thiserror 2.0.21",
  "tokio",
@@ -274,6 +276,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "vrf_dalek",
+ "zeroize",
 ]
 
 [[package]]
