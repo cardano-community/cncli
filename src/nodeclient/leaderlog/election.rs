@@ -1,9 +1,11 @@
 use super::{rational::ExactRatio, Error};
+use curve25519_dalek::{constants::ED25519_BASEPOINT_POINT, edwards::EdwardsPoint, scalar::Scalar};
 use dashu_int::{IBig, UBig};
 use pallas_crypto::hash::{Hash, Hasher};
 use pallas_math::math::{ExpOrdering, FixedDecimal, FixedPrecision};
 use rayon::prelude::*;
-use vrf_dalek::vrf03::{PublicKey03, SecretKey03, VrfProof03};
+use sha2::{Digest, Sha512};
+use zeroize::Zeroize;
 
 pub(super) struct LeaderThreshold {
     width: usize,
@@ -80,9 +82,14 @@ impl LeaderThreshold {
     }
 }
 
+// IETF VRF draft-03 (ECVRF-ED25519-SHA512-Elligator2) domain constants.
+const VRF03_SUITE: u8 = 0x04;
+const VRF03_ONE: u8 = 0x01;
+const VRF03_THREE: u8 = 0x03;
+
 struct PreparedVrf {
-    secret: SecretKey03,
-    public: PublicKey03,
+    scalar: Scalar,
+    public: [u8; 32],
 }
 
 impl PreparedVrf {
@@ -91,13 +98,41 @@ impl PreparedVrf {
             .get(..32)
             .and_then(|bytes| bytes.try_into().ok())
             .ok_or_else(|| Error::Leaderlog("VRF signing key must contain at least 32 bytes".to_string()))?;
-        let secret = SecretKey03::from_bytes(bytes);
-        let public = PublicKey03::from(&secret);
-        Ok(Self { secret, public })
+        let mut digest = Sha512::digest(bytes);
+        let mut secret_bytes = [0u8; 32];
+        secret_bytes.copy_from_slice(&digest[..32]);
+        digest[..].zeroize();
+        secret_bytes[0] &= 248;
+        secret_bytes[31] &= 127;
+        secret_bytes[31] |= 64;
+        let scalar = Scalar::from_bits(secret_bytes);
+        secret_bytes.zeroize();
+        let public = (scalar * ED25519_BASEPOINT_POINT).compress().to_bytes();
+        Ok(Self { scalar, public })
     }
 
     fn evaluate(&self, seed: &[u8; 32]) -> Hash<64> {
-        Hash::from(VrfProof03::generate(&self.public, &self.secret, seed).proof_to_hash())
+        let mut hash_input = [0u8; 66];
+        hash_input[0] = VRF03_SUITE;
+        hash_input[1] = VRF03_ONE;
+        hash_input[2..34].copy_from_slice(&self.public);
+        hash_input[34..66].copy_from_slice(seed);
+        let h = EdwardsPoint::hash_from_bytes::<Sha512>(&hash_input);
+        let gamma_cofac = (self.scalar * h).mul_by_cofactor().compress();
+
+        let mut output_input = [0u8; 34];
+        output_input[0] = VRF03_SUITE;
+        output_input[1] = VRF03_THREE;
+        output_input[2..34].copy_from_slice(gamma_cofac.as_bytes());
+        let mut output = [0u8; 64];
+        output.copy_from_slice(&Sha512::digest(&output_input));
+        Hash::from(output)
+    }
+}
+
+impl Drop for PreparedVrf {
+    fn drop(&mut self) {
+        self.scalar.zeroize();
     }
 }
 
@@ -211,13 +246,102 @@ mod tests {
     use std::io::Write;
     use std::process::{Command, Stdio};
     use std::str::FromStr;
+    use vrf_dalek::vrf03::{PublicKey03, SecretKey03, VrfProof03};
 
     #[test]
     fn prepared_vrf_preserves_compatibility_and_short_key_errors() {
         assert!(matches!(PreparedVrf::new(&[0; 31]), Err(Error::Leaderlog(_))));
         let prepared = PreparedVrf::new(&[0; 32]).unwrap();
-        assert_eq!(hex::encode(prepared.evaluate(&[0; 32])),
-            "2f9e929479cb32192477b6908a57e6ad748f13a96152ebd67cb6345b2c66b5377ebe42828160bd98d29a710f4b4efe3d7a6a1ed49ae9433f5b06c172c11d04a0");
+        assert_eq!(
+            hex::encode(prepared.evaluate(&[0; 32])),
+            "2f9e929479cb32192477b6908a57e6ad748f13a96152ebd67cb6345b2c66b5377ebe42828160bd98d29a710f4b4efe3d7a6a1ed49ae9433f5b06c172c11d04a0"
+        );
+    }
+
+    #[test]
+    fn prepared_vrf_matches_ietf_vrf03_vectors_and_slot_seeds() {
+        for short_len in [0, 1, 16, 31] {
+            let err = PreparedVrf::new(&vec![0u8; short_len]).err().unwrap();
+            assert_eq!(
+                err.to_string(),
+                "Leaderlog error: VRF signing key must contain at least 32 bytes"
+            );
+        }
+
+        // Secret keys, public keys, and alpha prefixes from IETF draft-irtf-cfrg-vrf-03
+        // Section A.3 (ECVRF-ED25519-SHA512-Elligator2) and libsodium vrf03 vectors,
+        // plus Cardano extended 64-byte operational signing keys.
+        let vectors = [
+            (
+                "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+                "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+                "",
+            ),
+            (
+                "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb",
+                "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+                "72",
+            ),
+            (
+                "c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7",
+                "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025",
+                "af82",
+            ),
+            (
+                "ac21b0303ed8b5123ae3bf13f2c627dc9b9c2e04cf1c732364cfe472a5f145c2",
+                "5b14fde6db37a5302f0150a73f6ada5a05a810a24c656482cbdeb51020e92fe7",
+                "230dd4c855c133c5b3c24a72af9bbbc48205984ea4f2045feaac17fe1af9",
+            ),
+            (
+                "adb9c97bec60189aa90d01d113e3ef405f03477d82a94f81da926c90cd46a374e0ff2371508ac339431b50af7d69cde0f120d952bb876806d3136f9a7fda4381",
+                "e0ff2371508ac339431b50af7d69cde0f120d952bb876806d3136f9a7fda4381",
+                "5ac2fd05d52fbcb6",
+            ),
+        ];
+
+        let nonces = [[0u8; 32], [0xffu8; 32], UC_NONCE];
+
+        for (sk_hex, pk_hex, alpha_prefix_hex) in vectors {
+            let sk_raw = hex::decode(sk_hex).unwrap();
+            let expected_pk: [u8; 32] = hex::decode(pk_hex).unwrap().try_into().unwrap();
+
+            let prepared = PreparedVrf::new(&sk_raw).unwrap();
+            assert_eq!(prepared.public, expected_pk);
+
+            let sk_seed: [u8; 32] = sk_raw[..32].try_into().unwrap();
+            let sk03 = SecretKey03::from_bytes(&sk_seed);
+            let pk03 = PublicKey03::from(&sk03);
+            assert_eq!(prepared.public, pk03.to_bytes());
+
+            let mut padded_alpha = [0u8; 32];
+            let alpha_bytes = hex::decode(alpha_prefix_hex).unwrap();
+            padded_alpha[..alpha_bytes.len()].copy_from_slice(&alpha_bytes);
+
+            let mut seeds = vec![[0u8; 32], [0xffu8; 32], padded_alpha];
+            for nonce in &nonces {
+                for slot in [0_u64, 1, 42, 431_999, 10_000_000, 138_240_000, u64::MAX] {
+                    seeds.push(mk_seed(slot, nonce));
+                    seeds.push(mk_input_vrf(slot, nonce));
+                }
+            }
+
+            for seed in &seeds {
+                let proof = VrfProof03::generate(&pk03, &sk03, seed);
+                let expected = Hash::<64>::from(proof.proof_to_hash());
+                let verified = Hash::<64>::from(proof.verify(&pk03, seed).unwrap());
+                assert_eq!(expected, verified);
+                assert_eq!(prepared.evaluate(seed), expected);
+            }
+        }
+
+        let mut uninit = std::mem::MaybeUninit::new(PreparedVrf::new(&[0x42; 32]).unwrap());
+        unsafe {
+            assert_ne!(uninit.assume_init_ref().scalar.as_bytes(), &[0u8; 32]);
+            std::ptr::drop_in_place(uninit.as_mut_ptr());
+            let scalar_ptr = std::ptr::addr_of!((*uninit.as_ptr()).scalar).cast::<u8>();
+            let wiped: [u8; 32] = std::array::from_fn(|i| std::ptr::read_volatile(scalar_ptr.add(i)));
+            assert_eq!(wiped, [0u8; 32]);
+        }
     }
 
     fn ratio(numerator: u64, denominator: u64) -> ExactRatio {
