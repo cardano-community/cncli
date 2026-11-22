@@ -5,6 +5,13 @@ use pallas_math::math::{ExpOrdering, FixedDecimal, FixedPrecision};
 use rayon::prelude::*;
 use vrf_dalek::vrf03::{PublicKey03, SecretKey03, VrfProof03};
 
+fn left_pad_be_bytes(width: usize, natural: &UBig) -> [u8; 64] {
+    let bytes = natural.to_be_bytes();
+    let mut padded = [0_u8; 64];
+    padded[width - bytes.len()..width].copy_from_slice(&bytes);
+    padded
+}
+
 pub(super) struct LeaderThreshold {
     width: usize,
     maximum: IBig,
@@ -12,6 +19,7 @@ pub(super) struct LeaderThreshold {
     sigma: FixedDecimal,
     c: Option<FixedDecimal>,
     x: Option<FixedDecimal>,
+    cutoff_bytes: Option<[u8; 64]>,
 }
 
 impl LeaderThreshold {
@@ -43,14 +51,46 @@ impl LeaderThreshold {
             let x = -(&sigma * &c);
             (Some(c), Some(x))
         };
-        Ok(Self {
+        let mut threshold = Self {
             width,
             maximum,
             maximum_fixed,
             sigma,
             c,
             x,
-        })
+            cutoff_bytes: None,
+        };
+        threshold.cutoff_bytes = threshold.compute_cutoff_bytes()?;
+        Ok(threshold)
+    }
+
+    fn compute_cutoff_bytes(&self) -> Result<Option<[u8; 64]>, Error> {
+        if self.c.is_none() {
+            let mut cutoff = [0_u8; 64];
+            cutoff[..self.width].fill(0xFF);
+            return Ok(Some(cutoff));
+        }
+        if self.sigma == FixedDecimal::from(0_u64) || !self.is_leader(&IBig::ZERO)? {
+            return Ok(None);
+        }
+        if self.is_leader(&self.maximum)? {
+            let mut cutoff = [0_u8; 64];
+            cutoff[..self.width].fill(0xFF);
+            return Ok(Some(cutoff));
+        }
+        let mut low = IBig::ZERO;
+        let mut high = self.maximum.clone();
+        while &high - &low > IBig::ONE {
+            let mid = (&low + &high) >> 1;
+            if self.is_leader(&mid)? {
+                low = mid;
+            } else {
+                high = mid;
+            }
+        }
+        let highest =
+            UBig::try_from(low).map_err(|_| Error::Leaderlog("Elected VRF cutoff must be non-negative".to_string()))?;
+        Ok(Some(left_pad_be_bytes(self.width, &highest)))
     }
 
     // The inclusive consensus bound is a special case in checkLeaderNatValue,
@@ -77,6 +117,18 @@ impl LeaderThreshold {
                 ExpOrdering::LT
             )),
         }
+    }
+
+    pub(super) fn is_leader_bytes(&self, digest: &[u8]) -> Result<bool, Error> {
+        if digest.len() != self.width {
+            return Err(Error::Leaderlog(
+                "VRF digest length does not match threshold width".to_string(),
+            ));
+        }
+        Ok(match &self.cutoff_bytes {
+            None => false,
+            Some(cutoff) => digest <= &cutoff[..self.width],
+        })
     }
 }
 
@@ -147,10 +199,10 @@ pub(super) fn calculate_schedule(
         ));
     }
     let prepared = PreparedVrf::new(vrf_key)?;
-    let full_coefficient = threshold.c.is_none();
-    if !full_coefficient && threshold.sigma == FixedDecimal::from(0_u64) {
+    if threshold.cutoff_bytes.is_none() {
         return Ok(Vec::new());
     }
+    let full_coefficient = threshold.c.is_none();
 
     const CHUNK_SLOTS: u64 = 1024;
     let chunks = slot_count.div_ceil(CHUNK_SLOTS);
@@ -181,15 +233,15 @@ pub(super) fn calculate_schedule(
                         mk_input_vrf(slot, epoch_nonce)
                     };
                     let raw = prepared.evaluate(&seed);
-                    let natural = if mode == "tpraos" {
-                        IBig::from(UBig::from_be_bytes(raw.as_slice()))
+                    let is_elected = if mode == "tpraos" {
+                        threshold.is_leader_bytes(raw.as_slice())?
                     } else {
                         let mut hasher = Hasher::<256>::new();
                         hasher.input(b"L");
                         hasher.input(raw.as_slice());
-                        IBig::from(UBig::from_be_bytes(hasher.finalize().as_slice()))
+                        threshold.is_leader_bytes(hasher.finalize().as_slice())?
                     };
-                    if threshold.is_leader(&natural)? {
+                    if is_elected {
                         elected.push(slot);
                     }
                 }
@@ -411,17 +463,70 @@ mod tests {
 
     #[test]
     fn inclusive_bounds_and_probability_decisions() {
+        let cert_bytes = |width: usize, cert: &IBig| -> Vec<u8> {
+            let natural = UBig::try_from(cert.clone()).unwrap();
+            left_pad_be_bytes(width, &natural)[..width].to_vec()
+        };
         for width in [32, 64] {
+            assert_eq!(&left_pad_be_bytes(width, &UBig::ZERO)[..width], &vec![0_u8; width]);
             let full = LeaderThreshold::new(0, 1, &ratio(1, 1), width).unwrap();
             assert!(full.is_leader(&IBig::ZERO).unwrap());
             assert!(full.is_leader(&full.maximum).unwrap());
+            assert_eq!(&full.cutoff_bytes.unwrap()[..width], &vec![0xFF; width]);
             assert_eq!(full.reciprocal_q(&full.maximum), full.maximum_fixed);
             assert_eq!(full.reciprocal_q(&(&full.maximum - IBig::ONE)), full.maximum_fixed);
             assert!(full.is_leader(&(-IBig::ONE)).is_err());
             assert!(full.is_leader(&(&full.maximum + IBig::ONE)).is_err());
+            assert!(full.is_leader_bytes(&vec![0_u8; width - 1]).is_err());
+            assert!(full.is_leader_bytes(&vec![0_u8; width + 1]).is_err());
+            for cert in [IBig::ZERO, IBig::ONE, &full.maximum - IBig::ONE] {
+                assert!(full.is_leader_bytes(&cert_bytes(width, &cert)).unwrap());
+            }
+
             let zero = LeaderThreshold::new(0, 1, &ratio(1, 20), width).unwrap();
+            assert!(zero.cutoff_bytes.is_none());
             for cert in [IBig::ZERO, IBig::ONE, &zero.maximum - IBig::ONE, zero.maximum.clone()] {
                 assert!(!zero.is_leader(&cert).unwrap());
+                if cert < zero.maximum {
+                    assert!(!zero.is_leader_bytes(&cert_bytes(width, &cert)).unwrap());
+                }
+            }
+
+            let mut rejected_zero = LeaderThreshold::new(1, 2, &ratio(1, 20), width).unwrap();
+            rejected_zero.x = Some(FixedDecimal::from(0_u64));
+            rejected_zero.cutoff_bytes = rejected_zero.compute_cutoff_bytes().unwrap();
+            assert!(rejected_zero.cutoff_bytes.is_none());
+            for cert in [IBig::ZERO, IBig::ONE, &rejected_zero.maximum - IBig::ONE] {
+                assert!(!rejected_zero.is_leader_bytes(&cert_bytes(width, &cert)).unwrap());
+            }
+
+            for (pool, active, f) in [
+                (1, u64::MAX, ratio(1, u64::MAX)),
+                (1, 2, ratio(1, 100000)),
+                (1, 3, ratio(1, 20)),
+                (9, 10, ratio(9, 10)),
+            ] {
+                let threshold = LeaderThreshold::new(pool, active, &f, width).unwrap();
+                let cutoff_slice = &threshold.cutoff_bytes.unwrap()[..width];
+                let cutoff_nat = IBig::from(UBig::from_be_bytes(cutoff_slice));
+                assert!(threshold.is_leader(&cutoff_nat).unwrap());
+                assert!(!threshold.is_leader(&(&cutoff_nat + IBig::ONE)).unwrap());
+                for candidate in [
+                    IBig::ZERO,
+                    IBig::ONE,
+                    &cutoff_nat - IBig::ONE,
+                    cutoff_nat.clone(),
+                    &cutoff_nat + IBig::ONE,
+                    &threshold.maximum - IBig::ONE,
+                ] {
+                    if candidate >= IBig::ZERO && candidate < threshold.maximum {
+                        assert_eq!(
+                            threshold.is_leader_bytes(&cert_bytes(width, &candidate)).unwrap(),
+                            threshold.is_leader(&candidate).unwrap(),
+                            "width={width} pool={pool}/{active} cert={candidate}"
+                        );
+                    }
+                }
             }
         }
         for (pool, active, f, width) in [
@@ -436,7 +541,10 @@ mod tests {
         let boundary =
             IBig::from_str("578961893594933494372516232843189694053309489864580603568403404332973678").unwrap();
         assert!(tiny.is_leader(&boundary).unwrap());
-        assert!(!tiny.is_leader(&(boundary + IBig::ONE)).unwrap());
+        assert!(!tiny.is_leader(&(&boundary + IBig::ONE)).unwrap());
+        assert_eq!(&tiny.cutoff_bytes.unwrap()[..32], cert_bytes(32, &boundary).as_slice());
+        assert!(tiny.is_leader_bytes(&cert_bytes(32, &boundary)).unwrap());
+        assert!(!tiny.is_leader_bytes(&cert_bytes(32, &(&boundary + IBig::ONE))).unwrap());
         let mut exhausted = LeaderThreshold::new(1, 1, &ratio(1, 2), 32).unwrap();
         exhausted.x = Some(FixedDecimal::from(1_000_000_u64));
         assert_eq!(
@@ -449,6 +557,30 @@ mod tests {
             ExpOrdering::UNKNOWN
         );
         assert!(!exhausted.is_leader(&IBig::ZERO).unwrap());
+        assert!(exhausted.compute_cutoff_bytes().unwrap().is_none());
+
+        for (index, line) in include_str!("../../../tests/data/leaderlog/node-vectors.tsv")
+            .lines()
+            .enumerate()
+        {
+            let fields: Vec<_> = line.split_whitespace().collect();
+            let width: usize = fields[0].parse().unwrap();
+            let cert = IBig::from_str(fields[1]).unwrap();
+            let threshold = LeaderThreshold::new(
+                fields[2].parse().unwrap(),
+                fields[3].parse().unwrap(),
+                &ratio(fields[4].parse().unwrap(), fields[5].parse().unwrap()),
+                width,
+            )
+            .unwrap();
+            if cert < threshold.maximum {
+                assert_eq!(
+                    threshold.is_leader_bytes(&cert_bytes(width, &cert)).unwrap(),
+                    threshold.is_leader(&cert).unwrap(),
+                    "byte cutoff parity row {index}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -471,6 +603,27 @@ mod tests {
         assert!(!slots.contains(&0));
         assert!(slots.contains(&2499));
         assert!(!slots.contains(&2500));
+
+        for (mode, wrong_mode, width) in [
+            ("tpraos", "praos", 64),
+            ("praos", "tpraos", 32),
+            ("cpraos", "tpraos", 32),
+        ] {
+            let mut rejected_zero = LeaderThreshold::new(1, 2, &ratio(1, 20), width).unwrap();
+            rejected_zero.x = Some(FixedDecimal::from(0_u64));
+            rejected_zero.cutoff_bytes = rejected_zero.compute_cutoff_bytes().unwrap();
+            for empty in [LeaderThreshold::new(0, 1, &ratio(1, 20), width).unwrap(), rejected_zero] {
+                assert!(empty.cutoff_bytes.is_none());
+                assert!(calculate_schedule(0, 10, "bad", &ratio(0, 1), &nonce, &key, &empty).is_err());
+                assert!(calculate_schedule(0, 10, wrong_mode, &ratio(0, 1), &nonce, &key, &empty).is_err());
+                assert!(calculate_schedule(u64::MAX, 2, mode, &ratio(0, 1), &nonce, &key, &empty).is_err());
+                assert!(calculate_schedule(0, 10, mode, &ratio(0, 1), &nonce, &[0; 31], &empty).is_err());
+                assert!(calculate_schedule(0, 60, mode, &ratio(0, 1), &nonce, &key, &empty)
+                    .unwrap()
+                    .is_empty());
+            }
+        }
+
         let praos = LeaderThreshold::new(1, 3, &ratio(1, 3), 32).unwrap();
         let expected = calculate_schedule(10_000_000, 60, "praos", &ratio(0, 1), &nonce, &key, &praos).unwrap();
         for mode in ["praos", "cpraos"] {
