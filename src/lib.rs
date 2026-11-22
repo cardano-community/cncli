@@ -486,6 +486,7 @@ pub async fn start(cmd: &Command) -> Result<(), Box<dyn std::error::Error + Send
             if !cardano_node.is_file() {
                 return Err("cardano-node not found!".into());
             }
+            let (_version_watcher, node_version) = pooltool::NodeVersionWatcher::spawn(cardano_node.clone()).await?;
             let client = reqwest::Client::builder()
                 .user_agent(APP_USER_AGENT)
                 .connect_timeout(std::time::Duration::from_secs(5))
@@ -494,7 +495,7 @@ pub async fn start(cmd: &Command) -> Result<(), Box<dyn std::error::Error + Send
             let mut tasks = tokio::task::JoinSet::new();
             for pool in pooltool_config.pools {
                 let api_key = pooltool_config.api_key.clone();
-                let cardano_node_path = cardano_node.clone();
+                let node_version = node_version.clone();
                 let client = client.clone();
                 tasks.spawn(async move {
                     sync::sendtip(
@@ -503,12 +504,13 @@ pub async fn start(cmd: &Command) -> Result<(), Box<dyn std::error::Error + Send
                         pool.host,
                         pool.port,
                         api_key,
-                        &cardano_node_path,
+                        node_version,
                         client,
                     )
                     .await
                 });
             }
+            drop(node_version);
             while let Some(result) = tasks.join_next().await {
                 result??;
             }

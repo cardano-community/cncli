@@ -39,6 +39,7 @@ uuid = { version = "1.26.1", features = ["v7"] }
 
 [dev-dependencies]
 rusqlite = { version = "0.40.2", features = ["hooks"] }
+tokio = { version = "1.53.1", features = ["test-util"] }
 
 [build-dependencies]
 built = { version = "0.8.1", features = ["git2"] }

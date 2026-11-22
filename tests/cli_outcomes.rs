@@ -126,6 +126,130 @@ async fn configuration_read_and_json_failures_are_command_errors() {
     );
 }
 
+fn write_node_script(dir: &Path, mode: &str) -> PathBuf {
+    fs::write(dir.join("mode"), mode).unwrap();
+    let _ = fs::remove_file(dir.join("spawns"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = dir.join("cardano-node");
+        let script = concat!(
+            "#!/bin/sh\n",
+            "dir=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n",
+            "printf '1\\n' >> \"$dir/spawns\"\n",
+            "mode=$(cat \"$dir/mode\")\n",
+            "case \"$mode\" in\n",
+            "  ok) printf 'cardano-node 10.1.0 linux\\ngit rev abcdef012345\\n' ;;\n",
+            "  bad) printf 'unrecognized\\n' ;;\n",
+            "  exit) exit 1 ;;\n",
+            "  timeout) exec sleep 10 ;;\n",
+            "  *) exit 2 ;;\n",
+            "esac\n",
+        );
+        fs::write(&path, script).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        path
+    }
+    #[cfg(windows)]
+    {
+        let path = dir.join("cardano-node.cmd");
+        let script = concat!(
+            "@echo off\r\n",
+            "echo 1>>\"%~dp0spawns\"\r\n",
+            "set /p mode=<\"%~dp0mode\"\r\n",
+            "if \"%mode%\"==\"ok\" (\r\n",
+            "  echo cardano-node 10.1.0 windows\r\n",
+            "  echo git rev abcdef012345\r\n",
+            "  exit /b 0\r\n",
+            ")\r\n",
+            "if \"%mode%\"==\"bad\" (\r\n",
+            "  echo unrecognized\r\n",
+            "  exit /b 0\r\n",
+            ")\r\n",
+            "if \"%mode%\"==\"exit\" exit /b 1\r\n",
+            "if \"%mode%\"==\"timeout\" ping -n 11 127.0.0.1 >nul\r\n",
+        );
+        fs::write(&path, script).unwrap();
+        path
+    }
+}
+
+fn spawn_count(dir: &Path) -> usize {
+    fs::read_to_string(dir.join("spawns"))
+        .map(|contents| contents.lines().count())
+        .unwrap_or(0)
+}
+
+#[tokio::test]
+async fn sendtip_validates_node_version_once_before_opening_peer_sessions() {
+    let dir = FixtureDir::new();
+    let listeners = [
+        TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        TcpListener::bind("127.0.0.1:0").await.unwrap(),
+        TcpListener::bind("127.0.0.1:0").await.unwrap(),
+    ];
+    let config = dir.0.join("pooltool.json");
+    let pools: Vec<Value> = listeners
+        .iter()
+        .enumerate()
+        .map(|(idx, listener)| {
+            serde_json::json!({
+                "name": format!("POOL{idx}"),
+                "pool_id": format!("{:056x}", idx + 1),
+                "host": "127.0.0.1",
+                "port": listener.local_addr().unwrap().port(),
+            })
+        })
+        .collect();
+    fs::write(
+        &config,
+        serde_json::to_vec(&serde_json::json!({
+            "api_key": "test-api-key",
+            "pools": pools,
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    for mode in ["bad", "exit", "timeout"] {
+        let node = write_node_script(&dir.0, mode);
+        let child = Process::spawn(cli().args([
+            "sendtip",
+            "--config",
+            config.to_str().unwrap(),
+            "--cardano-node",
+            node.to_str().unwrap(),
+        ]));
+        tokio::select! {
+            biased;
+            accepted = listeners[0].accept() => panic!("peer 0 accepted connection on {mode}: {accepted:?}"),
+            accepted = listeners[1].accept() => panic!("peer 1 accepted connection on {mode}: {accepted:?}"),
+            accepted = listeners[2].accept() => panic!("peer 2 accepted connection on {mode}: {accepted:?}"),
+            output = child.output() => { error(&output); }
+        }
+        assert_eq!(spawn_count(&dir.0), 1, "expected 1 version check on {mode}");
+    }
+
+    let node = write_node_script(&dir.0, "ok");
+    let mut child = Process::spawn(cli().args([
+        "sendtip",
+        "--config",
+        config.to_str().unwrap(),
+        "--cardano-node",
+        node.to_str().unwrap(),
+    ]));
+    let (peer0, peer1, peer2) = tokio::join!(
+        Peer::accept(&listeners[0]),
+        Peer::accept(&listeners[1]),
+        Peer::accept(&listeners[2]),
+    );
+    assert_eq!(spawn_count(&dir.0), 1);
+    child.stop();
+    peer0.close().await;
+    peer1.close().await;
+    peer2.close().await;
+}
+
 fn ping(port: u16) -> Process {
     Process::spawn(cli().args([
         "ping",

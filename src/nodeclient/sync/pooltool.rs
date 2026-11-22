@@ -8,9 +8,11 @@ use crate::nodeclient::sync::BlockHeader;
 use chrono::{SecondsFormat, Utc};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tracing::instrument::WithSubscriber;
 use tracing::{error, info};
 
 pub(crate) const POOLTOOL_BASE_URL: &str = "https://api.pooltool.io";
+const NODE_VERSION_REFRESH_INTERVAL: Duration = Duration::from_secs(3600);
 
 pub(crate) fn get_pooltool_config(config: &Path) -> Result<PooltoolConfig, Box<dyn std::error::Error + Send + Sync>> {
     let config: PooltoolConfig = serde_json::from_reader(BufReader::new(File::open(config)?))?;
@@ -93,12 +95,103 @@ struct PooltoolData1 {
     platform: String,
 }
 
+async fn read_node_version(cardano_node_path: &Path) -> Result<String, super::Error> {
+    let output = tokio::time::timeout(
+        Duration::from_secs(5),
+        tokio::process::Command::new(cardano_node_path)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .kill_on_drop(true)
+            .output(),
+    )
+    .await
+    .map_err(|_| super::Error::Reporter("cardano-node version deadline exceeded".into()))?
+    .map_err(|_| super::Error::Reporter("Cannot execute cardano-node version command".into()))?;
+    if !output.status.success() {
+        return Err(super::Error::Reporter("cardano-node version command failed".into()));
+    }
+    let version = String::from_utf8(output.stdout)
+        .map_err(|_| super::Error::Reporter("Invalid cardano-node version output".into()))?;
+    static VERSION_REGEX: std::sync::LazyLock<Result<Regex, regex::Error>> =
+        std::sync::LazyLock::new(|| Regex::new(r"cardano-node (\d+\.\d+\.\d+) .*\r?\ngit rev ([a-f\d]{5}).*"));
+    let regex = VERSION_REGEX
+        .as_ref()
+        .map_err(|_| super::Error::Reporter("Invalid node version matcher".into()))?;
+    let captures = regex
+        .captures(&version)
+        .ok_or_else(|| super::Error::Reporter("Unrecognized cardano-node version output".into()))?;
+    let release = captures
+        .get(1)
+        .ok_or_else(|| super::Error::Reporter("Missing node release".into()))?;
+    let revision = captures
+        .get(2)
+        .ok_or_else(|| super::Error::Reporter("Missing node revision".into()))?;
+    Ok(format!("{}:{}", release.as_str(), revision.as_str()))
+}
+
+pub(crate) struct NodeVersionWatcher {
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl NodeVersionWatcher {
+    pub(crate) async fn spawn(
+        cardano_node_path: PathBuf,
+    ) -> Result<(Self, tokio::sync::watch::Receiver<String>), super::Error> {
+        let initial_version = read_node_version(&cardano_node_path).await?;
+        let (sender, receiver) = tokio::sync::watch::channel(initial_version);
+        let mut interval = tokio::time::interval_at(
+            tokio::time::Instant::now() + NODE_VERSION_REFRESH_INTERVAL,
+            NODE_VERSION_REFRESH_INTERVAL,
+        );
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        let task = tokio::spawn(
+            async move {
+                loop {
+                    tokio::select! {
+                        _ = sender.closed() => break,
+                        _ = interval.tick() => {}
+                    }
+                    let refresh = tokio::select! {
+                        _ = sender.closed() => break,
+                        result = read_node_version(&cardano_node_path) => result,
+                    };
+                    match refresh {
+                        Ok(version) => {
+                            sender.send_if_modified(|current| {
+                                if *current == version {
+                                    false
+                                } else {
+                                    *current = version;
+                                    true
+                                }
+                            });
+                        }
+                        Err(_) => error!("Cannot refresh cardano-node version; retaining verified version"),
+                    }
+                }
+            }
+            .with_current_subscriber(),
+        );
+        Ok((Self { task }, receiver))
+    }
+
+    #[cfg(test)]
+    fn is_finished(&self) -> bool {
+        self.task.is_finished()
+    }
+}
+
+impl Drop for NodeVersionWatcher {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 pub(crate) struct PoolToolNotifier {
     pool_id: String,
     api_key: String,
-    cardano_node_path: PathBuf,
-    last_node_version_time: Instant,
-    node_version: String,
+    node_version: tokio::sync::watch::Receiver<String>,
     client: reqwest::Client,
     base_url: String,
 }
@@ -108,7 +201,7 @@ impl PoolToolNotifier {
         _pool_name: String,
         pool_id: String,
         api_key: String,
-        cardano_node_path: PathBuf,
+        node_version: tokio::sync::watch::Receiver<String>,
         client: reqwest::Client,
         base_url: String,
     ) -> Result<Self, super::Error> {
@@ -120,50 +213,14 @@ impl PoolToolNotifier {
         Ok(Self {
             pool_id,
             api_key,
-            cardano_node_path,
+            node_version,
             client,
             base_url,
-            last_node_version_time: Instant::now(),
-            node_version: String::new(),
         })
     }
 
-    async fn read_node_version(&self) -> Result<String, super::Error> {
-        let output = tokio::time::timeout(
-            Duration::from_secs(5),
-            tokio::process::Command::new(&self.cardano_node_path)
-                .arg("--version")
-                .stdin(Stdio::null())
-                .stderr(Stdio::null())
-                .kill_on_drop(true)
-                .output(),
-        )
-        .await
-        .map_err(|_| super::Error::Reporter("cardano-node version deadline exceeded".into()))?
-        .map_err(|_| super::Error::Reporter("Cannot execute cardano-node version command".into()))?;
-        if !output.status.success() {
-            return Err(super::Error::Reporter("cardano-node version command failed".into()));
-        }
-        let version = String::from_utf8(output.stdout)
-            .map_err(|_| super::Error::Reporter("Invalid cardano-node version output".into()))?;
-        static VERSION_REGEX: std::sync::LazyLock<Result<Regex, regex::Error>> =
-            std::sync::LazyLock::new(|| Regex::new(r"cardano-node (\d+\.\d+\.\d+) .*\r?\ngit rev ([a-f\d]{5}).*"));
-        let regex = VERSION_REGEX
-            .as_ref()
-            .map_err(|_| super::Error::Reporter("Invalid node version matcher".into()))?;
-        let captures = regex
-            .captures(&version)
-            .ok_or_else(|| super::Error::Reporter("Unrecognized cardano-node version output".into()))?;
-        let release = captures
-            .get(1)
-            .ok_or_else(|| super::Error::Reporter("Missing node release".into()))?;
-        let revision = captures
-            .get(2)
-            .ok_or_else(|| super::Error::Reporter("Missing node revision".into()))?;
-        Ok(format!("{}:{}", release.as_str(), revision.as_str()))
-    }
-
     fn request_for(&self, header: &BlockHeader) -> Result<reqwest::RequestBuilder, super::Error> {
+        let node_version = self.node_version.borrow().clone();
         let (endpoint, body) = if header.block_vrf_0.is_empty() {
             (
                 "/v0/sendstats",
@@ -172,7 +229,7 @@ impl PoolToolNotifier {
                     pool_id: self.pool_id.clone(),
                     data: PooltoolData0 {
                         node_id: String::new(),
-                        version: self.node_version.clone(),
+                        version: node_version,
                         at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
                         block_no: header.block_number,
                         slot_no: header.slot_number,
@@ -195,7 +252,7 @@ impl PoolToolNotifier {
                     pool_id: self.pool_id.clone(),
                     data: PooltoolData1 {
                         node_id: String::new(),
-                        version: self.node_version.clone(),
+                        version: node_version,
                         at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
                         block_no: header.block_number,
                         slot_no: header.slot_number,
@@ -220,18 +277,9 @@ impl PoolToolNotifier {
         &mut self,
         mut tips: tokio::sync::watch::Receiver<Option<BlockHeader>>,
     ) -> Result<(), super::Error> {
-        self.node_version = self.read_node_version().await?;
-        self.last_node_version_time = Instant::now();
         loop {
             if tips.changed().await.is_err() {
                 return Ok(());
-            }
-            if self.last_node_version_time.elapsed() >= Duration::from_secs(3600) {
-                self.last_node_version_time = Instant::now();
-                match self.read_node_version().await {
-                    Ok(version) => self.node_version = version,
-                    Err(_) => error!("Cannot refresh cardano-node version; retaining verified version"),
-                }
             }
             // Serialize while borrowing, then release the watch guard before HTTP awaits.
             let request = {
@@ -268,56 +316,95 @@ mod tests {
     use std::io::{Read, Write};
     use std::net::{TcpListener, TcpStream};
     use std::sync::{Arc, Mutex};
-    use tracing::instrument::WithSubscriber;
 
     const SECRET: &str = "CNCLI_TEST_SECRET_DO_NOT_LOG";
 
-    struct NodeFixture(PathBuf);
+    struct NodeFixture {
+        dir: PathBuf,
+        bin: PathBuf,
+    }
     impl NodeFixture {
         fn new(mode: &str) -> Self {
             let dir = std::env::temp_dir().join(format!("cncli-node-{}", uuid::Uuid::now_v7()));
             std::fs::create_dir(&dir).unwrap();
+            std::fs::write(dir.join("mode"), mode).unwrap();
             #[cfg(unix)]
-            {
+            let bin = {
                 use std::os::unix::fs::PermissionsExt;
-                let body = match mode {
-                    "ok" => "printf 'cardano-node 10.1.0 linux\\ngit rev abcdef012345\\n'",
-                    "bad" => "printf 'unrecognized\\n'",
-                    "exit" => "exit 1",
-                    "timeout" => "exec sleep 10",
-                    _ => unreachable!(),
-                };
                 let path = dir.join("cardano-node");
-                std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+                let script = concat!(
+                    "#!/bin/sh\n",
+                    "dir=$(CDPATH= cd -- \"$(dirname -- \"$0\")\" && pwd)\n",
+                    "printf '1\\n' >> \"$dir/spawns\"\n",
+                    "mode=$(cat \"$dir/mode\")\n",
+                    "case \"$mode\" in\n",
+                    "  ok) printf 'cardano-node 10.1.0 linux\\ngit rev abcdef012345\\n' ;;\n",
+                    "  upgrade) printf 'cardano-node 10.2.0 linux\\ngit rev 1234567890ab\\n' ;;\n",
+                    "  bad) printf 'unrecognized\\n' ;;\n",
+                    "  exit) exit 1 ;;\n",
+                    "  timeout) exec sleep 10 ;;\n",
+                    "  *) exit 2 ;;\n",
+                    "esac\n",
+                );
+                std::fs::write(&path, script).unwrap();
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700)).unwrap();
-                Self(path)
-            }
+                path
+            };
             #[cfg(windows)]
-            {
-                let body = match mode {
-                    "ok" => "echo cardano-node 10.1.0 windows\r\necho git rev abcdef012345",
-                    "bad" => "echo unrecognized",
-                    "exit" => "exit /b 1",
-                    "timeout" => "ping -n 11 127.0.0.1 >nul",
-                    _ => unreachable!(),
-                };
+            let bin = {
                 let path = dir.join("cardano-node.cmd");
-                std::fs::write(&path, format!("@echo off\r\n{body}\r\n")).unwrap();
-                Self(path)
-            }
+                let script = concat!(
+                    "@echo off\r\n",
+                    "echo 1>>\"%~dp0spawns\"\r\n",
+                    "set /p mode=<\"%~dp0mode\"\r\n",
+                    "if \"%mode%\"==\"ok\" (\r\n",
+                    "  echo cardano-node 10.1.0 windows\r\n",
+                    "  echo git rev abcdef012345\r\n",
+                    "  exit /b 0\r\n",
+                    ")\r\n",
+                    "if \"%mode%\"==\"upgrade\" (\r\n",
+                    "  echo cardano-node 10.2.0 windows\r\n",
+                    "  echo git rev 1234567890ab\r\n",
+                    "  exit /b 0\r\n",
+                    ")\r\n",
+                    "if \"%mode%\"==\"bad\" (\r\n",
+                    "  echo unrecognized\r\n",
+                    "  exit /b 0\r\n",
+                    ")\r\n",
+                    "if \"%mode%\"==\"exit\" exit /b 1\r\n",
+                    "if \"%mode%\"==\"timeout\" ping -n 11 127.0.0.1 >nul\r\n",
+                );
+                std::fs::write(&path, script).unwrap();
+                path
+            };
+            Self { dir, bin }
+        }
+
+        fn set_mode(&self, mode: &str) {
+            std::fs::write(self.dir.join("mode"), mode).unwrap();
+        }
+
+        fn spawns(&self) -> usize {
+            std::fs::read_to_string(self.dir.join("spawns"))
+                .map(|contents| contents.lines().count())
+                .unwrap_or(0)
         }
     }
     impl Drop for NodeFixture {
         fn drop(&mut self) {
-            std::fs::remove_dir_all(self.0.parent().unwrap()).unwrap();
+            std::fs::remove_dir_all(&self.dir).unwrap();
         }
     }
-    fn notifier(node: &NodeFixture, base_url: String) -> PoolToolNotifier {
+    fn notifier_with_pool(
+        pool_id: &str,
+        node_version: tokio::sync::watch::Receiver<String>,
+        base_url: String,
+    ) -> PoolToolNotifier {
         PoolToolNotifier::new(
             "test".into(),
-            "短".into(),
+            pool_id.into(),
             SECRET.into(),
-            node.0.clone(),
+            node_version,
             reqwest::Client::builder()
                 .no_proxy()
                 .timeout(Duration::from_secs(5))
@@ -326,6 +413,9 @@ mod tests {
             base_url,
         )
         .unwrap()
+    }
+    fn notifier(node_version: tokio::sync::watch::Receiver<String>, base_url: String) -> PoolToolNotifier {
+        notifier_with_pool("短", node_version, base_url)
     }
     fn header(number: u64, v1: bool) -> BlockHeader {
         BlockHeader {
@@ -409,7 +499,8 @@ mod tests {
         for v1 in [false, true] {
             let node = NodeFixture::new("ok");
             let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-            let mut notifier = notifier(&node, format!("http://{}", listener.local_addr().unwrap()));
+            let (_watcher, node_version) = NodeVersionWatcher::spawn(node.bin.clone()).await.unwrap();
+            let mut notifier = notifier(node_version, format!("http://{}", listener.local_addr().unwrap()));
             let (tx, rx) = tokio::sync::watch::channel(None);
             let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
             let server = std::thread::spawn(move || {
@@ -499,7 +590,8 @@ mod tests {
         for invalidate in [false, true] {
             let node = NodeFixture::new("ok");
             let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-            let mut notifier = notifier(&node, format!("http://{}", listener.local_addr().unwrap()));
+            let (_watcher, node_version) = NodeVersionWatcher::spawn(node.bin.clone()).await.unwrap();
+            let mut notifier = notifier(node_version, format!("http://{}", listener.local_addr().unwrap()));
             let (tx, rx) = tokio::sync::watch::channel(None);
             let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
             let (release_tx, release_rx) = std::sync::mpsc::channel();
@@ -555,15 +647,239 @@ mod tests {
             let node = NodeFixture::new(mode);
             let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
             listener.set_nonblocking(true).unwrap();
-            let mut notifier = notifier(&node, format!("http://{}", listener.local_addr().unwrap()));
+            let base_url = format!("http://{}", listener.local_addr().unwrap());
             let (tx, rx) = tokio::sync::watch::channel(None);
             tx.send_replace(Some(header(1, false)));
-            assert!(tokio::time::timeout(Duration::from_secs(8), notifier.run(rx))
+            let startup = async {
+                let (_watcher, node_version) = NodeVersionWatcher::spawn(node.bin.clone()).await?;
+                let mut notifier = notifier(node_version, base_url);
+                notifier.run(rx).await
+            };
+            assert!(tokio::time::timeout(Duration::from_secs(8), startup)
                 .await
                 .unwrap()
                 .is_err());
             assert_eq!(listener.accept().unwrap_err().kind(), std::io::ErrorKind::WouldBlock);
         }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn shared_watcher_updates_multiple_notifiers_once_per_hour_and_stops_when_closed() {
+        tokio::time::resume();
+        let node = NodeFixture::new("ok");
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+        let (watcher, node_version) = NodeVersionWatcher::spawn(node.bin.clone()).await.unwrap();
+        assert_eq!(node.spawns(), 1);
+
+        let mut observer = node_version.clone();
+        let mut notifier_a = notifier_with_pool("pool-a", node_version.clone(), base_url.clone());
+        let mut notifier_b = notifier_with_pool("pool-b", node_version, base_url);
+        let (tx_a, rx_a) = tokio::sync::watch::channel(None);
+        let (tx_b, rx_b) = tokio::sync::watch::channel(None);
+        let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
+        let server = std::thread::spawn(move || {
+            for _ in 0..4 {
+                let (stream, _, payload) = receive(&listener);
+                respond(stream, 200);
+                seen_tx.send(payload).unwrap();
+            }
+        });
+        let worker_a = tokio::spawn(async move { notifier_a.run(rx_a).await });
+        let worker_b = tokio::spawn(async move { notifier_b.run(rx_b).await });
+
+        tx_a.send_replace(Some(header(1, false)));
+        tx_b.send_replace(Some(header(1, false)));
+        for _ in 0..2 {
+            let payload = tokio::time::timeout(Duration::from_secs(10), seen_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(payload["data"]["version"], "10.1.0:abcde");
+        }
+        assert_eq!(node.spawns(), 1);
+
+        node.set_mode("upgrade");
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(5), observer.changed())
+            .await
+            .unwrap()
+            .unwrap();
+
+        tx_a.send_replace(Some(header(2, false)));
+        tx_b.send_replace(Some(header(2, false)));
+        for _ in 0..2 {
+            let payload = tokio::time::timeout(Duration::from_secs(10), seen_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(payload["data"]["version"], "10.2.0:12345");
+        }
+        assert_eq!(node.spawns(), 2);
+
+        // MissedTickBehavior::Delay must coalesce overdue ticks into one refresh instead of bursting.
+        node.set_mode("ok");
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(7500)).await;
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(5), observer.changed())
+            .await
+            .unwrap()
+            .unwrap();
+        drop(observer);
+        tokio::time::sleep(Duration::from_millis(30)).await;
+        assert_eq!(node.spawns(), 3);
+
+        drop(tx_a);
+        drop(tx_b);
+        worker_a.await.unwrap().unwrap();
+        worker_b.await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !watcher.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        tokio::time::resume();
+        tokio::task::yield_now().await;
+        assert_eq!(node.spawns(), 3);
+        server.join().unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn failed_or_timed_out_hourly_refresh_logs_retains_version_and_never_stalls_tips() {
+        tokio::time::resume();
+        let node = NodeFixture::new("ok");
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let base_url = format!("http://{}", listener.local_addr().unwrap());
+
+        let logs = Arc::new(Mutex::new(Vec::new()));
+        let writer = LogWriter(logs.clone());
+        let subscriber = tracing::Dispatch::new(
+            tracing_subscriber::fmt()
+                .with_max_level(tracing::Level::TRACE)
+                .with_ansi(false)
+                .without_time()
+                .with_writer(move || writer.clone())
+                .finish(),
+        );
+
+        let (watcher, node_version) = async { NodeVersionWatcher::spawn(node.bin.clone()).await.unwrap() }
+            .with_subscriber(subscriber.clone())
+            .await;
+        assert_eq!(node.spawns(), 1);
+
+        let mut notifier = notifier(node_version, base_url);
+        let (tx, rx) = tokio::sync::watch::channel(None);
+        let (seen_tx, mut seen_rx) = tokio::sync::mpsc::unbounded_channel();
+        let server = std::thread::spawn(move || {
+            for _ in 0..4 {
+                let (stream, _, payload) = receive(&listener);
+                respond(stream, 200);
+                seen_tx.send(payload).unwrap();
+            }
+        });
+        let worker = tokio::spawn(async move { notifier.run(rx).await }.with_subscriber(subscriber));
+
+        let error_log_count = || {
+            String::from_utf8(logs.lock().unwrap().clone())
+                .unwrap()
+                .matches("Cannot refresh cardano-node version; retaining verified version")
+                .count()
+        };
+
+        for (step, mode) in [(1, "bad"), (2, "exit")] {
+            node.set_mode(mode);
+            let expected_spawns = step + 1;
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(3600)).await;
+            tokio::time::resume();
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while node.spawns() < expected_spawns || error_log_count() < step {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            })
+            .await
+            .unwrap();
+
+            let sent_at = Utc::now();
+            let started = Instant::now();
+            tx.send_replace(Some(header(step as u64, false)));
+            let payload = tokio::time::timeout(Duration::from_secs(5), seen_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(started.elapsed() < Duration::from_secs(1));
+            assert_eq!(payload["data"]["version"], "10.1.0:abcde");
+            let stamped = chrono::DateTime::parse_from_rfc3339(payload["data"]["at"].as_str().unwrap())
+                .unwrap()
+                .with_timezone(&Utc);
+            assert!((stamped - sent_at).num_milliseconds().abs() < 1000);
+        }
+
+        // Trigger an hourly refresh that hangs for 10s, then send a tip mid-refresh.
+        node.set_mode("timeout");
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(3600)).await;
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while node.spawns() < 4 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        let sent_at = Utc::now();
+        let tip_started = Instant::now();
+        tx.send_replace(Some(header(3, false)));
+        let payload = tokio::time::timeout(Duration::from_secs(1), seen_rx.recv())
+            .await
+            .expect("tip delivery stalled behind background refresh subprocess")
+            .unwrap();
+        assert!(tip_started.elapsed() < Duration::from_secs(1));
+        assert_eq!(payload["data"]["version"], "10.1.0:abcde");
+        let stamped = chrono::DateTime::parse_from_rfc3339(payload["data"]["at"].as_str().unwrap())
+            .unwrap()
+            .with_timezone(&Utc);
+        assert!((stamped - sent_at).num_milliseconds().abs() < 1000);
+
+        // Advance paused clock by 5s to trip the background subprocess timeout without waiting 5s.
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(5)).await;
+        tokio::time::resume();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while error_log_count() < 3 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap();
+
+        tx.send_replace(Some(header(4, false)));
+        let payload = tokio::time::timeout(Duration::from_secs(5), seen_rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(payload["data"]["version"], "10.1.0:abcde");
+
+        drop(tx);
+        worker.await.unwrap().unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !watcher.is_finished() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        server.join().unwrap();
+
+        assert_eq!(error_log_count(), 3);
     }
 
     #[test]
