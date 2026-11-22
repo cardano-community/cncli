@@ -346,16 +346,12 @@ fn get_intersect_blocks(block_store: &mut dyn BlockStore) -> Result<Vec<Point>, 
     let start = Instant::now();
     debug!("get_intersect_blocks");
 
-    let mut chain_blocks: Vec<Point> = vec![];
-
     /* Classic sync: Use blocks from store if available. */
-    let blocks = block_store.load_blocks()?;
-    for (i, (slot, hash)) in blocks.iter().enumerate() {
-        // Tip, then exponentially spaced ancestors (including its immediate parent).
-        if i == 0 || i.is_power_of_two() {
-            chain_blocks.push(Point::Specific(*slot, hash.clone()));
-        }
-    }
+    let mut chain_blocks: Vec<Point> = block_store
+        .load_intersect_blocks()?
+        .into_iter()
+        .map(|(slot, hash)| Point::Specific(slot, hash))
+        .collect();
 
     chain_blocks.extend(bootstrap_points());
     chain_blocks.push(Point::Origin);
@@ -1029,6 +1025,133 @@ mod tests {
                     .unwrap()
                     .orphaned
             );
+        }
+    }
+
+    fn legacy_get_intersect_blocks(block_store: &mut dyn BlockStore) -> Vec<Point> {
+        let mut chain_blocks = Vec::new();
+        let blocks = block_store.load_blocks().unwrap();
+        for (i, (slot, hash)) in blocks.iter().enumerate() {
+            if i == 0 || i.is_power_of_two() {
+                chain_blocks.push(Point::Specific(*slot, hash.clone()));
+            }
+        }
+        chain_blocks.extend(bootstrap_points());
+        chain_blocks.push(Point::Origin);
+        chain_blocks
+    }
+
+    fn numbered_header(number: u64, slot: u64, prev_hash: Vec<u8>) -> BlockHeader {
+        let mut hash = vec![0u8; 32];
+        hash[24..].copy_from_slice(&number.to_be_bytes());
+        let mut hdr = header(number, slot, 1, 0);
+        hdr.hash = hash;
+        hdr.prev_hash = prev_hash;
+        hdr
+    }
+
+    #[test]
+    fn get_intersect_blocks_matches_legacy_across_empty_post_genesis_and_forked_stores() {
+        let genesis = "00".repeat(32);
+        for use_redb in [false, true] {
+            let fixture = Fixture::new();
+            let path = fixture.0.join(if use_redb { "intersect.redb" } else { "intersect.db" });
+            let mut store: Box<dyn BlockStore + Send> = if use_redb {
+                Box::new(RedbBlockStore::new(&path).unwrap())
+            } else {
+                Box::new(SqLiteBlockStore::new(&path).unwrap())
+            };
+
+            // 1. Empty store
+            let empty_points = get_intersect_blocks(store.as_mut()).unwrap();
+            assert_eq!(empty_points, legacy_get_intersect_blocks(store.as_mut()));
+            assert_eq!(empty_points.len(), 5);
+            assert_eq!(empty_points.last(), Some(&Point::Origin));
+
+            // 2. Post-genesis single block and multi-block chain (starting at block 4,500,000)
+            let mut batch = Vec::new();
+            let mut prev = vec![0xaa; 32];
+            for offset in 0..65u64 {
+                let b = numbered_header(4_500_000 + offset, 10_000_000 + offset * 20, prev);
+                prev = b.hash.clone();
+                batch.push(b);
+            }
+            store.save_block(&batch[..1], &genesis).unwrap();
+            assert_eq!(
+                get_intersect_blocks(store.as_mut()).unwrap(),
+                legacy_get_intersect_blocks(store.as_mut())
+            );
+            store.save_block(&batch[1..5], &genesis).unwrap();
+            assert_eq!(
+                get_intersect_blocks(store.as_mut()).unwrap(),
+                legacy_get_intersect_blocks(store.as_mut())
+            );
+            store.save_block(&batch[5..], &genesis).unwrap();
+            assert_eq!(
+                get_intersect_blocks(store.as_mut()).unwrap(),
+                legacy_get_intersect_blocks(store.as_mut())
+            );
+
+            // 3. Fork replacement with shorter suffix (replace from 4_500_020..=4_500_025, orphaning 4_500_026..=4_500_064)
+            let mut fork_batch = Vec::new();
+            let mut fork_prev = batch[19].hash.clone();
+            for offset in 20..=25u64 {
+                let mut b = numbered_header(4_500_000 + offset, 10_000_000 + offset * 20 + 7, fork_prev);
+                b.hash[0] = 0xfe;
+                fork_prev = b.hash.clone();
+                fork_batch.push(b);
+            }
+            store.save_block(&fork_batch, &genesis).unwrap();
+            assert_eq!(
+                get_intersect_blocks(store.as_mut()).unwrap(),
+                legacy_get_intersect_blocks(store.as_mut())
+            );
+
+            // 4. Explicit rollback to Specific point and then to Origin
+            let rollback_target = Point::Specific(fork_batch[2].slot_number, fork_batch[2].hash.clone());
+            store.rollback_to(&rollback_target).unwrap();
+            assert_eq!(
+                get_intersect_blocks(store.as_mut()).unwrap(),
+                legacy_get_intersect_blocks(store.as_mut())
+            );
+
+            store.rollback_to(&Point::Origin).unwrap();
+            assert_eq!(
+                get_intersect_blocks(store.as_mut()).unwrap(),
+                legacy_get_intersect_blocks(store.as_mut())
+            );
+        }
+    }
+
+    #[test]
+    fn get_intersect_blocks_matches_legacy_on_300k_stores() {
+        const BLOCKS: u64 = 300_000;
+        for use_redb in [false, true] {
+            let fixture = Fixture::new();
+            let path = fixture.0.join(if use_redb { "chain300k.redb" } else { "chain300k.db" });
+            let mut store: Box<dyn BlockStore + Send> = if use_redb {
+                let mut redb = RedbBlockStore::new(&path).unwrap();
+                redb.seed_active_chain_for_test(BLOCKS);
+                Box::new(redb)
+            } else {
+                let mut sqlite = SqLiteBlockStore::new(&path).unwrap();
+                sqlite.seed_active_chain_for_test(BLOCKS);
+                Box::new(sqlite)
+            };
+
+            let points = get_intersect_blocks(store.as_mut()).unwrap();
+            let legacy = legacy_get_intersect_blocks(store.as_mut());
+            assert_eq!(points, legacy);
+            // 20 active Point::Specific + 4 BOOTSTRAP_POINTS + Point::Origin = 25 points
+            assert_eq!(points.len(), 25);
+            for (idx, &offset) in blockstore::INTERSECT_BLOCK_OFFSETS.iter().enumerate() {
+                let expected_number = BLOCKS - offset;
+                let mut expected_hash = vec![0u8; 32];
+                expected_hash[24..].copy_from_slice(&expected_number.to_be_bytes());
+                assert_eq!(points[idx], Point::Specific(expected_number * 20, expected_hash));
+            }
+            assert_eq!(&points[20..24], bootstrap_points().as_slice());
+            assert_eq!(points[24], Point::Origin);
         }
     }
 }

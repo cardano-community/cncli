@@ -25,7 +25,7 @@ tar xzf "$archive" -C unpacked
 ./unpacked/cncli --help
 ```
 
-Before replacement, preserve the previous binary and a backend-consistent database backup. Stop the services during backup/replacement: for SQLite, use its backup API or copy all database state only after every writer has stopped; for redb, stop all users before copying. Never copy/unlock a live redb file. Review storage/nonce changes and rehearse backup/restore on disposable data first. Read the [SQLite schema v5 upgrade notes](#sqlite-schema-v5-upgrade) before opening an existing SQLite database.
+Before replacement, preserve the previous binary and a backend-consistent database backup. Stop the services during backup/replacement: for SQLite, use its backup API or copy all database state only after every writer has stopped; for redb, stop all users before copying. Never copy/unlock a live redb file. Review storage/nonce changes and rehearse backup/restore on disposable data first. Read the [storage schema upgrade notes](#storage-schema-upgrades) before opening an existing SQLite or redb database.
 
 ```bash
 sudo systemctl stop cncli-leaderlog.timer cncli-leaderlog.service cncli-sync.service cncli-sendtip.service
@@ -42,13 +42,13 @@ After the initial migration completes and sync catches up, require a successful 
 
 For a first install, create the units below before starting them; omit the stop step if they do not exist. Opening the database can automatically migrate it; restoring a backup is a separate operator action. A verified attestation identifies build provenance, not source correctness or bit-reproducibility. Older releases without attestations do not satisfy this staged verification procedure.
 
-### SQLite schema v5 upgrade
+### Storage schema upgrades
 
-Opening a SQLite database at schema version 0–4 atomically upgrades it to version 5, adding `idx_chain_orphaned_slot_number` on `(orphaned, slot_number)` and `idx_chain_orphaned_block_number` on `(orphaned, block_number)`. These indexes accelerate active-chain reads and suffix updates without changing chain rows, nonces, saved slot schedules, orphan filtering or the 120-second freshness limit. Existing single-column indexes and operator `_681` workaround indexes remain intact; equivalent indexes under different names are not deduplicated.
+Opening a SQLite database at schema version 0–5 atomically upgrades it to version 6 in a single transaction, adding `idx_chain_active_intersect` on `chain(orphaned, block_number, slot_number, hash)` (alongside the version 5 active-chain indexes `idx_chain_orphaned_slot_number` and `idx_chain_orphaned_block_number`). Opening a redb database at schema version 0–1 atomically upgrades it to version 2 in a single write transaction, backfilling `chain_active_block_index` (`block_number` -> `(slot_number, hash)`) for active blocks while logging progress. These covering indexes answer chain-sync intersection lookups without scanning historical slots or decoding `ChainRecord` entries, and without changing chain rows, nonces, saved slot schedules, orphan filtering or the 120-second freshness limit. Existing single-column indexes and operator `_681` workaround indexes in SQLite remain intact; equivalent indexes under different names are not deduplicated.
 
-Run the initial upgrade with one cncli process while other database consumers are stopped. Index creation on large databases may take several minutes and needs additional free disk/WAL space. A lock, disk or index-creation failure propagates to the command; both new index builds and the version marker roll back together, leaving the upgrade retryable. Reopening version 5 skips index builds and metadata writes.
+Run the initial upgrade with one cncli process while other database consumers are stopped. Index creation or backfill on large databases may take several minutes and needs additional free disk/WAL space. A lock, disk, integrity or index-creation failure propagates to the command; new index changes and the version marker roll back together, leaving the upgrade retryable. Reopening an already upgraded store skips migration writes.
 
-Unmodified v6.8.1 rejects schema version 5. To roll back the binary, restore the consistent pre-migration backup; do not manually lower the schema marker.
+Upgraded stores fail closed with `UnsupportedSchemaVersion` when opened by older cncli binaries (for example, v6.8.3 and earlier reject SQLite schema version 6 and redb schema version 2). To roll back to an older binary, restore the consistent pre-migration database backup; do not manually lower the schema version marker.
 
 ### Compile from source
 

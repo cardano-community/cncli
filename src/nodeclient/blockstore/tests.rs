@@ -89,6 +89,7 @@ fn canonical_chain_matches_independent_state() {
         store.rollback_to(&Point::Origin).unwrap();
         assert_eq!(store.get_tip_slot_number().unwrap(), 0);
         assert!(store.load_blocks().unwrap().is_empty());
+        assert!(store.load_intersect_blocks().unwrap().is_empty());
         assert!(
             store
                 .find_block_by_hash(&hex::encode([1; 32]))
@@ -97,6 +98,7 @@ fn canonical_chain_matches_independent_state() {
                 .orphaned
         );
         store.save_block(&[header(42, 200, 42, 41)], &genesis).unwrap();
+        assert_eq!(store.load_intersect_blocks().unwrap(), vec![(200, vec![42; 32])]);
         assert_eq!(
             store.get_eta_v_before_slot(201).unwrap(),
             generate_rolling_nonce(Hash::from([0; 32]), &[42; 64])

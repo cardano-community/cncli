@@ -448,6 +448,7 @@ async fn sqlite_v4_upgrade_preserves_status_freshness() {
         .execute_batch(
             "DROP INDEX idx_chain_orphaned_slot_number;
              DROP INDEX idx_chain_orphaned_block_number;
+             DROP INDEX idx_chain_active_intersect;
              UPDATE db_version SET version = 4;",
         )
         .unwrap();
@@ -496,7 +497,7 @@ async fn sqlite_v4_upgrade_preserves_status_freshness() {
         assert_eq!(
             db.query_row::<i64, _, _>("SELECT version FROM db_version", [], |row| row.get(0))
                 .unwrap(),
-            5
+            6
         );
         let hashes: Vec<String> = db
             .prepare("SELECT hash FROM chain ORDER BY block_number")
@@ -551,9 +552,21 @@ async fn newly_reached_tip_is_committed_and_already_at_tip_sends_done() {
                 .execute_batch(
                     "DROP INDEX idx_chain_orphaned_slot_number;
                      DROP INDEX idx_chain_orphaned_block_number;
+                     DROP INDEX idx_chain_active_intersect;
                      UPDATE db_version SET version = 4;",
                 )
                 .unwrap();
+        } else {
+            let raw = redb::Database::open(&db).unwrap();
+            let tx = raw.begin_write().unwrap();
+            {
+                let active_def: redb::TableDefinition<u64, (u64, &[u8])> =
+                    redb::TableDefinition::new("chain_active_block_index");
+                let version_def: redb::TableDefinition<&str, u16> = redb::TableDefinition::new("version");
+                tx.delete_table(active_def).unwrap();
+                tx.open_table(version_def).unwrap().insert("version", 1).unwrap();
+            }
+            tx.commit().unwrap();
         }
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let child = sync(&db, listener.local_addr().unwrap().port(), redb, true);

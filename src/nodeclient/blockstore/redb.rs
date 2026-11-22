@@ -113,6 +113,12 @@ struct ChainRecord {
     orphaned: bool,
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static CHAIN_RECORD_DECODES: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static ACTIVE_BLOCK_INDEX_LOOKUPS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Value for ChainRecord {
     type SelfType<'a> = Self;
     type AsBytes<'a>
@@ -129,6 +135,8 @@ impl Value for ChainRecord {
     where
         Self: 'a,
     {
+        #[cfg(test)]
+        CHAIN_RECORD_DECODES.with(|count| count.set(count.get() + 1));
         bincode::decode_from_slice(data, bincode::config::legacy()).unwrap().0
     }
 
@@ -194,6 +202,7 @@ const VERSION_TABLE: TableDefinition<&str, u16> = TableDefinition::new("version"
 const CHAIN_TABLE: TableDefinition<u128, ChainRecord> = TableDefinition::new("chain");
 const CHAIN_TABLE_SLOT_INDEX: MultimapTableDefinition<u64, u128> = MultimapTableDefinition::new("chain_slot_index");
 const CHAIN_TABLE_HASH_INDEX: MultimapTableDefinition<&[u8], u128> = MultimapTableDefinition::new("chain_hash_index");
+const CHAIN_ACTIVE_BLOCK_INDEX: TableDefinition<u64, (u64, &[u8])> = TableDefinition::new("chain_active_block_index");
 const SLOTS_TABLE: TableDefinition<u128, SlotsRecord> = TableDefinition::new("slots");
 const SLOTS_TABLE_POOL_ID_EPOCH_INDEX: TableDefinition<&[u8], u128> = TableDefinition::new("slots_pool_id_epoch_index");
 
@@ -209,7 +218,7 @@ pub struct RedbBlockStore {
 }
 
 impl RedbBlockStore {
-    const DB_VERSION: u16 = 1;
+    const DB_VERSION: u16 = 2;
 
     pub fn new(db_path: &Path) -> Result<Self, Error> {
         let db = Builder::new()
@@ -255,16 +264,55 @@ impl RedbBlockStore {
             // Do migration
             let write_tx = db.begin_write()?;
             {
+                if current_version < 1 {
+                    info!("Migrating database from version 0 to 1");
+                    // create the chain table if it doesn't exist
+                    write_tx.open_table(CHAIN_TABLE)?;
+                    write_tx.open_multimap_table(CHAIN_TABLE_SLOT_INDEX)?;
+                    write_tx.open_multimap_table(CHAIN_TABLE_HASH_INDEX)?;
+                    // create the slots table if it doesn't exist
+                    write_tx.open_table(SLOTS_TABLE)?;
+                    write_tx.open_table(SLOTS_TABLE_POOL_ID_EPOCH_INDEX)?;
+                }
+                if current_version < 2 {
+                    info!(
+                        "Migrating database from version {} to 2 (backfilling active block index)...",
+                        current_version
+                    );
+                    let chain_table = write_tx.open_table(CHAIN_TABLE)?;
+                    let mut active_block_index = write_tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX)?;
+                    while active_block_index.pop_first()?.is_some() {}
+                    let mut scanned: u64 = 0;
+                    let mut active_count: u64 = 0;
+                    for entry in chain_table.iter()? {
+                        let (_, record) = entry?;
+                        let record = record.value();
+                        scanned += 1;
+                        if !record.orphaned {
+                            if active_block_index
+                                .insert(record.block_number, (record.slot_number, record.hash.as_slice()))?
+                                .is_some()
+                            {
+                                return Err(Error::DataIntegrity(
+                                    "Multiple active blocks at one block number".into(),
+                                ));
+                            }
+                            active_count += 1;
+                        }
+                        if scanned.is_multiple_of(100_000) {
+                            info!(
+                                "Backfilled {} active blocks ({} chain records scanned)...",
+                                active_count, scanned
+                            );
+                        }
+                    }
+                    info!(
+                        "Migrated database to version 2 ({} active blocks indexed from {} records).",
+                        active_count, scanned
+                    );
+                }
                 let mut version_table = write_tx.open_table(VERSION_TABLE)?;
-                info!("Migrating database from version 0 to 1");
                 version_table.insert("version", Self::DB_VERSION)?;
-                // create the chain table if it doesn't exist
-                write_tx.open_table(CHAIN_TABLE)?;
-                write_tx.open_multimap_table(CHAIN_TABLE_SLOT_INDEX)?;
-                write_tx.open_multimap_table(CHAIN_TABLE_HASH_INDEX)?;
-                // create the slots table if it doesn't exist
-                write_tx.open_table(SLOTS_TABLE)?;
-                write_tx.open_table(SLOTS_TABLE_POOL_ID_EPOCH_INDEX)?;
             }
             write_tx.commit()?;
         }
@@ -297,6 +345,7 @@ impl RedbBlockStore {
             let mut chain_table = write_tx.open_table(CHAIN_TABLE)?;
             let mut chain_table_slot_index = write_tx.open_multimap_table(CHAIN_TABLE_SLOT_INDEX)?;
             let mut chain_table_hash_index = write_tx.open_multimap_table(CHAIN_TABLE_HASH_INDEX)?;
+            let mut chain_active_block_index = write_tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX)?;
             let mut predecessor = None;
             let mut has_active_chain = false;
             let mut to_update: Vec<(u128, ChainRecord)> = Vec::new();
@@ -348,6 +397,7 @@ impl RedbBlockStore {
                 None => return Err(Error::DataIntegrity("Active predecessor block is missing".into())),
             };
             for (key, record) in to_update {
+                chain_active_block_index.remove(record.block_number)?;
                 chain_table.insert(key, record)?;
             }
 
@@ -388,6 +438,7 @@ impl RedbBlockStore {
                 chain_table.insert(key, chain_record)?;
                 chain_table_slot_index.insert(block.slot_number, key)?;
                 chain_table_hash_index.insert(block.hash.as_slice(), key)?;
+                chain_active_block_index.insert(block.block_number, (block.slot_number, block.hash.as_slice()))?;
 
                 prev_eta_v = eta_v;
             }
@@ -422,6 +473,7 @@ impl RedbBlockStore {
         let write_tx = self.db.begin_write()?;
         {
             let mut chain_table = write_tx.open_table(CHAIN_TABLE)?;
+            let mut chain_active_block_index = write_tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX)?;
             let target_number = match point {
                 Point::Origin => None,
                 Point::Specific(slot, hash) => {
@@ -472,6 +524,7 @@ impl RedbBlockStore {
                 }
             }
             for (key, record) in updates {
+                chain_active_block_index.remove(record.block_number)?;
                 chain_table.insert(key, record)?;
             }
         }
@@ -479,6 +532,7 @@ impl RedbBlockStore {
         Ok(())
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     fn redb_load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error> {
         let read_tx = self.db.begin_read()?;
         let chain_table = read_tx.open_table(CHAIN_TABLE)?;
@@ -492,6 +546,42 @@ impl RedbBlockStore {
             }
             if blocks.len() >= 262145 {
                 break;
+            }
+        }
+
+        Ok(blocks)
+    }
+
+    fn redb_load_intersect_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, Error> {
+        let read_tx = self.db.begin_read()?;
+        let index = read_tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX)?;
+        #[cfg(test)]
+        ACTIVE_BLOCK_INDEX_LOOKUPS.with(|count| count.set(count.get() + 1));
+        let Some(tip) = index.last()? else {
+            return Ok(Vec::new());
+        };
+        let tip_block_number = tip.0.value();
+        let (tip_slot, tip_hash) = tip.1.value();
+        let mut prev_slot = tip_slot;
+        let mut blocks = Vec::with_capacity(blockstore::INTERSECT_BLOCK_OFFSETS.len());
+        blocks.push((tip_slot, tip_hash.to_vec()));
+        drop(tip);
+
+        for &offset in &blockstore::INTERSECT_BLOCK_OFFSETS[1..] {
+            let Some(target_block_number) = tip_block_number.checked_sub(offset) else {
+                break;
+            };
+            #[cfg(test)]
+            ACTIVE_BLOCK_INDEX_LOOKUPS.with(|count| count.set(count.get() + 1));
+            if let Some(entry) = index.get(target_block_number)? {
+                let (slot, hash) = entry.value();
+                if slot >= prev_slot {
+                    return Err(Error::DataIntegrity(
+                        "Active block slot order does not match block numbers".into(),
+                    ));
+                }
+                prev_slot = slot;
+                blocks.push((slot, hash.to_vec()));
             }
         }
 
@@ -678,6 +768,51 @@ impl RedbBlockStore {
             Ok(None)
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn seed_active_chain_for_test(&mut self, blocks: u64) {
+        let write_tx = self.db.begin_write().unwrap();
+        {
+            let mut chain_table = write_tx.open_table(CHAIN_TABLE).unwrap();
+            let mut active_index = write_tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX).unwrap();
+            let mut slot_index = write_tx.open_multimap_table(CHAIN_TABLE_SLOT_INDEX).unwrap();
+            for number in 1..=blocks {
+                let slot = 20 * number;
+                let mut hash = vec![0u8; 32];
+                hash[24..].copy_from_slice(&number.to_be_bytes());
+                let key = number as u128;
+                let record = ChainRecord {
+                    block_number: number,
+                    slot_number: slot,
+                    hash: hash.clone(),
+                    prev_hash: Vec::new(),
+                    pool_id: Vec::new(),
+                    eta_v: Vec::new(),
+                    node_vkey: Vec::new(),
+                    node_vrf_vkey: Vec::new(),
+                    block_vrf_0: Vec::new(),
+                    block_vrf_1: Vec::new(),
+                    eta_vrf_0: Vec::new(),
+                    eta_vrf_1: Vec::new(),
+                    leader_vrf_0: Vec::new(),
+                    leader_vrf_1: Vec::new(),
+                    block_size: 0,
+                    block_body_hash: Vec::new(),
+                    pool_opcert: Vec::new(),
+                    unknown_0: 0,
+                    unknown_1: 0,
+                    unknown_2: Vec::new(),
+                    protocol_major_version: 2,
+                    protocol_minor_version: 0,
+                    orphaned: false,
+                };
+                chain_table.insert(key, record).unwrap();
+                slot_index.insert(slot, key).unwrap();
+                active_index.insert(number, (slot, hash.as_slice())).unwrap();
+            }
+        }
+        write_tx.commit().unwrap();
+    }
 }
 
 impl BlockStore for RedbBlockStore {
@@ -695,6 +830,10 @@ impl BlockStore for RedbBlockStore {
 
     fn load_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, blockstore::Error> {
         Ok(self.redb_load_blocks()?)
+    }
+
+    fn load_intersect_blocks(&mut self) -> Result<Vec<(u64, Vec<u8>)>, blockstore::Error> {
+        Ok(self.redb_load_intersect_blocks()?)
     }
 
     fn find_block_by_hash(&mut self, hash_start: &str) -> Result<Option<Block>, blockstore::Error> {
@@ -1070,7 +1209,7 @@ mod tests {
 
     #[test]
     fn future_and_missing_schema_metadata_fail_closed() {
-        for metadata in [Some(2), None] {
+        for metadata in [Some(3), None] {
             let fixture = Fixture::new();
             let mut store = RedbBlockStore::new(&fixture.path()).unwrap();
             store.redb_save_block(&[header(1, 10, 1, 0)], &"00".repeat(32)).unwrap();
@@ -1088,9 +1227,9 @@ mod tests {
             drop(store);
             let result = RedbBlockStore::new(&fixture.path());
             match metadata {
-                Some(2) => assert!(matches!(
+                Some(3) => assert!(matches!(
                     result,
-                    Err(Error::UnsupportedSchemaVersion { found: 2, supported: 1 })
+                    Err(Error::UnsupportedSchemaVersion { found: 3, supported: 2 })
                 )),
                 None => assert!(matches!(result, Err(Error::DataIntegrity(_)))),
                 _ => unreachable!(),
@@ -1158,9 +1297,317 @@ mod tests {
                         .unwrap()
                         .unwrap()
                         .value(),
-                    1
+                    RedbBlockStore::DB_VERSION
                 );
             }
+        }
+    }
+
+    fn active_index_entries(store: &RedbBlockStore) -> Vec<(u64, u64, Vec<u8>)> {
+        let tx = store.db.begin_read().unwrap();
+        let table = tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX).unwrap();
+        table
+            .iter()
+            .unwrap()
+            .map(|entry| {
+                let (key, value) = entry.unwrap();
+                let (slot, hash) = value.value();
+                (key.value(), slot, hash.to_vec())
+            })
+            .collect()
+    }
+
+    fn active_chain_table_entries(store: &RedbBlockStore) -> Vec<(u64, u64, Vec<u8>)> {
+        let tx = store.db.begin_read().unwrap();
+        let table = tx.open_table(CHAIN_TABLE).unwrap();
+        let mut rows = table
+            .iter()
+            .unwrap()
+            .map(|entry| entry.unwrap().1.value())
+            .filter(|record| !record.orphaned)
+            .map(|record| (record.block_number, record.slot_number, record.hash))
+            .collect::<Vec<_>>();
+        rows.sort_by_key(|row| row.0);
+        rows
+    }
+
+    #[test]
+    fn v1_migration_backfills_active_index_and_rolls_back_on_write_or_integrity_failure() {
+        let fixture = Fixture::new();
+        // Construct a genuine version-1 database without CHAIN_ACTIVE_BLOCK_INDEX, containing
+        // both canonical active blocks and an orphaned fork block, plus saved slot data.
+        let mut store = RedbBlockStore::new(&fixture.path()).unwrap();
+        let genesis = "00".repeat(32);
+        store
+            .redb_save_block(
+                &[header(1, 10, 1, 0), header(2, 20, 2, 1), header(3, 30, 3, 2)],
+                &genesis,
+            )
+            .unwrap();
+        store.redb_save_block(&[header(2, 25, 12, 1)], &genesis).unwrap();
+        store.redb_save_slots(7, "0102", 3, "[10,20,30]", "0a0b").unwrap();
+        let tx = store.db.begin_write().unwrap();
+        {
+            assert!(tx.delete_table(CHAIN_ACTIVE_BLOCK_INDEX).unwrap());
+            tx.open_table(VERSION_TABLE).unwrap().insert("version", 1).unwrap();
+        }
+        tx.commit().unwrap();
+        let expected_active = active(&store);
+        drop(store);
+
+        // Inject a write failure during v1 -> v2 migration and verify atomic rollback.
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(fixture.path())
+            .unwrap();
+        let armed = Arc::new(AtomicBool::new(false));
+        let failing_db = Builder::new()
+            .create_with_backend(FailingBackend {
+                inner: FileBackend::new(file).unwrap(),
+                armed: Arc::clone(&armed),
+            })
+            .unwrap();
+        armed.store(true, Ordering::SeqCst);
+        assert!(RedbBlockStore::migrate(&failing_db).is_err());
+        drop(failing_db);
+
+        let raw_db = Database::open(fixture.path()).unwrap();
+        {
+            let read_tx = raw_db.begin_read().unwrap();
+            assert_eq!(
+                read_tx
+                    .open_table(VERSION_TABLE)
+                    .unwrap()
+                    .get("version")
+                    .unwrap()
+                    .unwrap()
+                    .value(),
+                1
+            );
+            assert!(matches!(
+                read_tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX),
+                Err(redb::TableError::TableDoesNotExist(_))
+            ));
+        }
+        drop(raw_db);
+
+        // Disarm write failure and verify clean v1 -> v2 upgrade and backfill.
+        let mut store = RedbBlockStore::new(&fixture.path()).unwrap();
+        assert_eq!(active(&store), expected_active);
+        assert_eq!(
+            active_index_entries(&store),
+            vec![(1, 10, vec![1; 32]), (2, 25, vec![12; 32])]
+        );
+        assert_eq!(active_index_entries(&store), active_chain_table_entries(&store));
+        assert_eq!(store.redb_get_current_slots(7, "0102").unwrap(), (3, "0a0b".into()));
+        CHAIN_RECORD_DECODES.with(|c| c.set(0));
+        ACTIVE_BLOCK_INDEX_LOOKUPS.with(|c| c.set(0));
+        assert_eq!(
+            store.redb_load_intersect_blocks().unwrap(),
+            vec![(25, vec![12; 32]), (10, vec![1; 32])]
+        );
+        assert_eq!(CHAIN_RECORD_DECODES.with(|c| c.get()), 0);
+        assert!(ACTIVE_BLOCK_INDEX_LOOKUPS.with(|c| c.get()) <= 20);
+        drop(store);
+
+        // Corrupt a v1 database with duplicate active block_number and verify fail-closed rollback.
+        let corrupt_fixture = Fixture::new();
+        let mut corrupt_store = RedbBlockStore::new(&corrupt_fixture.path()).unwrap();
+        corrupt_store.redb_save_block(&[header(1, 10, 1, 0)], &genesis).unwrap();
+        let tx = corrupt_store.db.begin_write().unwrap();
+        {
+            let mut chain_table = tx.open_table(CHAIN_TABLE).unwrap();
+            let existing = chain_table.iter().unwrap().next().unwrap().unwrap().1.value();
+            chain_table.insert(999, existing).unwrap();
+            tx.delete_table(CHAIN_ACTIVE_BLOCK_INDEX).unwrap();
+            tx.open_table(VERSION_TABLE).unwrap().insert("version", 1).unwrap();
+        }
+        tx.commit().unwrap();
+        drop(corrupt_store);
+        assert!(matches!(
+            RedbBlockStore::new(&corrupt_fixture.path()),
+            Err(Error::DataIntegrity(_))
+        ));
+        let raw_db = Database::open(corrupt_fixture.path()).unwrap();
+        let read_tx = raw_db.begin_read().unwrap();
+        assert_eq!(
+            read_tx
+                .open_table(VERSION_TABLE)
+                .unwrap()
+                .get("version")
+                .unwrap()
+                .unwrap()
+                .value(),
+            1
+        );
+        assert!(matches!(
+            read_tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX),
+            Err(redb::TableError::TableDoesNotExist(_))
+        ));
+    }
+
+    #[test]
+    fn active_block_index_never_retains_orphans_across_forks_and_rollbacks() {
+        use pallas_network::miniprotocols::Point;
+        let fixture = Fixture::new();
+        let mut store = RedbBlockStore::new(&fixture.path()).unwrap();
+        let genesis = "00".repeat(32);
+
+        // Build 5-block chain [1..=5]
+        store
+            .redb_save_block(
+                &[
+                    header(1, 10, 1, 0),
+                    header(2, 20, 2, 1),
+                    header(3, 30, 3, 2),
+                    header(4, 40, 4, 3),
+                    header(5, 50, 5, 4),
+                ],
+                &genesis,
+            )
+            .unwrap();
+        assert_eq!(active_index_entries(&store), active_chain_table_entries(&store));
+
+        // Replace suffix [2..=5] with a shorter fork [2..=3]: blocks 4 and 5 must be removed!
+        store
+            .redb_save_block(&[header(2, 25, 22, 1), header(3, 35, 33, 22)], &genesis)
+            .unwrap();
+        assert_eq!(
+            active_index_entries(&store),
+            vec![(1, 10, vec![1; 32]), (2, 25, vec![22; 32]), (3, 35, vec![33; 32])]
+        );
+        assert_eq!(active_index_entries(&store), active_chain_table_entries(&store));
+
+        // Rollback to Specific(25, [22; 32]): block 3 must be removed!
+        store.redb_rollback_to(&Point::Specific(25, vec![22; 32])).unwrap();
+        assert_eq!(
+            active_index_entries(&store),
+            vec![(1, 10, vec![1; 32]), (2, 25, vec![22; 32])]
+        );
+        assert_eq!(active_index_entries(&store), active_chain_table_entries(&store));
+
+        // Rollback to Origin: index must become completely empty while history remains in CHAIN_TABLE.
+        store.redb_rollback_to(&Point::Origin).unwrap();
+        assert!(active_index_entries(&store).is_empty());
+        assert!(store.redb_load_intersect_blocks().unwrap().is_empty());
+
+        // Start post-genesis active chain [100..=102]
+        store
+            .redb_save_block(
+                &[
+                    header(100, 1000, 50, 49),
+                    header(101, 1010, 51, 50),
+                    header(102, 1020, 52, 51),
+                ],
+                &genesis,
+            )
+            .unwrap();
+        assert_eq!(
+            active_index_entries(&store),
+            vec![
+                (100, 1000, vec![50; 32]),
+                (101, 1010, vec![51; 32]),
+                (102, 1020, vec![52; 32]),
+            ]
+        );
+        assert_eq!(active_index_entries(&store), active_chain_table_entries(&store));
+    }
+
+    #[test]
+    fn intersect_blocks_reads_at_most_20_entries_and_decodes_zero_chain_records_on_300k_store() {
+        const BLOCKS: u64 = 300_000;
+        let fixture = Fixture::new();
+        let mut store = RedbBlockStore::new(&fixture.path()).unwrap();
+        {
+            let write_tx = store.db.begin_write().unwrap();
+            {
+                let mut chain_table = write_tx.open_table(CHAIN_TABLE).unwrap();
+                let mut active_index = write_tx.open_table(CHAIN_ACTIVE_BLOCK_INDEX).unwrap();
+                let mut slot_index = write_tx.open_multimap_table(CHAIN_TABLE_SLOT_INDEX).unwrap();
+                for number in 1..=BLOCKS {
+                    let slot = 20 * number;
+                    let mut hash = vec![0u8; 32];
+                    hash[24..].copy_from_slice(&number.to_be_bytes());
+                    let mut prev_hash = vec![0u8; 32];
+                    prev_hash[24..].copy_from_slice(&(number - 1).to_be_bytes());
+                    let key = number as u128;
+                    let record = ChainRecord {
+                        block_number: number,
+                        slot_number: slot,
+                        hash: hash.clone(),
+                        prev_hash,
+                        pool_id: vec![0; 28],
+                        eta_v: vec![0; 32],
+                        node_vkey: vec![0; 32],
+                        node_vrf_vkey: vec![0; 32],
+                        block_vrf_0: vec![],
+                        block_vrf_1: vec![],
+                        eta_vrf_0: vec![0; 32],
+                        eta_vrf_1: vec![],
+                        leader_vrf_0: vec![],
+                        leader_vrf_1: vec![],
+                        block_size: 0,
+                        block_body_hash: vec![0; 32],
+                        pool_opcert: vec![],
+                        unknown_0: 0,
+                        unknown_1: 0,
+                        unknown_2: vec![],
+                        protocol_major_version: 2,
+                        protocol_minor_version: 0,
+                        orphaned: false,
+                    };
+                    chain_table.insert(key, record).unwrap();
+                    slot_index.insert(slot, key).unwrap();
+                    active_index.insert(number, (slot, hash.as_slice())).unwrap();
+                }
+                // Insert an orphaned record above tip to verify it is never returned or decoded.
+                let orphan_key = (BLOCKS + 1) as u128;
+                let orphan_record = ChainRecord {
+                    block_number: BLOCKS + 1,
+                    slot_number: 20 * (BLOCKS + 1),
+                    hash: vec![0xff; 32],
+                    prev_hash: vec![0; 32],
+                    pool_id: vec![0; 28],
+                    eta_v: vec![0; 32],
+                    node_vkey: vec![0; 32],
+                    node_vrf_vkey: vec![0; 32],
+                    block_vrf_0: vec![],
+                    block_vrf_1: vec![],
+                    eta_vrf_0: vec![0; 32],
+                    eta_vrf_1: vec![],
+                    leader_vrf_0: vec![],
+                    leader_vrf_1: vec![],
+                    block_size: 0,
+                    block_body_hash: vec![0; 32],
+                    pool_opcert: vec![],
+                    unknown_0: 0,
+                    unknown_1: 0,
+                    unknown_2: vec![],
+                    protocol_major_version: 2,
+                    protocol_minor_version: 0,
+                    orphaned: true,
+                };
+                chain_table.insert(orphan_key, orphan_record).unwrap();
+                slot_index.insert(20 * (BLOCKS + 1), orphan_key).unwrap();
+            }
+            write_tx.commit().unwrap();
+        }
+
+        CHAIN_RECORD_DECODES.with(|c| c.set(0));
+        ACTIVE_BLOCK_INDEX_LOOKUPS.with(|c| c.set(0));
+        let checkpoints = store.redb_load_intersect_blocks().unwrap();
+        let decodes = CHAIN_RECORD_DECODES.with(|c| c.get());
+        let lookups = ACTIVE_BLOCK_INDEX_LOOKUPS.with(|c| c.get());
+        eprintln!("300k Redb intersect lookup: {lookups} index lookups, {decodes} ChainRecord decodes");
+        assert_eq!(decodes, 0, "expected 0 ChainRecord decodes, got {decodes}");
+        assert!(lookups <= 20, "expected <= 20 index lookups, got {lookups}");
+        assert_eq!(checkpoints.len(), 20);
+        for (idx, &offset) in blockstore::INTERSECT_BLOCK_OFFSETS.iter().enumerate() {
+            let expected_number = BLOCKS - offset;
+            let mut expected_hash = vec![0u8; 32];
+            expected_hash[24..].copy_from_slice(&expected_number.to_be_bytes());
+            assert_eq!(checkpoints[idx], (20 * expected_number, expected_hash));
         }
     }
 }
